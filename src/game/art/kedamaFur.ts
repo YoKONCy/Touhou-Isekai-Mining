@@ -1,5 +1,8 @@
+import { bakeSprite, drawSprite, SpriteCache } from '../../core/rendering/SpriteCache'
+
 const TAU = Math.PI * 2
 const outlines = new Map<number, Path2D>()
+const sprites = new SpriteCache()
 
 /** 头饰与小怪共享白色毛团；轮廓只有短绒，内部毛流避开脸部。 */
 function outline(r: number): Path2D {
@@ -12,12 +15,28 @@ function outline(r: number): Path2D {
     if (!i) p.moveTo(x, y)
     else p.quadraticCurveTo(Math.cos(a - .09) * (q + r * .055), Math.sin(a - .09) * (q + r * .055) * .94, x, y)
   }
-  p.closePath(); outlines.set(r, p); return p
+  p.closePath()
+  if (outlines.size >= 96) outlines.delete(outlines.keys().next().value!)
+  outlines.set(r, p); return p
 }
 
 export interface KedamaFurOptions { flash?: boolean; face?: boolean; blink?: boolean; crying?: boolean; mouthOpen?: number; angle?: number }
 
 export function drawKedamaFur(g: CanvasRenderingContext2D, r: number, opts: KedamaFurOptions = {}): void {
+  if (r <= 0) return
+  const radius = Math.max(.25, Math.round(r * 4) / 4)
+  const mouth = Math.round(Math.max(0, Math.min(1, opts.mouthOpen ?? .6)) * 8) / 8
+  const key = `${radius}:${!!opts.flash}:${opts.face !== false}:${!!opts.blink}:${!!opts.crying}:${mouth}`
+  const sprite = sprites.get(key, () => {
+    const pad = radius + 3
+    return bakeSprite(-pad, -pad, pad * 2, pad * 2, ctx => paintFur(ctx, radius, { ...opts, angle: 0, mouthOpen: mouth }))
+  })
+  g.save(); g.rotate(opts.angle ?? 0); g.scale(r / radius, r / radius)
+  drawSprite(g, sprite); g.restore()
+}
+
+/** 仅在缓存未命中时绘制毛流和表情，连续缩放由调用方的变换完成。 */
+function paintFur(g: CanvasRenderingContext2D, r: number, opts: KedamaFurOptions): void {
   g.save(); g.rotate(opts.angle ?? 0); g.lineJoin = 'round'; g.lineCap = 'round'
   const path = outline(r), coat = g.createLinearGradient(-r, -r, r * .5, r)
   coat.addColorStop(0, '#fffdf4'); coat.addColorStop(.6, '#f0eee7'); coat.addColorStop(1, '#c9c8d0')

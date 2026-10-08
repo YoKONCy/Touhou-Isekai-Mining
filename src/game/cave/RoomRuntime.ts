@@ -6,6 +6,7 @@
  * 房间可被缓存重访——已清房间保持空场、矿脉破坏状态与掉落物全部保留。
  */
 import type { EngineContext } from '../../core/types'
+import { compactInPlace } from '../../core/collections'
 import { bladeErasesProjectile } from '../weaponProjectileSweep'
 import type { WeaponImpactInstance } from '../../content/items/types'
 import { aoeMultiplier, meleeImpact } from '../../content/items/combatComponents'
@@ -1500,7 +1501,7 @@ export class RoomRuntime {
       }
       // 高速弹与曲线弹按整段实际轨迹判定，撞到玩家后方墙壁也不能漏掉途中命中。
       let hitPlayer = false
-      if (player.alive && b.canTouch && b.touchesCircle(player.x, player.y, player.collisionR) && !player.isInvincible) {
+      if (player.alive && !player.isInvincible && b.canTouch && b.touchesCircle(player.x, player.y, player.collisionR)) {
         hitPlayer = true
         b.dead = true
         const hpBefore = player.hp
@@ -1522,10 +1523,9 @@ export class RoomRuntime {
         }
         continue
       }
-      if (!player.alive) { splitBullets.push(...b.drainSplit()); continue }
-      splitBullets.push(...b.drainSplit())
+      if (b.hasPendingSplit) splitBullets.push(...b.drainSplit())
     }
-    this.bullets = this.bullets.filter((b) => !b.removed)
+    compactInPlace(this.bullets, b => !b.removed)
     this.bullets.push(...splitBullets)
 
     // 玩家倒下（接触/弹幕两路都可能造成）→ 先问剧情层是否接管，否则边沿通知一次
@@ -1538,7 +1538,7 @@ export class RoomRuntime {
     }
 
     // 尸体清理
-    this.enemies = this.enemies.filter((e) => !e.removed)
+    compactInPlace(this.enemies, e => !e.removed)
 
     // 掉落物：贴身请求拾取 → 背包确认入包 / 满包弹回
     for (const drop of this.drops) {
@@ -1556,7 +1556,7 @@ export class RoomRuntime {
         this.fx.damageText(player.x, player.y - 26, t('game.notify.bag_full'), '#ff9a7a')
       }
     }
-    this.drops = this.drops.filter((d) => !d.isCollected)
+    compactInPlace(this.drops, d => !d.isCollected)
 
     // 挥镐双目标判定
     const swing = player.getSwing()
@@ -2048,7 +2048,13 @@ export class RoomRuntime {
       ctx.save(); ctx.translate(flight.x, flight.y); ctx.rotate(flight.rotation)
       getItemDef(flight.item).weapon?.drawHeld?.(ctx, { time: this.time }); ctx.restore()
     }
-    for (const b of this.bullets) b.render(ctx)
+    // 读取一次当前世界变换，含相机缩放、震动和设备像素比；仅剔除绘制，不剔除逻辑。
+    const transform = ctx.getTransform()
+    const canCull = transform.b === 0 && transform.c === 0 && transform.a !== 0 && transform.d !== 0
+    const x0 = -transform.e / transform.a, x1 = (ctx.canvas.width - transform.e) / transform.a
+    const y0 = -transform.f / transform.d, y1 = (ctx.canvas.height - transform.f) / transform.d
+    const left = Math.min(x0, x1), right = Math.max(x0, x1), top = Math.min(y0, y1), bottom = Math.max(y0, y1)
+    for (const b of this.bullets) if (!canCull || b.visibleIn(left, top, right, bottom)) b.render(ctx)
     player.bow.render(ctx)
     this.fx.render(ctx)
     this.renderSpellFx(ctx)

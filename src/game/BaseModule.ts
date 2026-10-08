@@ -406,7 +406,11 @@ export class BaseModule extends CharacterModuleActions implements IGameModule {
     const reimuX=this.deathStage==='none'?rx:CAMP_BED.x-70,reimuY=this.deathStage==='none'?ry:CAMP_BED.y+40
     draws.push({y:reimuY,draw:()=>drawReimuRig(g,reimuX,reimuY,this.animator.build(Math.PI/2))})
     if(this.deathStage==='none')draws.push({y:this.player.y,draw:()=>this.player.render(g)})
-    if(this.fourth)draws.push({y:RUMIA_CAMP.y,draw:()=>this.fourth!.render(g)})
+    if(this.fourth){
+      const fourth=this.fourth
+      draws.push({y:fourth.rumiaPosition.y,draw:()=>fourth.renderRumia(g)})
+      draws.push({y:fourth.kedamaSortY,draw:()=>fourth.renderKedama(g)})
+    }
     draws.sort((a,b)=>a.y-b.y).forEach(d=>d.draw())
     if(hasAvailableStory('camp.worktable',this.storyContext)&&this.deathStage==='none'&&!dialogue.isActive)drawCraftMarker(g,CAMP_TABLE.x,CAMP_TABLE.y,this.time)
     // 修炉任务与待领取成品共用炉体右上侧标记；领取失败时成品仍在，提示持续保留。

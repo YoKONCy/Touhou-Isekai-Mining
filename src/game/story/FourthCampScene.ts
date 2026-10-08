@@ -72,19 +72,38 @@ export class FourthCampScene {
       } })
     } else playStory(FOURTH_TREES.idle.id, { profile: this.profile }, { onEnd: this.reset })
   }
-  render(g: CanvasRenderingContext2D): void {
+  get rumiaPosition(): { x: number; y: number } {
+    if (this.phase === 'hungry') return {
+      x: this.player.x + (this.hugging ? 26 : 68 + Math.sin(this.clock * 1.7) * 12),
+      y: this.player.y + (this.hugging ? 34 : 22)
+    }
+    // 认出灵梦后躲到主角侧后方，头部仍能完整露出，不挤进主角胸口或怀里的毛玉。
+    if (this.phase === 'arrival' && this.profile.flagBool(FOURTH_FLAGS.known)) return { x: this.player.x + 70, y: this.player.y + 30 }
+    return RUMIA_CAMP
+  }
+  get kedamaPosition(): { x: number; y: number } {
+    return this.phase === 'arrival'
+      ? { x: this.player.x + 30, y: this.player.y - 12 }
+      : { x: CAMP_NPC_ANCHOR.x - 58, y: CAMP_NPC_ANCHOR.y + 85 }
+  }
+  /** 抱着的毛玉绘制在主角手臂前，安置后则按落地点与场景实体一起排序。 */
+  get kedamaSortY(): number { return this.phase === 'arrival' ? this.player.y + 1 : this.kedamaPosition.y }
+
+  renderRumia(g: CanvasRenderingContext2D): void {
     const atFeet = this.phase === 'hungry', rolling = atFeet && !this.hugging, pose = this.animator.build(Math.PI / 2)
     const frightened = this.phase === 'arrival' && this.profile.flagBool(FOURTH_FLAGS.known)
-    const x = atFeet ? this.player.x + (this.hugging ? 12 : 35 + Math.sin(this.clock * 1.7) * 16) : frightened ? this.player.x + 10 : RUMIA_CAMP.x
-    const y = atFeet ? this.player.y + 22 : frightened ? this.player.y + 25 : RUMIA_CAMP.y
+    const { x, y } = this.rumiaPosition
     g.save(); g.fillStyle = '#18131e44'; g.beginPath(); g.ellipse(x, y + 16, 14, 5, 0, 0, Math.PI * 2); g.fill()
     if (rolling) { g.translate(x, y); g.rotate(Math.sin(this.clock * 2.6) * .9 + Math.PI / 2); drawRumiaRig(g, 0, 0, pose, { expression: 'hungry' }) }
     else drawRumiaRig(g, x, y, pose, { expression: frightened ? 'scared' : 'hungry' })
     g.restore()
     if (!this.blocking && rumiaPending(this.profile) && !dialogue.isActive) drawCraftMarker(g, RUMIA_CAMP.x, RUMIA_CAMP.y, this.clock)
+  }
+  renderKedama(g: CanvasRenderingContext2D): void {
+    const { x, y } = this.kedamaPosition
     g.save()
     // 回营时毛玉由主角抱着，之后安置在灵梦附近；普通人形尚未醒来出场。
-    g.translate(this.phase === 'arrival' ? this.player.x + 6 : CAMP_NPC_ANCHOR.x - 42, this.phase === 'arrival' ? this.player.y - 5 : CAMP_NPC_ANCHOR.y + 48)
+    g.translate(x, y)
     g.scale(.7, .65); drawKedamaFur(g, 17, { crying: true }); g.restore()
   }
   renderScreen(g: CanvasRenderingContext2D, width: number, height: number): void {

@@ -132,7 +132,7 @@ export function drawOverloadedKedamaRig(g: CanvasRenderingContext2D, x: number, 
   const power = opts.overload ?? 1, time = pose.time
   const alpha = g.globalAlpha
   g.save(); g.translate(x, y); g.rotate(opts.lean ?? 0)
-  for (let i = 0; i < 11; i++) {
+  for (let i = 0; power > 0 && i < 11; i++) {
     const a = time * .45 + i / 11 * TAU, radius = 30 + Math.sin(time * 1.5 + i) * 4, px = Math.cos(a) * radius, py = Math.sin(a) * radius * .65 - 16
     g.globalAlpha = alpha * power * (.18 + (1 + Math.sin(time * 2 + i)) * .13); g.strokeStyle = i % 2 ? '#cba4d8' : '#a5d4cc'; g.lineWidth = .8
     g.beginPath(); g.moveTo(px - 2, py + 4); g.lineTo(px + 1, py); g.lineTo(px - 1, py - 2); g.lineTo(px + 3, py - 5); g.stroke()

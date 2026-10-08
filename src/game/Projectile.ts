@@ -11,6 +11,7 @@ import type { BulletRenderer, ProjectileId } from '../content/projectiles/types'
 import type { TileMap } from './tilemap'
 import { sweepProjectileObstacles, type BulletBlocker } from './projectileObstacles'
 export type { BulletBlocker } from './projectileObstacles'
+const NO_BLOCKERS: readonly BulletBlocker[] = []
 
 export class Projectile {
   x: number
@@ -29,6 +30,7 @@ export class Projectile {
   private phase = Math.random() * Math.PI * 2
   /** 本弹外观绘制器（来自 ProjectileDef，随实体落字段避免每帧查表） */
   private readonly renderer: BulletRenderer
+  private readonly renderRadius: number
   private readonly pierceObstacles: boolean
   private readonly ignoreRoomObstacles: boolean
   private readonly split?: import('../content/projectiles/types').ProjectileDef['split']
@@ -41,7 +43,13 @@ export class Projectile {
   private readonly spawnY: number
   private readonly initialAngle: number
   private readonly speed: number
-  private contactPath: Array<{ x: number; y: number }> = []
+  // 复用轨迹缓冲，连续弹幕不再每帧分配数组和坐标对象。
+  private contactPath = new Float64Array(8)
+  private contactLength = 0
+  private pathLeft = 0
+  private pathRight = 0
+  private pathTop = 0
+  private pathBottom = 0
 
   constructor(x: number, y: number, angle: number, projectileId: ProjectileId) {
     const def = getProjectileDef(projectileId)
@@ -54,6 +62,7 @@ export class Projectile {
     this.onHitStatus = def.onHitStatus
     this.life = def.life ?? Infinity
     this.renderer = def.render
+    this.renderRadius = def.renderRadius ?? Infinity
     this.pierceObstacles = def.pierceObstacles === true
     this.ignoreRoomObstacles = def.ignoreRoomObstacles === true
     this.split = def.split
@@ -62,8 +71,8 @@ export class Projectile {
     if (this.spiral) { this.x += Math.cos(angle) * this.spiral.initialRadius; this.y += Math.sin(angle) * this.spiral.initialRadius }
   }
 
-  update(dt: number, map: TileMap, blockers: readonly BulletBlocker[] = []): void {
-    this.contactPath = []
+  update(dt: number, map: TileMap, blockers: readonly BulletBlocker[] = NO_BLOCKERS): void {
+    this.contactLength = 0
     if (this.dead) return
     this.age += dt
     this.life -= dt
@@ -72,7 +81,9 @@ export class Projectile {
       return
     }
     this.phase += dt * 10
-    this.contactPath.push({ x: this.x, y: this.y })
+    this.pathLeft = this.pathRight = this.x
+    this.pathTop = this.pathBottom = this.y
+    this.appendContact(this.x, this.y)
     // 弯曲弹道分段采样，掉帧也不能从弧线内侧抄近路穿墙或漏判玩家。
     const steps = this.spiral ? Math.max(1, Math.ceil(dt / .02)) : 1
     for (let i = 1; i <= steps; i++) {
@@ -87,14 +98,25 @@ export class Projectile {
         this.vx = Math.cos(angle) * this.speed - Math.sin(angle) * radius * this.spiral.angularSpeed*turning
         this.vy = Math.sin(angle) * this.speed + Math.cos(angle) * radius * this.spiral.angularSpeed*turning
       } else { this.x += this.vx * dt; this.y += this.vy * dt }
-      const hit = this.pierceObstacles ? null : sweepProjectileObstacles(map, this.ignoreRoomObstacles?[]:blockers, prevX, prevY, this.x, this.y, this.r,this.ignoreRoomObstacles)
+      const hit = this.pierceObstacles ? null : sweepProjectileObstacles(map, this.ignoreRoomObstacles?NO_BLOCKERS:blockers, prevX, prevY, this.x, this.y, this.r,this.ignoreRoomObstacles)
       if (hit) { this.x = hit.x; this.y = hit.y; this.dead = true; this.hitProp = hit.prop }
       if (this.pierceObstacles && (this.x < 0 || this.y < 0 || this.x >= map.cols * map.tile || this.y >= map.rows * map.tile)) this.dead = true
-      this.contactPath.push({ x: this.x, y: this.y })
-      this.travelled += Math.hypot(this.x - prevX, this.y - prevY)
+      this.appendContact(this.x, this.y)
+      if (this.split) this.travelled += Math.hypot(this.x - prevX, this.y - prevY)
       if (this.dead) return
     }
     this.prepareSplit()
+  }
+
+  private appendContact(x: number, y: number): void {
+    if (this.contactLength + 2 > this.contactPath.length) {
+      const grown = new Float64Array(this.contactPath.length * 2)
+      grown.set(this.contactPath); this.contactPath = grown
+    }
+    this.contactPath[this.contactLength++] = x
+    this.contactPath[this.contactLength++] = y
+    this.pathLeft = Math.min(this.pathLeft, x); this.pathRight = Math.max(this.pathRight, x)
+    this.pathTop = Math.min(this.pathTop, y); this.pathBottom = Math.max(this.pathBottom, y)
   }
 
   private prepareSplit(): void {
@@ -108,18 +130,29 @@ export class Projectile {
     return Array.from({ length: this.split.count }, (_, i) => new Projectile(this.x, this.y, this.angle + i * Math.PI * 2 / this.split!.count, this.split!.projectileId))
   }
 
+  get hasPendingSplit(): boolean { return !this.dead && this.splitReady }
+
   get removed(): boolean {
     return this.dead
   }
-  get canTouch(): boolean { return this.contactPath.length > 0 && (!this.lingering || this.age >= this.lingering.riseTime) }
+  get canTouch(): boolean { return this.contactLength > 0 && (!this.lingering || this.age >= this.lingering.riseTime) }
   /** 伤害扫掠和撞墙共享实际轨迹，墙后的路径不会参与触碰判定。 */
   touchesCircle(x: number, y: number, radius: number): boolean {
-    for (let i = 1; i < this.contactPath.length; i++) {
-      const a = this.contactPath[i - 1], b = this.contactPath[i], dx = b.x - a.x, dy = b.y - a.y
-      const t = Math.max(0, Math.min(1, ((x - a.x) * dx + (y - a.y) * dy) / Math.max(1e-9, dx * dx + dy * dy)))
-      if (Math.hypot(x - a.x - dx * t, y - a.y - dy * t) <= this.r + radius) return true
+    const reach = this.r + radius
+    if (x < this.pathLeft - reach || x > this.pathRight + reach || y < this.pathTop - reach || y > this.pathBottom + reach) return false
+    for (let i = 2; i < this.contactLength; i += 2) {
+      const ax = this.contactPath[i - 2], ay = this.contactPath[i - 1], dx = this.contactPath[i] - ax, dy = this.contactPath[i + 1] - ay
+      const t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / Math.max(1e-9, dx * dx + dy * dy)))
+      const ex = x - ax - dx * t, ey = y - ay - dy * t
+      if (ex * ex + ey * ey <= reach * reach) return true
     }
     return false
+  }
+
+  /** 不参与屏外绘制的弹幕仍继续运动、撞墙、分裂和命中，绝不缩短存活时间。 */
+  visibleIn(left: number, top: number, right: number, bottom: number): boolean {
+    return this.x + this.renderRadius >= left && this.x - this.renderRadius <= right
+      && this.y + this.renderRadius >= top && this.y - this.renderRadius <= bottom
   }
 
   /** 飞行方向角（命中玩家时的击退方向） */

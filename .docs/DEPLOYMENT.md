@@ -9,6 +9,7 @@
 - 仓库：<https://github.com/YoKONCy/Touhou-Isekai-Mining>
 - 网页：<https://yokoncy.github.io/Touhou-Isekai-Mining/>
 - Pages 发布来源：GitHub Actions。
+- 首次启用仓库时先设置 Pages 发布来源，再运行工作流；若首批推送抢在启用之前报 404，启用后重跑该任务即可。当前仓库已启用并完成首次发布。
 - 构建环境：Node.js 22，`npm ci`，`npm run build -- --base "/Touhou-Isekai-Mining/"`。
 - 工作流使用 Pages 返回的 `base_path` 设置资源路径；本地 `npm run dev` 仍使用根路径。
 

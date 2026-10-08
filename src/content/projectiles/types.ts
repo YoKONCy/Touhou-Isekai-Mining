@@ -55,6 +55,8 @@ export interface ProjectileDef {
   split?: { distance: number; count: number; projectileId: ProjectileId }
   /** 弹体外观（官方程序化绘制；MOD 可画任意形状） */
   render: BulletRenderer
+  /** 外观（含光晕）的最大半径；提供后可跳过屏外绘制，碰撞与飞行仍照常更新。 */
+  renderRadius?: number
   /** 自由标签（消弹分派/抗性/事件条件用，如 ['venom','ring']） */
   tags?: string[]
 }

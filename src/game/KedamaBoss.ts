@@ -6,6 +6,9 @@ import { PlayerAnimator } from './art/rig/playerAnims'
 import { drawOverloadedKedamaRig } from './art/rig/fourthFloorCharacters'
 import { drawKedamaFur } from './art/kedamaFur'
 import { drawKedamaCharge, drawKedamaDashWake, drawKedamaMoveWarning, drawKedamaTeleport, type BossTrail } from './art/kedamaBossEffects'
+import { bakeSprite, drawSprite, type RasterSprite } from '../core/rendering/SpriteCache'
+import { compactInPlace } from '../core/collections'
+import { getKedamaGirlParts } from './art/rig/kedamaGirlHead'
 
 type Mode = 'intro' | 'windup' | 'shoot' | 'move' | 'recovery' | 'phase' | 'defeated'
 type Skill = 'wave' | 'seed' | 'orbit' | 'dash' | 'spiral' | 'linger'
@@ -41,6 +44,7 @@ export class KedamaBoss extends Enemy {
   private teleportFx: {x:number;y:number;tx:number;ty:number;age:number} | null = null
   private dashTrail: BossTrail[] = []
   private dashTrailClock = 0
+  private dashGhost?: RasterSprite
   private lean = 0
   private readonly orbitVolleys:OrbitVolley[]=[]
   private readonly animator = new PlayerAnimator()
@@ -115,7 +119,8 @@ export class KedamaBoss extends Enemy {
     this.clock+=dt;if(this.ornamentDropTime>=0)this.ornamentDropTime+=dt
     if(this.teleportFx){this.teleportFx.age+=dt;if(this.teleportFx.age>.55)this.teleportFx=null}
     for(const point of this.dashTrail)point.age+=dt
-    this.dashTrail=this.dashTrail.filter(point=>point.age<.28)
+    compactInPlace(this.dashTrail, point=>point.age<.28)
+    if (!this.dashTrail.length) this.dashGhost = undefined
     const target=this.mode==='move'?Math.cos(this.moveAngle)*.22:0
     this.lean+=(target-this.lean)*(1-Math.exp(-dt*18))
     this.animator.update(dt,{speed:0,moveAngle:Math.PI/2,aim:Math.PI/2,armed:false})
@@ -213,6 +218,11 @@ export class KedamaBoss extends Enemy {
     const k=Math.max(0,Math.min(1,this.restoreProgress)),entrance=1-Math.pow(1-this.entranceProgress,3)
     g.save();g.translate((1-entrance)*140,(1-entrance)*-65)
     const pose=this.animator.build(Math.PI/2),moving=this.mode==='move'||Math.hypot(this.vx,this.vy)>10
+    // 一次位移的拖影共享完整人物快照，保留 >w< 表情与倾斜，不反复执行整套骨骼绘制。
+    if (this.dashTrail.length && !this.dashGhost && getKedamaGirlParts()) {
+      this.dashGhost = bakeSprite(-70, -96, 140, 152,
+        ctx=>drawOverloadedKedamaRig(ctx,0,-6,pose,{overload:0,expression:'playful'}))
+    }
     for(const volley of this.orbitVolleys){
       const fade=Math.min(1,((volley.count-1)*.2+.18-volley.age)/.18)
       for(let i=0;i<4;i++){
@@ -223,7 +233,9 @@ export class KedamaBoss extends Enemy {
     }
     for(const point of this.dashTrail) {
       g.save();g.globalAlpha*=Math.max(0,1-point.age/.28)*.26
-      drawOverloadedKedamaRig(g,point.x,point.y-6,{...pose,time:point.time},{overload:0,expression:'playful',lean:point.lean});g.restore()
+      g.translate(point.x,point.y);g.rotate(point.lean)
+      if (this.dashGhost) drawSprite(g,this.dashGhost)
+      g.restore()
     }
     drawKedamaDashWake(g,this.dashTrail,this.x,this.y,this.moveAngle,this.mode==='move'?1:0)
     if(this.teleportFx){const f=this.teleportFx;drawKedamaTeleport(g,f.x,f.y,f.age,false);drawKedamaTeleport(g,f.tx,f.ty,f.age,true)}

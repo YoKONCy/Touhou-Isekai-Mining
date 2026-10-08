@@ -1,10 +1,11 @@
 /**
  * 特效层：命中火花粒子 + 飘字
- * MVP 用普通数组并设数量上限；后续弹幕海阶段会整体升级为对象池
+ * 设数量上限并原地清理过期条目，避免高密度战斗逐帧生成筛选数组。
  */
 
 import { t, itemName } from '../i18n'
 import { damageLabel } from '../shared/combat'
+import { compactInPlace } from '../core/collections'
 
 export type HitDamageKind = 'physical' | 'magic' | 'true'
 export const DAMAGE_COLORS: Record<HitDamageKind, string> = { physical: '#f4ca8c', magic: '#b8b0ff', true: '#8ef0e2' }
@@ -142,7 +143,7 @@ export class FxLayer {
 
   update(dt: number): void {
     for (const p of this.pickups) p.life -= dt
-    this.pickups = this.pickups.filter(p => p.life > 0)
+    compactInPlace(this.pickups, p => p.life > 0)
     while (this.pickups.length < 3 && this.pendingPickups.length) {
       const p = this.pendingPickups.shift()!
       p.y = this.pickups.length ? this.pickups[this.pickups.length - 1].y + 19 : 0
@@ -158,14 +159,15 @@ export class FxLayer {
       p.x += p.vx * dt
       p.y += p.vy * dt
     }
-    this.particles = this.particles.filter((p) => p.life > 0)
+    compactInPlace(this.particles, p => p.life > 0)
 
+    const textDrag = Math.exp(-3 * dt)
     for (const t of this.texts) {
       t.life -= dt
       t.y += t.vy * dt
-      t.vy *= Math.exp(-3 * dt)
+      t.vy *= textDrag
     }
-    this.texts = this.texts.filter((t) => t.life > 0)
+    compactInPlace(this.texts, t => t.life > 0)
   }
 
   render(ctx: CanvasRenderingContext2D): void {

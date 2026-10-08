@@ -149,14 +149,17 @@ body .title-hud-mask .title-rename-form input::placeholder { color: #b8acc8; }
 body .title-hud-mask .title-rename-form p { color: #bfb4cf; }
 
 /* 首页音量设置：晶体滑块、银白细轨；默认游戏滑条完全保留。 */
-body .title-hud-mask .settings-panel { width: min(470px, 100%); }
+body .title-hud-mask .settings-panel { width: min(470px, 100%); overflow-x: hidden; scrollbar-gutter: stable; }
 body .title-hud-mask .settings-panel h2 { margin: 15px 0 32px; }
 body .title-hud-mask .title-audio-settings { margin: 25px 0 32px; gap: 30px; }
-body .title-hud-mask .title-audio-settings label { font-family: 'Microsoft YaHei', sans-serif; color: #e3dbf1; font-size: 15px; letter-spacing: 2px; gap: 18px; }
-body .title-hud-mask .title-audio-settings small { color: #c5b7df; font-size: 12px; font-variant-numeric: tabular-nums; }
-body .title-hud-mask .title-audio-settings input { height: 3px; border: 0; background: linear-gradient(90deg, #9383b2, #524766); box-shadow: 0 0 10px #967cbc18; }
-body .title-hud-mask .title-audio-settings input::-webkit-slider-thumb { width: 11px; height: 11px; border: 1px solid #ddd0ff; background: #c5b6e7; transform: rotate(45deg); box-shadow: 0 0 11px #bea5ed66; }
-body .title-hud-mask .title-audio-settings input::-moz-range-thumb { width: 11px; height: 11px; border: 1px solid #ddd0ff; border-radius: 0; background: #c5b6e7; transform: rotate(45deg); box-shadow: 0 0 11px #bea5ed66; }
+body .title-hud-mask .title-audio-settings label { display: grid; grid-template-columns: 66px minmax(0, 1fr) 52px; min-height: 28px; font-family: 'Microsoft YaHei', sans-serif; color: #e3dbf1; font-size: 15px; letter-spacing: 2px; gap: 18px; }
+body .title-hud-mask .title-audio-settings small { width: 52px; white-space: nowrap; color: #c5b7df; font-size: 12px; font-variant-numeric: tabular-nums; letter-spacing: 0; }
+/* 交互区域固定为整行高度，菱形只改变外观，不旋转原生滑块的命中区域。 */
+body .title-hud-mask .title-audio-settings input { width: 100%; height: 28px; margin: 0; padding: 0; border: 0; background: transparent; box-shadow: none; transform: none; transition: none; }
+body .title-hud-mask .title-audio-settings input::-webkit-slider-runnable-track { height: 3px; background: linear-gradient(90deg, #b0a0cf, #66547f); box-shadow: 0 0 9px #967cbc30; }
+body .title-hud-mask .title-audio-settings input::-webkit-slider-thumb { width: 15px; height: 15px; margin-top: -6px; border: 0; background: linear-gradient(135deg, #fff1ff, #bba2e9); clip-path: polygon(50% 0,100% 50%,50% 100%,0 50%); transform: none; box-shadow: none; }
+body .title-hud-mask .title-audio-settings input::-moz-range-track { height: 3px; background: linear-gradient(90deg, #b0a0cf, #66547f); }
+body .title-hud-mask .title-audio-settings input::-moz-range-thumb { width: 15px; height: 15px; border: 0; border-radius: 0; background: linear-gradient(135deg, #fff1ff, #bba2e9); clip-path: polygon(50% 0,100% 50%,50% 100%,0 50%); transform: none; box-shadow: none; }
 body .title-hud-mask .title-audio-settings input:focus-visible { outline: 1px solid #9c87c3; outline-offset: 7px; }
 body .title-hud-mask .settings-panel > button { margin-top: 12px; }
 
