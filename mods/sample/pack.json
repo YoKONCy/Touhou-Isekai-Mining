@@ -1,0 +1,19 @@
+{
+  "id": "sample",
+  "name": "示例数据包·幸运币",
+  "version": "1.0.0",
+  "items": [
+    {
+      "id": "lucky_coin",
+      "kind": "consumable",
+      "tier": 2,
+      "color": "#f2c94c",
+      "hi": "#fff3b0",
+      "text": "#ffd968",
+      "maxStack": 20,
+      "iconSvg": "<svg viewBox=\"0 0 48 48\" width=\"100%\" height=\"100%\" shape-rendering=\"geometricPrecision\"><circle cx=\"24\" cy=\"24\" r=\"18\" fill=\"#f2c94c\" stroke=\"#5c4410\" stroke-width=\"2\"/><circle cx=\"24\" cy=\"24\" r=\"13.2\" fill=\"none\" stroke=\"#c9962e\" stroke-width=\"1.6\"/><circle cx=\"24\" cy=\"24\" r=\"4.8\" fill=\"#5c4410\"/><path d=\"M14 17 A 13 13 0 0 1 31 11\" fill=\"none\" stroke=\"#fff3b0\" stroke-width=\"2.4\" stroke-linecap=\"round\"/><circle cx=\"17.5\" cy=\"15.5\" r=\"1.6\" fill=\"#fff8d8\"/></svg>",
+      "consume": { "heal": 20 },
+      "tags": ["consumable", "coin", "lucky"]
+    }
+  ]
+}

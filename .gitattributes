@@ -1,0 +1,15 @@
+# 文本统一使用 LF；图片、音乐、视频等二进制资源保留原始字节。
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.gif binary
+*.mp3 binary
+*.ogg binary
+*.wav binary
+*.mp4 binary
+*.webm binary
+*.ttf binary
+*.woff binary
+*.woff2 binary

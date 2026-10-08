@@ -1,0 +1,16 @@
+import type { ItemDef } from '../../types'
+import { HEMP_THREAD_ID, COPPER_INGOT_ID, IRON_INGOT_ID, SALT_SOUP_ID, HEAT_NOZZLE_ID } from '../ids'
+import { supplyIcon } from './supplyAppearance'
+import mushroomSoup from '../food/mushroomSoup'
+import { soupIcon, soupGround } from '../food/soupAppearance'
+
+const thread:ItemDef={id:HEMP_THREAD_ID,kind:'material',tier:1,maxStack:9999,color:'#b5a074',hi:'#e4d0a3',text:'#d5c6a4',
+  icon:supplyIcon('<ellipse cx="25" cy="38" rx="15" ry="3" fill="#211e2a" opacity=".22"/><path d="M11 18Q16 9 31 13L38 23Q36 37 20 38L10 29Z" fill="#8c754e"/><path d="M14 17Q22 11 32 17M12 22Q23 15 36 23M12 27Q25 20 36 28M16 33Q26 27 33 32" fill="none" stroke="#d5bc89" stroke-width="3"/><path d="M13 20L15 24M22 18L24 22M29 23L31 27M20 29L22 33" stroke="#efe0b4" stroke-width=".9"/><path d="M31 34Q43 40 41 29" fill="none" stroke="#baa377" stroke-width="2.4"/>'),tags:['fiber','crafting'],
+  ground:({ctx,x,y})=>{ctx.save();ctx.translate(x,y);ctx.fillStyle='#8c754e';ctx.strokeStyle='#d5bc89';ctx.lineWidth=1;ctx.beginPath();ctx.ellipse(0,0,6,4,-.3,0,Math.PI*2);ctx.fill();for(let i=0;i<3;i++){ctx.beginPath();ctx.ellipse(0,0,2+i*1.5,1.3+i*.7,-.3,0,Math.PI*2);ctx.stroke()}ctx.beginPath();ctx.moveTo(4,3);ctx.quadraticCurveTo(10,7,8,1);ctx.stroke();ctx.restore()}}
+const ingot=(id:string,copper:boolean):ItemDef=>({id,kind:'material',tier:1,maxStack:9999,color:copper?'#b57651':'#919a9d',hi:copper?'#e1b083':'#d0d7d1',text:'#d5c6a4',
+  icon:supplyIcon(`<ellipse cx="25" cy="39" rx="17" ry="3" fill="#211e2a" opacity=".2"/><path d="M8 28L13 18L30 12L41 21L38 33L20 39Z" fill="${copper?'#9e613e':'#697579'}"/><path d="M13 18L30 12L41 21L22 29L8 28Z" fill="${copper?'#d4a073':'#c2ccc8'}"/><path d="M22 29L41 21L38 33L20 39Z" fill="${copper?'#b8754a':'#8d999c'}"/><path d="M15 19L29 15L34 20M23 31L34 27" fill="none" stroke="${copper?'#efd1a0':'#e3e8db'}" stroke-width="1.3"/>`),tags:['metal','smelted']})
+const saltSoup:ItemDef={...mushroomSoup,id:SALT_SOUP_ID,consume:{heal:35},icon:soupIcon(true),ground:soupGround(true)}
+const heatNozzle:ItemDef={id:HEAT_NOZZLE_ID,kind:'misc',tier:2,maxStack:1,color:'#a49983',hi:'#e4d4ae',text:'#d5c6a4',tags:['furnace','quest'],
+  icon:supplyIcon('<ellipse cx="25" cy="40" rx="17" ry="3" fill="#211e2a" opacity=".25"/><path d="M7 27L13 18L34 14L41 21L37 32L16 37Z" fill="#756b60" stroke="#47433f" stroke-width="1.3"/><path d="M13 18L34 14L41 21L20 27L7 27Z" fill="#c3b393"/><path d="M20 27L41 21L37 32L16 37Z" fill="#9d8e73"/><path d="M7 27L16 24L23 29L16 37L7 32Z" fill="#d4c4a0" stroke="#6d6355"/><ellipse cx="15" cy="30" rx="4" ry="3.5" transform="rotate(-20 15 30)" fill="#34312e" stroke="#8c7a5c"/><path d="M26 17L28 24L25 34M29 16L31 23L28 33" fill="none" stroke="#e4d3ae" stroke-width="1.1"/><path d="M33 26L37 25M19 19L23 18" stroke="#5f584f" stroke-width=".8"/><path d="M10 31L12 29" stroke="#ebe1c2" stroke-width=".8"/>'),
+  ground:({ctx,x,y})=>{ctx.save();ctx.translate(x,y);ctx.fillStyle='#aa9a79';ctx.strokeStyle='#534d44';ctx.beginPath();ctx.moveTo(-7,0);ctx.lineTo(4,-4);ctx.lineTo(8,0);ctx.lineTo(5,4);ctx.lineTo(-5,5);ctx.closePath();ctx.fill();ctx.stroke();ctx.fillStyle='#37332e';ctx.beginPath();ctx.ellipse(-4,2,2.1,1.5,-.3,0,Math.PI*2);ctx.fill();ctx.restore()}}
+export const workshopMaterials=[heatNozzle,thread,ingot(COPPER_INGOT_ID,true),ingot(IRON_INGOT_ID,false),saltSoup]

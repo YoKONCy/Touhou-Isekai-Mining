@@ -1,0 +1,6 @@
+{
+  "_comment": "sample 示例数据包简体中文语言文件（MC Mod 式扁平键值；物品文案与 pack.json 分离）。多语言时新增 en_us.json 等同名结构文件即可。",
+
+  "item.sample:lucky_coin.name": "幸运币",
+  "item.sample:lucky_coin.desc": "一枚带着体温的旧金币，据说咬一口能带来好运（回复 20 点生命）。这是零代码数据包示例：只有 pack.json + 内联 SVG。"
+}

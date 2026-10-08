@@ -1,0 +1,7 @@
+{
+  "ui.storage.record": "旧营 · 物资柜",
+  "ui.storage.organize": "整理",
+  "ui.storage.quick": "随身快捷栏",
+  "ui.storage.gestures": "左键整堆 · 右键半堆 / 放一个 · 双击归并 · Shift 扫格快移",
+  "ui.storage.keys": "Shift 查看属性 · 滚轮翻阅详情 · R 整理 · Esc 返回"
+}

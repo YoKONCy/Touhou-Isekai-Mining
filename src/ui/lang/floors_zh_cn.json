@@ -1,0 +1,23 @@
+{
+  "ui.floors.record": "旧营 · 矿道勘探记录",
+  "ui.floors.title": "选择层级",
+  "ui.floors.floor1": "地下一层",
+  "ui.floors.floor2": "地下二层",
+  "ui.floors.description1": "熟悉的旧矿道。",
+  "ui.floors.description2": "更深、更潮湿的矿道。",
+  "ui.floors.available": "可前往",
+  "ui.floors.selected": "已选定",
+  "ui.floors.unknown_resources": "尚未探索的资源",
+  "ui.floors.hint": "选定一层，沿矿道下行。",
+  "ui.floors.keys": "方向键选择 · Enter进入 · Esc返回",
+  "ui.floors.enter": "进入矿洞",
+  "ui.floors.floor3": "地下三层",
+  "ui.floors.floor4": "地下四层",
+  "ui.floors.description4": "湿冷的深窟里，浅蓝小花与白色毛团隐在苔影之间。",
+  "ui.floors.collapsed": "通道塌方",
+  "ui.floors.collapsed_description": "通往这一层的旧矿道已被塌方堵住。",
+  "ui.floors.attention": "旧矿道有待查看的动静",
+  "ui.floors.description3": "更深的旧矿道。残破的炉体与嵌入泥土的骨骸，留着久远的痕迹。",
+  "ui.floors.floor5": "地下五层",
+  "ui.floors.description5": "沿着露米娅提到的亮光继续深入。"
+}

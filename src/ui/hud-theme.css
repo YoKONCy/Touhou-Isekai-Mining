@@ -1,0 +1,100 @@
+/* 材质适配层：沿用各面板的造型、包角、装订、压边与交互；只协调材质配色。
+ * 常驻物品栏与左上角生命、灵力栏继续使用原来的样式。
+ * 禁止在这里统一清空背景、阴影、伪元素或按钮状态。 */
+#app .hud-panel {
+  --leather: #4b3836;
+  --leather-deep: #35282a;
+  --leather-dark: #261c20;
+  --wood: #705340;
+  --wood-deep: #503c30;
+  --brass: #c1a06c;
+  --brass-hi: #e7ca91;
+  --brass-dim: #8f7450;
+  --text: #eee0c6;
+  --text-dim: #b29d82;
+  border-radius: 0;
+}
+#app .hud-panel button { border-radius: 0; }
+
+/* 背包仍是一只装备陈列箱：厚框、内衬、刻线与右下封印全部保留。 */
+#app .inv-panel {
+  border-color: #261d21;
+  background:
+    radial-gradient(ellipse at 8% 0%, #d6b57513, transparent 48%),
+    radial-gradient(ellipse at 95% 95%, #875b3612, transparent 55%),
+    repeating-linear-gradient(0deg, #e0c99d03 0 1px, transparent 1px 5px),
+    linear-gradient(130deg, #40343a, #2d252d 60%, #332a30);
+}
+#app .inv-panel .rack-col { border-color: #b0987536; }
+#app .inv-panel :is(.eqcell.peg, .eqcell.spellcase, .eqcell.trinketcase, .velvet) {
+  background: radial-gradient(ellipse at 35% 0, #d8bd8810, transparent 70%), linear-gradient(145deg, #2d232a, #1d171f);
+}
+#app .inv-panel .eqcell:has(.item-icon) { background: radial-gradient(ellipse at 50% 0, #c0a16d1b, transparent 75%), #292029; }
+#app .inv-panel :is(.eqcell.enabled, .velvet):hover { background: radial-gradient(ellipse at 35% 0, #d8bd8820, transparent 70%), #362a32; }
+#app .inv-panel .bag-viewport { background: radial-gradient(ellipse at 95% 100%, #b48b4e0b, transparent 65%), #211a2277; }
+#app .inv-panel .growth-record { background: radial-gradient(ellipse at 0 0, #c0a16d0c, transparent 65%), #30252d; }
+#app .inv-panel .ability-row { background: linear-gradient(105deg, #cfb58407, transparent), #241c2777; }
+#app .inv-panel .ability-row.invested { background: linear-gradient(105deg, #c9973f16, transparent), #382a30; }
+#app .inv-panel .pending-allocation { background: radial-gradient(ellipse at 0 0, #cfb58412, transparent 70%), #3b2d33; }
+
+/* 暂停菜单保留皮革九宫格铜钉框、木牌按钮与凹槽铜质滑块。 */
+#app .pause-panel { --leather: #513d37; --leather-deep: #382b2d; }
+#app .pause-panel .p-range {
+  background: linear-gradient(180deg, #0009, #0002), linear-gradient(90deg, #49353a, #5b4443);
+}
+
+/* 仓库是木柜，制作和熔炉是工作台，料理是带包角的炊事台。 */
+#app .storage-panel {
+  border-color: #493a34;
+  background: repeating-linear-gradient(1deg, transparent 0 24px, #e0bb7907 25px, transparent 26px 50px), linear-gradient(135deg, #463735, #30272b 75%);
+}
+#app .storage-panel .shelf-viewport { background: repeating-linear-gradient(90deg, transparent 0 62px, #9a7b4920 63px, transparent 64px 125px), #21181fbb; }
+#app .storage-panel .inv .shelf-viewport { background: radial-gradient(ellipse at 0 100%, #bbb19308, transparent 65%), #201a22d9; }
+#app .storage-panel .storage-slot { background: radial-gradient(ellipse at 35% 0, #d8bd880b, transparent 70%), linear-gradient(145deg, #302429, #21191e); }
+#app .storage-panel .storage-slot:hover { background: radial-gradient(ellipse at 35% 0, #d8bd881b, transparent 70%), #3a2b30; }
+#app .production-panel { background: repeating-linear-gradient(1deg, transparent 0 28px, #d3aa6806 29px, transparent 30px 57px), linear-gradient(140deg, #453537, #30262d); }
+#app .production-panel .production-work { background: linear-gradient(145deg, #54402b18, transparent), #241a2255; }
+#app .cooking-panel {
+  border-color: #4b3d38;
+  background: repeating-linear-gradient(0deg, transparent 0 29px, #b2a27404 30px, transparent 31px 62px), linear-gradient(130deg, #40343b, #2b2630 76%);
+}
+
+/* 手账保留侧边装订、订线和印章；地图保留纸面折痕、夹子与层叠边框。 */
+#app .quest-panel { background: repeating-linear-gradient(35deg, #ffffff03 0 1px, transparent 1px 5px), #382c32; }
+#app .quest-panel .quest-index { background: repeating-linear-gradient(30deg, #e4bc7b04 0 1px, transparent 1px 6px), linear-gradient(90deg, #382b30, #2b242d 93%, #17171e); }
+#app .map-panel { border-color: #4f3e37; background: repeating-linear-gradient(2deg, transparent 0 25px, #c6a27006 26px, transparent 27px 51px), linear-gradient(135deg, #45373a, #2c2530); }
+#app .result-panel { background: repeating-linear-gradient(35deg, #ddbd8505 0 1px, transparent 1px 5px), linear-gradient(135deg, #493a38, #30272e); }
+#app .floor-board { background: repeating-linear-gradient(2deg, transparent 0 25px, #c6a27006 26px, transparent 27px 51px), linear-gradient(135deg, #45373a, #2c2530); }
+
+/* 内页仍有纸纤维、装订侧的压暗和局部受光，不把纸页变成平面白卡。 */
+#app .quest-sheet {
+  background: repeating-linear-gradient(0deg, transparent 0 3px, #70573505 3px 4px), radial-gradient(ellipse at 100% 0, #a1865824, transparent 55%), linear-gradient(100deg, #cdbc9f, #e8ddc6 8%, #e2d5b9 90%, #d3c3a5);
+}
+#app .production-panel .plans {
+  background: repeating-linear-gradient(0deg, transparent 0 3px, #70573505 3px 4px), linear-gradient(100deg, #cbb597, #e8dbc1 10%, #dbc8a8);
+}
+#app .record-sheet {
+  background: repeating-linear-gradient(0deg, transparent 0 3px, #7a5c3606 3px 4px), radial-gradient(ellipse at 100% 0, #b79a6426, transparent 65%), linear-gradient(100deg, #cfbfa3, #e7dcc4 5%, #e0d1b2 96%, #c9b697);
+}
+
+/* 物品卡传送到 body；保留品质压印和品质墨色，适配不能依赖 #app 祖先。 */
+body .item-hover-card.hud-paper {
+  border-radius: 0;
+  background: repeating-linear-gradient(0deg, transparent 0 3px, #6b4d2705 3px 4px), radial-gradient(ellipse at 90% 0, #b79d7126, transparent 65%), linear-gradient(155deg, #f0e6d0, #e3d3b4 80%, #d6c29c);
+}
+body .item-hover-card.hud-paper:is(.rarity-3, .rarity-4, .rarity-5, .rarity-6) {
+  background: repeating-linear-gradient(0deg, transparent 0 3px, #6b4d2705 3px 4px), radial-gradient(ellipse at 100% 0, color-mix(in srgb, var(--quality-ink) 9%, transparent), transparent 60%), linear-gradient(155deg, #f0e6d0, #e3d3b4 80%, #d6c29c);
+}
+body .item-hover-card.hud-paper button { border-radius: 0; }
+
+/* 对话仍沿用姓名纸签、符印与上下压边，保持原来的排版留白。 */
+#app .dlg-root { --dlg-bg: #332b2ef5; --dlg-bottom: #211d27f5; --dlg-border: #ad957366; --dlg-sign: #493831; }
+#app .dlg-box { border-radius: 0; }
+#app .dlg-choice { border-radius: 0; }
+#app .hud-surface.tut-root { border-radius: 0; }
+#app .room-toast .nail { color: #c4a375; }
+#app .dc-panel { border-radius: 0; }
+
+/* 交互反馈最后着色，保留原有轮廓、红叉、分配数量与拒绝动画。 */
+#app .hud-panel [data-drop].dragover { background: linear-gradient(160deg, #c8965052, #0006); }
+#app .hud-panel [data-drop].draginvalid { background: linear-gradient(160deg, #ad59644d, #261926aa); }

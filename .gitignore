@@ -1,0 +1,32 @@
+# 安装依赖与构建产物
+node_modules/
+dist/
+.vite/
+
+# 研究、预览与生成过程资料不进入游戏仓库
+art-studies/
+preview/
+
+# 本次资源维护的本机清单、报告与一次性工具
+.docs/static-resource-*.json
+.docs/STATIC_RESOURCES.md
+.docs/tools/compress_runtime_assets.py
+.docs/tools/resize_runtime_images.py
+
+# 本机环境与临时文件
+.env
+.env.*
+!.env.example
+*.log
+*.tsbuildinfo
+*.bak
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/
+coverage/
+*.tmp
+*.temp
+*.orig
+*.rej

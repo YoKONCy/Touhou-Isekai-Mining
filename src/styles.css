@@ -1,0 +1,64 @@
+/* 全局基础样式：全屏、禁选、无滚动条 */
+.audio-muted-indicator {
+  position: absolute;
+  left: calc(100% + 10px);
+  top: 4px;
+  width: 24px;
+  height: 24px;
+  color: #ded8cc;
+  opacity: .55;
+  pointer-events: none;
+}
+
+/* 像素字体（zpix：中英文全覆盖，源自 infOS 资产） */
+@font-face {
+  font-family: 'zpix';
+  src: url('/fonts/zpix.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #0b0d12;
+  /* 全局统一像素字体（UI + Canvas 文字都走 zpix） */
+  font-family: 'zpix', 'DotGothic16', 'Courier New', monospace;
+  /* 像素字体必须关掉抗锯齿平滑，否则小字发虚 */
+  -webkit-font-smoothing: none;
+  -moz-osx-font-smoothing: grayscale;
+  font-smooth: never;
+  text-rendering: optimizeSpeed;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+canvas {
+  display: block;
+}
+
+/* HUD 内所有滚动区共用暗槽铜片滚动条，包括传送到 body 的物品说明与确认层。 */
+#app *, body > .item-hover-card, .confirm-mask * {
+  scrollbar-width: thin;
+  scrollbar-color: #9d845f #211c28;
+}
+#app *::-webkit-scrollbar, body > .item-hover-card::-webkit-scrollbar, .confirm-mask *::-webkit-scrollbar { width: 8px; height: 8px; }
+#app *::-webkit-scrollbar-track, body > .item-hover-card::-webkit-scrollbar-track, .confirm-mask *::-webkit-scrollbar-track { background: #211c28; border: 1px solid #100d17; box-shadow: inset 0 1px 4px #0008; }
+#app *::-webkit-scrollbar-thumb, body > .item-hover-card::-webkit-scrollbar-thumb, .confirm-mask *::-webkit-scrollbar-thumb { border: 2px solid #211c28; border-radius: 0; background: linear-gradient(90deg,#705b43,#b9a077,#806747); }
+#app *::-webkit-scrollbar-thumb:hover, body > .item-hover-card::-webkit-scrollbar-thumb:hover { background: #cfb082; }
+#app *::-webkit-scrollbar-corner, body > .item-hover-card::-webkit-scrollbar-corner { background: #211c28; }
+#app *::-webkit-scrollbar-button, body > .item-hover-card::-webkit-scrollbar-button { display: none; }
+/* Chromium 采用上面的铜片造型，避免标准属性把自定义轨道重新换成原生形状。 */
+@supports selector(::-webkit-scrollbar) {
+  #app *, body > .item-hover-card, .confirm-mask * { scrollbar-width: auto; scrollbar-color: auto; }
+}

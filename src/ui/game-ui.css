@@ -1,0 +1,424 @@
+/**
+ * 矿洞工业手绘风 · 游戏 UI 设计规范（批次 C 立约）
+ *
+ * 铁律：游戏内界面一律走本文件的 gpanel/gbtn/gslot 体系，
+ * 禁止"圆角半透明深色块 + backdrop-blur"的塑料 web 语法
+ * （调试面板不受约束，开发工具可保持塑料风）。
+ *
+ * 材质：皮革/深木板为底、铜钉包角、羊皮纸内页、黄铜描边；
+ * 字体：招牌用楷体，正文用圆润无衬线；色彩限暖棕 + 黄铜 + 少量信号色。
+ */
+
+:root {
+  /* —— 材质色 —— */
+  --leather: #5a3f27;
+  --leather-deep: #402c19;
+  --leather-dark: #2c1d10;
+  --wood: #6e4c2c;
+  --wood-deep: #50361d;
+  --parchment: #e7d6b2;
+  --parchment-deep: #d4be93;
+  /* —— 金属 —— */
+  --brass: #c9973f;
+  --brass-hi: #f0cd7e;
+  --brass-dim: #8a682c;
+  --iron: #9aa4b4;
+  /* —— 墨/字 —— */
+  --ink: #33241a;
+  --text: #f2e4c6;
+  --text-dim: #c9b48e;
+  /* —— 信号色 —— */
+  --seal: #c9556a; /* 封印红 */
+  --open: #7bc77a; /* 解封绿 */
+  --heal: #8fe09a;
+  --danger: #e05a5a;
+
+  /* 字体：全局像素风（招牌/正文统一 zpix，靠字号与字距分层） */
+  --font-sign: 'zpix', 'DotGothic16', 'Courier New', monospace;
+  --font-body: 'zpix', 'DotGothic16', 'Courier New', monospace;
+}
+
+/* —— 九宫格边框：皮革包边 + 四角铜钉 + 内侧黄铜细线（内联 SVG，零外部资源） —— */
+.gpanel {
+  border: 12px solid transparent;
+  border-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48'%3E%3Cpath d='M0 0h48v12H0zM0 36h48v12H0zM0 0v48h12V0zM36 0v48h12V0z' fill='%236b4a2a'/%3E%3Cpath d='M0 0h48v3.5H0zM0 44.5h48v3.5H0zM0 0v48h3.5V0zM44.5 0v48h3.5V0z' fill='%23241609'/%3E%3Crect x='11.4' y='11.4' width='25.2' height='25.2' fill='none' stroke='%23a87c44' stroke-width='1.3'/%3E%3Ccircle cx='10' cy='10' r='3.4' fill='%23d8a84e' stroke='%237a5520' stroke-width='0.8'/%3E%3Ccircle cx='38' cy='10' r='3.4' fill='%23d8a84e' stroke='%237a5520' stroke-width='0.8'/%3E%3Ccircle cx='10' cy='38' r='3.4' fill='%23d8a84e' stroke='%237a5520' stroke-width='0.8'/%3E%3Ccircle cx='38' cy='38' r='3.4' fill='%23d8a84e' stroke='%237a5520' stroke-width='0.8'/%3E%3Ccircle cx='8.9' cy='8.9' r='1.1' fill='%23ffe9b8'/%3E%3C/svg%3E")
+    12 / 12px / 0 stretch;
+  background:
+    radial-gradient(circle at 28% 18%, rgba(255, 222, 170, 0.07), transparent 55%),
+    repeating-linear-gradient(45deg, rgba(0, 0, 0, 0.045) 0 2px, rgba(255, 220, 170, 0.02) 2px 6px),
+    linear-gradient(160deg, var(--leather), var(--leather-deep));
+  color: var(--text);
+  font-family: var(--font-body);
+}
+
+/*
+ * 常驻 HUD 轻量件（2026-10-01 HUD 批次）：
+ * 厚皮九宫格只留给弹窗（.gpanel）；常驻在游戏画面上的小牌一律走
+ * "细墨边 + 半透明暖褐底 + 顶部黄铜细高光线"，能看见底下场景、不抢戏。
+ */
+.gpanel-mini {
+  border: 1px solid #51434c;
+  border-radius: 3px;
+  background: rgba(46, 37, 44, 0.94);
+  box-shadow:
+    inset 0 1px 0 rgba(188, 149, 98, 0.35),
+    0 2px 5px rgba(20, 18, 28, 0.35);
+  color: var(--text);
+  font-family: var(--font-body);
+}
+
+/* 羊皮纸内页（大地图/卷轴类面板） */
+.gpanel-parchment {
+  border: 14px solid transparent;
+  border-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48'%3E%3Cpath d='M0 0h48v12H0zM0 36h48v12H0zM0 0v48h12V0zM36 0v48h12V0z' fill='%237a5230'/%3E%3Cpath d='M0 0h48v3.5H0zM0 44.5h48v3.5H0zM0 0v48h3.5V0zM44.5 0v48h3.5V0z' fill='%23301d0c'/%3E%3Crect x='11.4' y='11.4' width='25.2' height='25.2' fill='none' stroke='%23b58a4e' stroke-width='1.3'/%3E%3Ccircle cx='10' cy='10' r='3.4' fill='%23d8a84e' stroke='%237a5520' stroke-width='0.8'/%3E%3Ccircle cx='38' cy='10' r='3.4' fill='%23d8a84e' stroke='%237a5520' stroke-width='0.8'/%3E%3Ccircle cx='10' cy='38' r='3.4' fill='%23d8a84e' stroke='%237a5520' stroke-width='0.8'/%3E%3Ccircle cx='38' cy='38' r='3.4' fill='%23d8a84e' stroke='%237a5520' stroke-width='0.8'/%3E%3C/svg%3E")
+    12 / 14px / 0 stretch;
+  background:
+    radial-gradient(ellipse at 70% 12%, rgba(120, 80, 30, 0.12), transparent 55%),
+    radial-gradient(ellipse at 20% 88%, rgba(110, 70, 25, 0.1), transparent 50%),
+    repeating-linear-gradient(0deg, rgba(90, 60, 20, 0.03) 0 3px, transparent 3px 7px),
+    linear-gradient(160deg, #eee0c0, var(--parchment) 60%, var(--parchment-deep));
+  color: var(--ink);
+}
+
+/* 招牌标题（楷体刻字） */
+.gsign {
+  font-family: var(--font-sign);
+  color: var(--brass-hi);
+  letter-spacing: 6px;
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.45);
+}
+.gpanel-parchment .gsign {
+  color: #5a3a16;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+
+/* —— 铜钉按钮 —— */
+.gbtn {
+  font-family: var(--font-body);
+  color: var(--text);
+  background:
+    linear-gradient(180deg, rgba(255, 220, 160, 0.12), rgba(0, 0, 0, 0.18)),
+    linear-gradient(180deg, var(--wood), var(--wood-deep));
+  border: 1px solid #2a1a0a;
+  border-radius: 0;
+  box-shadow:
+    inset 0 1px 0 rgba(240, 205, 126, 0.35),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.35),
+    0 3px 0 #241608;
+  padding: 8px 18px;
+  letter-spacing: 3px;
+  cursor: pointer;
+  transition: transform 0.05s, filter 0.1s;
+}
+.gbtn:hover {
+  filter: brightness(1.12);
+}
+.gbtn:active {
+  transform: translateY(2px);
+  box-shadow:
+    inset 0 1px 0 rgba(240, 205, 126, 0.25),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.3);
+}
+.gbtn.primary {
+  background:
+    linear-gradient(180deg, rgba(255, 235, 180, 0.18), rgba(0, 0, 0, 0.12)),
+    linear-gradient(180deg, #b5863b, #8a5d24);
+}
+
+/* —— 凹槽格子（快捷栏/背包通用） —— */
+.gslot {
+  position: relative;
+  background:
+    linear-gradient(160deg, rgba(0, 0, 0, 0.32), rgba(0, 0, 0, 0.5)),
+    var(--leather-dark);
+  border: 1px solid #1c1006;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.55), inset 0 -1px 0 rgba(200, 150, 80, 0.12);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+}
+.gslot.draggable {
+  cursor: grab;
+}
+.gslot.dragover {
+  outline: 2px solid var(--brass-hi);
+  outline-offset: -2px;
+  background: linear-gradient(160deg, rgba(200, 150, 80, 0.35), rgba(0, 0, 0, 0.4));
+}
+.gslot .qty {
+  position: absolute;
+  right: 2px;
+  bottom: 0;
+  font-size: 11px;
+  font-weight: 700;
+  color: #f4ead2;
+  text-shadow: 0 1px 2px #000, 0 0 3px #000;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+.gslot .keyhint {
+  position: absolute;
+  left: 3px;
+  top: 1px;
+  font-size: 9px;
+  color: var(--text-dim);
+  text-shadow: 0 1px 2px #000;
+  pointer-events: none;
+}
+
+/* 装备槽 */
+.gequip {
+  position: relative;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px dashed rgba(200, 150, 80, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: default;
+}
+.gequip.enabled {
+  cursor: pointer;
+  border-style: solid;
+  border-color: #6a4a22;
+}
+.gequip.enabled.dragover {
+  outline: 2px solid var(--brass-hi);
+  outline-offset: -2px;
+}
+.gequip.disabled {
+  opacity: 0.4;
+}
+.gequip .eqlabel {
+  position: absolute;
+  bottom: 1px;
+  font-size: 9px;
+  color: var(--text-dim);
+  pointer-events: none;
+}
+
+/* —— 物品 Tooltip（小铜牌） —— */
+.gtooltip {
+  position: fixed;
+  z-index: 60;
+  max-width: 230px;
+  padding: 8px 12px;
+  pointer-events: none;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.6;
+  border: 8px solid transparent;
+  border-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48'%3E%3Cpath d='M0 0h48v12H0zM0 36h48v12H0zM0 0v48h12V0zM36 0v48h12V0z' fill='%233a2818'/%3E%3Cpath d='M0 0h48v3.5H0zM0 44.5h48v3.5H0zM0 0v48h3.5V0zM44.5 0v48h3.5V0z' fill='%231c1106'/%3E%3Crect x='11.4' y='11.4' width='25.2' height='25.2' fill='none' stroke='%238a6330' stroke-width='1.3'/%3E%3C/svg%3E")
+    12 / 8px / 0 stretch;
+  background: linear-gradient(160deg, #3d2a18, #2b1d10);
+}
+.gtooltip .tt-name {
+  font-family: var(--font-sign);
+  font-size: 15px;
+  letter-spacing: 2px;
+  color: var(--brass-hi);
+}
+.gtooltip .tt-stat {
+  color: #d8c098;
+}
+.gtooltip .tt-desc {
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+
+/* 所有弹出式 HUD 共用此入口；切换面板种类时用 key 重建，避免各写一份动效。 */
+.gpanel-pop {
+  animation: gpanel-pop 0.16s ease-out both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .gpanel-pop { animation: none; }
+}
+@keyframes gpanel-pop {
+  from {
+    scale: 0.96;
+    translate: 0 8px;
+    opacity: 0;
+  }
+  to {
+    scale: 1;
+    translate: 0 0;
+    opacity: 1;
+  }
+}
+
+/* 当前房间/重要物件的黄铜脉冲（大地图等复用） */
+.gpulse {
+  animation: gpulse 1.4s ease-in-out infinite;
+}
+@keyframes gpulse {
+  0%,
+  100% {
+    filter: drop-shadow(0 0 2px rgba(240, 205, 126, 0.5));
+  }
+  50% {
+    filter: drop-shadow(0 0 9px rgba(240, 205, 126, 0.95));
+  }
+}
+
+/* 拖放被拒绝：目标格红框一闪（背包面板 / 常驻快捷栏共用） */
+.dragbad {
+  animation: dragbad 0.3s ease-out;
+}
+@keyframes dragbad {
+  0%,
+  100% {
+    outline-color: rgba(224, 90, 90, 0);
+  }
+  30%,
+  70% {
+    outline: 2px solid var(--danger);
+    outline-offset: -2px;
+  }
+}
+
+/* ============================================================
+ * 自研指针拖拽（pointerDnd.ts）
+ * ============================================================ */
+
+/* 跟手物品浮层：放大 1.12 + 厚重投影，明确"拿起的是物品不是格子" */
+.drag-ghost {
+  position: fixed;
+  z-index: 1700;
+  pointer-events: none;
+  transform: scale(1.12) rotate(-2deg);
+  transform-origin: center;
+  filter: drop-shadow(0 9px 10px rgba(0, 0, 0, 0.6));
+  transition: filter 0.08s;
+}
+.drag-ghost .item-icon {
+  width: 48px;
+  height: 48px;
+}
+/* 源槽：物品拿起后只留空凹槽虚影 */
+.gslot.drag-source,
+.gequip.drag-source {
+  opacity: 0.32;
+}
+.gslot.drag-source .item-icon,
+.gequip.drag-source .item-icon {
+  visibility: hidden;
+}
+body.dragging-item,
+body.dragging-item * {
+  cursor: grabbing !important;
+}
+
+/* 任意落点通用高亮（gslot/gequip 专属规则之外的兜底） */
+[data-drop].dragover {
+  outline: 2px solid var(--brass-hi);
+  outline-offset: -2px;
+  background: linear-gradient(160deg, rgba(200, 150, 80, 0.32), rgba(0, 0, 0, 0.4));
+}
+/* 类型不接受：红叉态（画在 ::after 角标，不依赖额外节点） */
+[data-drop].draginvalid {
+  outline: 2px solid var(--danger);
+  outline-offset: -2px;
+}
+[data-drop].draginvalid::after {
+  content: '✕';
+  position: absolute;
+  right: 1px;
+  top: -2px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--danger);
+  text-shadow: 0 1px 2px #000;
+  pointer-events: none;
+}
+
+/* 拖出合法容器：屏幕内圈红色警戒边 + 物品泛红（此时松手才丢弃） */
+body.discarding::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 99;
+  pointer-events: none;
+  box-shadow:
+    inset 0 0 0 3px rgba(224, 90, 90, 0.75),
+    inset 0 0 70px rgba(224, 60, 60, 0.28);
+}
+body.discarding .drag-ghost {
+  filter: drop-shadow(0 0 12px rgba(224, 80, 80, 0.95));
+}
+.discard-hint {
+  position: fixed;
+  left: 50%;
+  bottom: 22%;
+  transform: translateX(-50%);
+  z-index: 99;
+  display: none;
+  pointer-events: none;
+  padding: 8px 22px;
+  font-family: var(--font-sign);
+  font-size: 17px;
+  letter-spacing: 4px;
+  color: #ffd0c4;
+  background: rgba(60, 14, 10, 0.82);
+  border: 1.5px solid rgba(224, 90, 90, 0.8);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.55);
+}
+body.discarding .discard-hint {
+  display: block;
+  animation: discard-pulse 0.6s ease-in-out infinite;
+}
+@keyframes discard-pulse {
+  50% {
+    filter: brightness(1.35);
+  }
+}
+
+/* ============================================================
+ * 光标持有堆（右键拆分，pointerDnd.ts hold 模式）
+ * ============================================================ */
+
+/* 持有期间禁止文本选择；浮层不沿用拖拽的倾斜与 grabbing 光标 */
+body.holding-item {
+  user-select: none;
+}
+.mouse-cursor { width: 48px; height: 48px; transform: none; }
+.mouse-cursor .item-icon { display: block; width: 48px; height: 48px; }
+.mouse-cursor .item-icon svg { width: 100%; height: 100%; }
+.mouse-cursor .hold-qty:empty { display: none; }
+/* 仓储转移的物品图案独立合成，不参与槽位命中和容器布局。 */
+.item-flight{position:fixed;left:0;top:0;width:36px;height:36px;z-index:1500;pointer-events:none;will-change:transform,opacity;filter:drop-shadow(0 3px 4px #080a1340)}
+.item-flight-icon,.item-flight-icon svg,.item-flight-icon img{display:block;width:100%;height:100%;object-fit:contain}
+.item-flight-count{position:absolute;right:-3px;bottom:-2px;padding:0 3px;border-radius:2px;border:1px solid #8c72454d;background:#23180dd9;color:#edd8ad;font-size:9px;line-height:1.4;font-variant-numeric:tabular-nums}
+.item-flight-count:empty{display:none}
+[data-drop].mouse-distribute { outline: 2px solid #d5ba7b; outline-offset: -2px; }
+[data-drop].mouse-distribute::after { content: attr(data-distribute-qty); position: absolute; right: 2px; bottom: 1px; z-index: 3; padding: 0 3px; background: #302416; color: #ffe3a3; font-size: 11px; line-height: 1.5; pointer-events: none; }
+.drag-ghost.hold-ghost {
+  transform: scale(1.08);
+}
+.hold-icon {
+  position: relative;
+  width: 48px;
+  height: 48px;
+}
+/* 持有数量牌：右下角黄铜圆牌（风格同槽位 .brass-qty） */
+.hold-qty {
+  position: absolute;
+  right: -7px;
+  bottom: -7px;
+  min-width: 16px;
+  height: 16px;
+  line-height: 15px;
+  padding: 0 3px;
+  box-sizing: border-box;
+  text-align: center;
+  border-radius: 9px;
+  background: radial-gradient(circle at 35% 30%, #f2d48c, #b5863b 62%, #6e4f1d);
+  border: 1px solid #5a3f18;
+  color: #2a1a08;
+  font-size: 10px;
+  font-weight: 700;
+  text-shadow: none;
+}
+/* 持有态出界：红边提示已由 body.discarding::after 承担，浮层同步泛红 */
+body.discarding .hold-ghost {
+  filter: drop-shadow(0 0 12px rgba(224, 80, 80, 0.95));
+}

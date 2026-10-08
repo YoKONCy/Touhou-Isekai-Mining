@@ -1,0 +1,27 @@
+{
+  "name": "touhou-isekai-mining",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "东方异界矿洞 Touhou-Isekai-Mining —— 俯视角动作 RPG 与采矿合成游戏",
+  "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/YoKONCy/Touhou-Isekai-Mining.git"
+  },
+  "homepage": "https://yokoncy.github.io/Touhou-Isekai-Mining/",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "dexie": "^4.4.6",
+    "vue": "^3.5.13"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.0",
+    "typescript": "~5.8.3",
+    "vite": "^7.0.6"
+  }
+}

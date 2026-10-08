@@ -1,0 +1,176 @@
+/* 首页独立视觉层：只匹配显式启用标题主题的弹窗，游戏内 HUD 不受影响。 */
+body .title-hud-mask:is(.settings-mask,.records-mask,.confirm-mask) {
+  background: radial-gradient(ellipse at 50% 42%, #12162c65, #050819bd);
+  padding: 24px;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  font-family: 'Microsoft YaHei', 'Segoe UI', sans-serif;
+  color: #dcd8ef;
+}
+body .title-hud-mask .title-hud-panel {
+  position: relative;
+  border: 1px solid #c5b9ef38;
+  border-radius: 0;
+  border-image: none;
+  padding: 32px 36px;
+  background: radial-gradient(ellipse at 12% 0, #7165a11a, transparent 65%), linear-gradient(140deg, #182035, #101628);
+  box-shadow: 0 24px 85px #03050caf, inset 0 1px #dfd8ff12;
+  color: #dcd8ef;
+  font-family: 'Microsoft YaHei', 'Segoe UI', sans-serif;
+}
+body .title-hud-mask .title-hud-panel::before,
+body .title-hud-mask .title-hud-panel::after {
+  content: '';
+  position: absolute;
+  width: 25px;
+  height: 25px;
+  pointer-events: none;
+  border-color: #d2c1fa88;
+  border-style: solid;
+  filter: drop-shadow(0 0 5px #a79cda33);
+}
+body .title-hud-mask .title-hud-panel::before { left: -1px; top: -1px; border-width: 1px 0 0 1px; }
+body .title-hud-mask .title-hud-panel::after { right: -1px; bottom: -1px; border-width: 0 1px 1px 0; }
+body .title-hud-mask .title-hud-panel h2 {
+  color: #f1ebff;
+  font-family: 'KaiTi', 'STKaiti', '楷体', serif;
+  font-weight: 400;
+  font-size: 34px;
+  letter-spacing: 5px;
+  text-shadow: 0 0 22px #b59de333;
+}
+body .title-hud-mask .title-hud-panel :is(header small, .confirm-caption),
+body .title-hud-mask .settings-panel > small { color: #c3b8db; font-size: 12px; letter-spacing: 3px; }
+body .title-hud-mask .title-hud-action {
+  position: relative;
+  display: inline-block;
+  border: 0;
+  border-radius: 0;
+  padding: 9px 14px 13px;
+  background: none;
+  box-shadow: none;
+  color: #ded4f3;
+  font-family: 'KaiTi', 'STKaiti', '楷体', serif;
+  font-size: 23px;
+  letter-spacing: 4px;
+  cursor: pointer;
+  transition: color .2s, transform .2s, text-shadow .2s;
+}
+body .title-hud-mask .title-hud-action::after {
+  content: '';
+  position: absolute;
+  left: 10px;
+  right: 14px;
+  bottom: 3px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, #c4b4f54d, transparent);
+  transition: background .2s;
+}
+body .title-hud-mask .title-hud-action.primary { color: #f0e6ff; }
+body .title-hud-mask .title-hud-action:hover:enabled,
+body .title-hud-mask .title-hud-action:focus-visible { color: #fff5ff; transform: scale(1.06); text-shadow: 0 0 18px #b09be580; outline: none; }
+body .title-hud-mask .title-hud-action:focus-visible::after { background: #d9c9fb; }
+body .title-hud-mask .title-hud-action:disabled { opacity: .4; cursor: default; }
+
+/* 首页确认框：银紫刻线与留白，不再使用营地纸面和红印。 */
+body .title-hud-mask .confirm-panel { width: min(470px, 100%); }
+body .title-hud-mask .confirm-panel h2 { margin: 14px 0 24px; font-size: 30px; }
+body .title-hud-mask .confirm-paper {
+  padding: 20px 0 26px;
+  border: 0;
+  border-top: 1px solid #a299c02e;
+  border-bottom: 1px solid #a299c02e;
+  background: none;
+  box-shadow: none;
+  color: #ded8eb;
+}
+body .title-hud-mask .confirm-paper p { font-size: 15px; line-height: 1.9; padding-right: 26px; }
+body .title-hud-mask .confirm-paper > span { bottom: 17px; right: 1px; border: 0; padding: 0; color: #b2a0e16e; transform: none; font-size: 18px; }
+body .title-hud-mask .confirm-panel footer { margin-top: 22px; gap: 24px; }
+
+/* 首页读取记录：深蓝记录条、细线与星光，与游戏内纸页分开。 */
+body .title-hud-mask .records-panel { width: min(710px, 100%); max-height: 86dvh; }
+body .title-hud-mask .records-panel header { border-color: #aaa0cc2e; padding-bottom: 21px; }
+body .title-hud-mask .records-close { color: #a69ebf; font-family: 'Segoe UI', sans-serif; font-weight: 200; font-size: 31px; padding: 4px; }
+body .title-hud-mask .records-close:hover { color: #f3e8ff; text-shadow: 0 0 14px #ac94d977; }
+body .title-hud-mask .records-close:focus-visible { outline: 1px solid #c0b0ee; }
+body .title-hud-mask .records-list { padding: 18px 4px 4px; gap: 13px; }
+/* 首页记录条不使用 record-sheet，避免游戏内带 #app 的纸面规则跨主题覆盖。 */
+body .title-hud-mask .title-record-sheet {
+  position: relative;
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  min-height: 132px;
+  padding: 18px 23px;
+  text-align: left;
+  font: inherit;
+  border-radius: 0;
+  border: 1px solid #8e81b440;
+  border-left: 2px solid #b5a0dd;
+  background: linear-gradient(110deg, #3c34561c, transparent 75%), #1b243b;
+  box-shadow: none;
+  color: #c9c3db;
+  cursor: pointer;
+  transition: border-color .22s, background .22s, transform .22s;
+}
+body .title-hud-mask .title-record-sheet:hover:enabled,
+body .title-hud-mask .title-record-sheet:focus-visible {
+  border-color: #b9a4e27d;
+  border-left-color: #e0cbff;
+  background: linear-gradient(110deg, #8e71bf20, transparent 80%), #27334d;
+  transform: translateX(2px);
+  filter: none;
+  box-shadow: inset 0 0 20px #af91e008;
+  outline: none;
+}
+body .title-hud-mask .title-record-sheet:focus-visible { outline: 1px solid #d7c5ff; outline-offset: 1px; }
+body .title-hud-mask .record-number { font-size: 12px; color: #c1b0e0; letter-spacing: 2px; }
+body .title-hud-mask .title-record-sheet strong { font-size: 20px; font-weight: 500; color: #f4efff; letter-spacing: 1px; padding-right: 34px; }
+body .title-hud-mask .title-record-sheet > span:not(.record-number) { font-size: 13px; color: #d0cadd; }
+body .title-hud-mask .title-record-sheet time { font-size: 12px; color: #b2aec3; letter-spacing: .5px; }
+body .title-hud-mask .record-stamp { right: 24px; bottom: 31px; border: 0; padding: 0; font-size: 26px; font-weight: 400; color: #b6a2e14d; transform: none; }
+body .title-hud-mask .title-record-sheet:disabled { cursor: default; opacity: .8; }
+body .title-hud-mask .title-record-sheet.empty { min-height: 96px; opacity: 1; border-color: #7e73942e; border-left-color: #827897; background: #141b2d; }
+body .title-hud-mask .title-record-sheet.empty strong { color: #c6bfd8; font-size: 17px; }
+body .title-hud-mask .title-record-sheet.empty > span { color: #aaa5be; }
+body .title-hud-mask .records-panel footer { padding-top: 22px; gap: 24px; }
+body .title-hud-mask .records-panel footer p { font-size: 12px; color: #bbb3ce; line-height: 1.8; }
+body .title-hud-mask .record-rename { top: 13px; right: 17px; color: #c9b8e4; font-family: 'Microsoft YaHei', sans-serif; font-size: 12px; }
+body .title-hud-mask .record-rename:hover:enabled { color: #f6eeff; }
+body .title-hud-mask .record-rename:focus-visible { outline: 1px solid #c6b3ec; }
+body .title-hud-mask .title-rename-form { border-color: #a299c04d; color: #e0d5ef; }
+body .title-hud-mask .title-rename-form input { background: #0e1427; border-color: #a28bb766; color: #f1e7ff; font-family: 'Microsoft YaHei', sans-serif; }
+body .title-hud-mask .title-rename-form input:focus { border-color: #d7c0f5; box-shadow: 0 0 12px #a588d51a; }
+body .title-hud-mask .title-rename-form input::placeholder { color: #b8acc8; }
+body .title-hud-mask .title-rename-form p { color: #bfb4cf; }
+
+/* 首页音量设置：晶体滑块、银白细轨；默认游戏滑条完全保留。 */
+body .title-hud-mask .settings-panel { width: min(470px, 100%); }
+body .title-hud-mask .settings-panel h2 { margin: 15px 0 32px; }
+body .title-hud-mask .title-audio-settings { margin: 25px 0 32px; gap: 30px; }
+body .title-hud-mask .title-audio-settings label { font-family: 'Microsoft YaHei', sans-serif; color: #e3dbf1; font-size: 15px; letter-spacing: 2px; gap: 18px; }
+body .title-hud-mask .title-audio-settings small { color: #c5b7df; font-size: 12px; font-variant-numeric: tabular-nums; }
+body .title-hud-mask .title-audio-settings input { height: 3px; border: 0; background: linear-gradient(90deg, #9383b2, #524766); box-shadow: 0 0 10px #967cbc18; }
+body .title-hud-mask .title-audio-settings input::-webkit-slider-thumb { width: 11px; height: 11px; border: 1px solid #ddd0ff; background: #c5b6e7; transform: rotate(45deg); box-shadow: 0 0 11px #bea5ed66; }
+body .title-hud-mask .title-audio-settings input::-moz-range-thumb { width: 11px; height: 11px; border: 1px solid #ddd0ff; border-radius: 0; background: #c5b6e7; transform: rotate(45deg); box-shadow: 0 0 11px #bea5ed66; }
+body .title-hud-mask .title-audio-settings input:focus-visible { outline: 1px solid #9c87c3; outline-offset: 7px; }
+body .title-hud-mask .settings-panel > button { margin-top: 12px; }
+
+#app .title-hud-mask *::-webkit-scrollbar-track { background: #101427; border: 0; box-shadow: none; }
+#app .title-hud-mask *::-webkit-scrollbar-thumb { border: 2px solid #101427; background: #6e6088; }
+#app .title-hud-mask *::-webkit-scrollbar-thumb:hover { background: #a091be; }
+@media (max-width: 560px) {
+  body .title-hud-mask:is(.settings-mask,.records-mask,.confirm-mask) { padding: 16px; }
+  body .title-hud-mask .title-hud-panel { padding: 23px 20px; }
+  body .title-hud-mask .title-hud-panel h2 { font-size: 28px; }
+  body .title-hud-mask .title-record-sheet { padding: 15px; }
+  body .title-hud-mask .record-stamp { right: 14px; }
+  body .title-hud-mask .title-audio-settings label { gap: 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  body .title-hud-mask :is(.title-hud-action,.title-record-sheet) { transition: none; }
+}
