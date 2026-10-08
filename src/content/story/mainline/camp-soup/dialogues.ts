@@ -67,5 +67,5 @@ export const soupDeliveryTree: DialogueTree = {
 }
 
 // sd-02：史莱姆球入锅的喜剧桥段。
-bindStoryCG(potRepairTree, ['p9', 'p10', 'p11', 'p12', 'p13'], storyCGs.slimeWater)
+bindStoryCG(potRepairTree, ['p9'], storyCGs.slimeWater)
 

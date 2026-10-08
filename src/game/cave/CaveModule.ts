@@ -602,6 +602,7 @@ export class CaveModule implements IGameModule, PrologueHost {
     if (kind && this.fourth?.blocksInput) return
     if (kind) this.player.cancelCharge()
     this.panel = kind
+    this.director?.onPanelChanged(kind)
     if (kind === 'map' && !this.director) {
       this.markMapTutorialSeen()
       if (tutorial.current.value?.key === 'story.tut.map') tutorial.dismiss()
@@ -1237,6 +1238,7 @@ export class CaveModule implements IGameModule, PrologueHost {
     // B2：F 交互提示木牌（底部居中；面板/结算/营地黑场时隐藏）
     if (this.panel === null && !dialogue.isActive && !this.locked && this.fade === 'none' && this.blackAlpha < .05) {
       this.director?.renderTorchGuide(ctx, this.camera, engine.viewW, engine.viewH)
+      this.director?.renderMiningGuide(ctx, this.camera, engine.viewW, engine.viewH)
     }
     this.fourth?.renderScreen(ctx,engine.viewW,engine.viewH)
     const rawHint = this.current.interactHint

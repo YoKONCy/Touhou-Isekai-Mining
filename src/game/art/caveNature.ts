@@ -134,7 +134,7 @@ export class CaveNature {
     if(!p.done){
       const name:MineSprite=p.item===DROOP_FRUIT_ID?'plant-droop-fruit':p.item===MUSHROOM_ID?'plant-mushroom-0':p.item===FRAGRANT_MUSHROOM_ID?'plant-mushroom-1':p.item===FORGET_ME_NOT_ID?'plant-forget-me-not':p.item===CLOVER_ID?'plant-clover':p.item===FLAX_ID?'plant-flax':'plant-herb'
       const width=p.item===MUSHROOM_ID||p.item===FRAGRANT_MUSHROOM_ID?30:32,height=width*(name.startsWith('plant-mushroom')?.75:1)
-      if(drawMineDetail(g,name,p.x,p.y+4,width,height))return
+      if(drawMineDetail(g,name,p.x,p.y+4,width,height,true))return
     }
     g.save();g.translate(p.x,p.y)
     g.lineJoin='round'
@@ -235,7 +235,7 @@ export class CaveNature {
     g.restore()
   }
   renderWood(g:CanvasRenderingContext2D,p:WoodRemnant):void{
-    if(drawMineDetail(g,(['wood-remnant-0','wood-remnant-1','wood-remnant-2'] as const)[p.kind%3]!,p.x,p.y+4,60,42))return
+    if(drawMineDetail(g,(['wood-remnant-0','wood-remnant-1','wood-remnant-2'] as const)[p.kind%3]!,p.x,p.y+4,60,42,p.hp>0))return
     g.save();g.translate(p.x,p.y);g.fillStyle='#15152244';g.beginPath();g.ellipse(0,2,27,7,0,0,Math.PI*2);g.fill()
     g.strokeStyle='#302735';g.lineWidth=1.5;g.lineJoin='round'
     const face=(pts:number[][],c:string)=>{g.beginPath();pts.forEach(([x,y],i)=>i?g.lineTo(x,y):g.moveTo(x,y));g.closePath();g.fillStyle=c;g.fill();g.stroke()}

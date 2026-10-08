@@ -61,29 +61,46 @@ const requestedCG=computed(()=>resolveDialogueCG(dialogue.state.value?.node))
 const visibleCG=ref<DialogueCG>()
 const cgOnStage=ref(false)
 let cgHoldTimer=0
+let cgLoadTimer=0
+let cgSequence=0
 let cgSceneFinished=false
 const CG_HOLD_MS=2800
 function clearCGHold():void {if(cgHoldTimer)window.clearTimeout(cgHoldTimer);cgHoldTimer=0}
-// 同一CG跨连续台词只演一次；对话结束后，独立的演出层仍可完成向左退场。
+function clearCGLoad():void {if(cgLoadTimer)window.clearTimeout(cgLoadTimer);cgLoadTimer=0}
+// 每张 CG 独占当前旁白的演出节拍，加载、停留、左侧退场全部结束后才释放推进。
 watch([
+  ()=>dialogue.seq.value,
   ()=>requestedCG.value?.src,
   ()=>requestedCG.value?loadedPortraits.value[requestedCG.value.src]:false
-],([src,ready],[previousSrc])=>{
-  if(src!==previousSrc){clearCGHold();cgSceneFinished=false;visibleCG.value=undefined}
-  if(!src||!ready||cgSceneFinished){visibleCG.value=undefined;return}
+],([sequence,src,ready],[previousSequence,previousSrc])=>{
+  if(sequence!==previousSequence||src!==previousSrc){clearCGHold();clearCGLoad();cgSequence=sequence;cgSceneFinished=false;visibleCG.value=undefined}
+  if(!src||cgSceneFinished){visibleCG.value=undefined;return}
+  if(ready===false){cgSceneFinished=true;visibleCG.value=undefined;clearCGLoad();if(!cgOnStage.value)dialogue.finishCG(sequence);return}
+  if(!ready){
+    if(!cgLoadTimer)cgLoadTimer=window.setTimeout(()=>{
+      cgLoadTimer=0
+      if(cgSequence!==sequence||cgOnStage.value)return
+      cgSceneFinished=true;dialogue.finishCG(sequence)
+    },15000)
+    return
+  }
+  clearCGLoad()
   visibleCG.value=requestedCG.value
 },{immediate:true})
 function cgEntered(element:Element):void {
-  const src=element.getAttribute('data-cg-src')
-  if(!src||visibleCG.value?.src!==src)return
+  const src=element.getAttribute('data-cg-src'),sequence=Number(element.getAttribute('data-cg-sequence'))
+  if(!src||visibleCG.value?.src!==src||sequence!==cgSequence)return
   clearCGHold()
   cgHoldTimer=window.setTimeout(()=>{
     cgHoldTimer=0
-    if(visibleCG.value?.src!==src)return
+    if(visibleCG.value?.src!==src||sequence!==cgSequence)return
     cgSceneFinished=true;visibleCG.value=undefined
   },CG_HOLD_MS)
 }
-function cgLeft():void {if(!visibleCG.value)cgOnStage.value=false}
+function cgLeft(element:Element):void {
+  if(!visibleCG.value)cgOnStage.value=false
+  dialogue.finishCG(Number(element.getAttribute('data-cg-sequence')))
+}
 const portraits = computed(() => cgOnStage.value?[]:resolvePortraits(dialogue.state.value?.node))
 function portraitReady(event: Event): void {
   const src = (event.target as HTMLImageElement).getAttribute('src')
@@ -149,6 +166,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKey, true)
   clearType()
   clearCGHold()
+  clearCGLoad()
 })
 </script>
 
@@ -157,7 +175,7 @@ onBeforeUnmount(() => {
   <div class="dlg-cg-layer" aria-hidden="true">
     <img v-if="requestedCG" class="dlg-cg-preload" :src="requestedCG.src" alt="" @load="portraitReady" @error="portraitFailed"/>
     <Transition name="dlg-cg-slide" @before-enter="cgOnStage=true" @after-enter="cgEntered" @after-leave="cgLeft">
-      <div v-if="visibleCG" :key="visibleCG.src" class="dlg-cg" :data-cg-src="visibleCG.src">
+      <div v-if="visibleCG" :key="`${cgSequence}:${visibleCG.src}`" class="dlg-cg" :data-cg-src="visibleCG.src" :data-cg-sequence="cgSequence">
         <img :src="visibleCG.src" alt="" draggable="false" @click="proceed"/>
       </div>
     </Transition>

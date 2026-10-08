@@ -24,25 +24,14 @@ import type { ScriptedRoomSpec } from './dungeon/script'
 import type { Player } from '../Player'
 import { CONFIG } from '../config'
 import { sfx } from '../audio/Sfx'
+import type { UIPanelKind } from '../gameEvents'
 import {
   PROOT,
   BREAK_IN,
   REIMU_POS,
-  CAMPFIRE_POS,
-  BASE_REIMU_POS,
-  BASE_POT_POS,
-  BASE_LANTERN_POS,
-  BASE_CRATE_A,
-  BASE_CRATE_B,
-  BASE_BED_POS,
-  BASE_WALK_PATH,
   prologueRoomSpecs
 } from './prologue/prologueFloor'
-import { drawBedroll, drawCampfire, drawCrate, drawLantern, drawOldPot } from './prologue/baseProps'
 import { createReimuNpc, type ReimuNpc } from './prologue/reimuNpc'
-
-/** 基地主角脚本走位速度（px/秒；约 4 秒走完三段路径） */
-const BASE_WALK_SPEED = 150
 
 /** 导演驱动矿洞模块所需的最小接口（CaveModule 实现，避免双向硬依赖） */
 export interface PrologueHost {
@@ -88,9 +77,6 @@ type Step =
   | 'S10_TALK'
   | 'CAMP_BLACKOUT'
   | 'CAMP_WALK'
-  | 'BASE_REVEAL'
-  | 'BASE_TALK'
-  | 'BASE_FREE'
   | 'DOWN'
   | 'DONE'
 
@@ -125,6 +111,9 @@ export class PrologueDirector {
   private startX = 0
   private startY = 0
   private rocksHit = 0
+  private bagOpened = false
+  private miningHintShown = false
+  private miningHintWait = 0
   /** 显影计时（-1＝未启动；启动后 veil/blurPx 随时间渐变） */
   private revealT = -1
   /** S2 破门计时与刷怪闸门 */
@@ -133,11 +122,6 @@ export class PrologueDirector {
   private reimu: ReimuNpc | null = null
   private downed = false
 
-  // —— 基地主角脚本走位（显影期间沿 basePts 逐段插值，与开场对白并行） ——
-  private basePts: Array<{ x: number; y: number }> = []
-  private baseSeg = 0
-  private baseSegT = 0
-  private baseWalking = false
   private torchGuideId: number | null = null
 
   constructor(private readonly host: PrologueHost) {}
@@ -158,7 +142,24 @@ export class PrologueDirector {
       this.torchGuideId = target?.id ?? null
     }
     if (!target) return
-    const sx = (target.x - Math.round(camera.x)) * camera.zoom, sy = (target.y - Math.round(camera.y)) * camera.zoom
+    this.drawTargetGuide(g, camera, width, height, target.x, target.y, 'story.tut.torch_location')
+  }
+
+  /** 第一次挖矿指向最近的可破坏岩石，屏外目标仍显示方向。 */
+  renderMiningGuide(g: CanvasRenderingContext2D, camera: Camera, width: number, height: number): void {
+    if (this.step !== 'S1_MINE' || !this.miningHintShown) return
+    let nearest: { x: number; y: number; distance: number } | undefined
+    this.host.room.map.forEachOre(ore => {
+      if (ore.vein !== 'rock') return
+      const x = (ore.col + .5) * CONFIG.tile + ore.offsetX, y = (ore.row + .5) * CONFIG.tile + ore.offsetY
+      const distance = (x - this.host.player.x) ** 2 + (y - this.host.player.y) ** 2
+      if (!nearest || distance < nearest.distance) nearest = { x, y, distance }
+    })
+    if (nearest) this.drawTargetGuide(g, camera, width, height, nearest.x, nearest.y, 'story.tut.mine_location')
+  }
+
+  private drawTargetGuide(g: CanvasRenderingContext2D, camera: Camera, width: number, height: number, worldX: number, worldY: number, labelKey: string): void {
+    const sx = (worldX - Math.round(camera.x)) * camera.zoom, sy = (worldY - Math.round(camera.y)) * camera.zoom
     const x = Math.max(40, Math.min(width - 40, sx)), y = Math.max(88, Math.min(height - 140, sy))
     const offscreen = sx !== x || sy !== y
     const pulse = Math.sin(performance.now() / 210)
@@ -171,7 +172,7 @@ export class PrologueDirector {
     else { g.translate(0, -30 - pulse * 3); g.rotate(Math.PI / 2) }
     g.beginPath(); g.moveTo(9, 0); g.lineTo(-5, -6); g.lineTo(-2, 0); g.lineTo(-5, 6); g.closePath(); g.fill(); g.restore()
     g.shadowBlur = 0; g.font = '13px zpix, monospace'
-    const label = t('story.tut.torch_location'), labelWidth = g.measureText(label).width + 20
+    const label = t(labelKey), labelWidth = g.measureText(label).width + 20
     const labelX = Math.max(12, Math.min(width - labelWidth - 12, x - labelWidth / 2))
     g.fillStyle = '#151016ee'; g.fillRect(labelX, y + 24, labelWidth, 26)
     g.strokeStyle = '#c5a57977'; g.lineWidth = 1; g.strokeRect(labelX, y + 24, labelWidth, 26)
@@ -236,8 +237,8 @@ export class PrologueDirector {
     } else if (roomId === PROOT.REIMU) {
       this.beginReimuEncounter()
     } else if (roomId === PROOT.BASE) {
-      // 黑场行路终点：布景、立灵梦、显影并开始脚本走位（对白 0.5s 后开演）
-      this.setupBase()
+      // 兼容旧序章房间编号；所有基地演出统一交给正式基地，不再绘制旧摆件房。
+      this.beginBase()
     }
   }
 
@@ -245,13 +246,14 @@ export class PrologueDirector {
   onInteract(it: Interactable): void {
     if (this.step === 'S1_PICK' && it.ref === 'pick') {
       // 先切到镐手持（对白期间手里就拿着镐）；端详链播完先提示看囊袋，
-      // 玩家敲下第一锤时再切挖矿教学（袋子里的家当刚入手，趁热认背包）
+      // 看过囊袋后直接接挖矿教学，不要求玩家先猜出挖矿操作。
       this.host.setHand(2)
       tutorial.dismiss()
       this.step = 'S1_LOOK'
       dialogue.start(PROLOGUE_TREE, PNODE.S1B, () => {
         tutorial.show('story.tut.bag', { durationMs: PERSIST_MS })
         this.rocksHit = 0
+        this.bagOpened = false; this.miningHintShown = false; this.miningHintWait = 0
         this.step = 'S1_MINE'
       })
     } else if (this.step === 'S3_TORCH' && it.kind === 'torch') {
@@ -281,13 +283,27 @@ export class PrologueDirector {
     }
   }
 
+  /** 面板实际打开/关闭后推进教学，键盘、关闭按钮与其他关闭方式共用这个入口。 */
+  onPanelChanged(kind: UIPanelKind | null): void {
+    if (this.step !== 'S1_MINE') return
+    if (kind === 'inventory' && !this.miningHintShown) {
+      this.bagOpened = true
+      tutorial.show('story.tut.bag_close', { durationMs: PERSIST_MS })
+    } else if (kind === null && this.bagOpened) this.showMiningHint()
+  }
+
+  private showMiningHint(): void {
+    if (this.miningHintShown && tutorial.current.value?.key === 'story.tut.mine' && tutorial.current.value.params?.count === this.rocksHit) return
+    this.miningHintShown = true
+    tutorial.show('story.tut.mine', { durationMs: PERSIST_MS, params: { count: this.rocksHit } })
+  }
+
   /** 敲矿回调（CaveModule host.onMine 转发） */
   notifyMine(kind: 'rock' | 'ore'): void {
     if (this.step !== 'S1_MINE') return
-    // 第一锤落下：背包提示让位给挖矿教学（岩石/显矿簇都算数）
-    if (this.rocksHit === 0) tutorial.show('story.tut.mine', { durationMs: PERSIST_MS })
     if (kind === 'rock') this.rocksHit++
     if (this.rocksHit >= 2) this.beginBreakIn()
+    else this.showMiningHint()
   }
 
   /**
@@ -314,16 +330,11 @@ export class PrologueDirector {
   }
 
   /**
-   * 剧情出口被踏入（基地东门）：仅对白全部结束、东门解封后的 BASE_FREE 态生效。
-   * 落 prologue.done 标记并交 CaveModule 收尾（名册/符卡/落盘 → 正式第一层）。
+   * 兼容旧基地出口；序章完成标记与基地对白统一由正式基地模块结算。
    */
-  onStoryExit(_ref: string): void {
-    if (this.step !== 'BASE_FREE') return
-    this.host.setStoryLock(true)
-    tutorial.dismiss()
-    this.host.profile.setFlag('prologue.done', true)
-    this.step = 'DONE'
-    this.host.onPrologueFinished()
+  onStoryExit(ref: string): void {
+    if (this.step === 'DONE' || (ref !== 'base_east' && ref !== 'base')) return
+    this.beginBase()
   }
 
   /** 每帧驱动（CaveModule 在各玩法分支中统一调用） */
@@ -337,6 +348,11 @@ export class PrologueDirector {
       case 'S0_MOVE':
         // 移动 240px（约 5 个瓦片）才触发发现镐子——给足苏醒后走动探索的时间
         if (Math.hypot(player.x - this.startX, player.y - this.startY) > 240) this.beginS1()
+        break
+      case 'S1_MINE':
+        this.miningHintWait += dt
+        // 背包不是推进条件；犹豫太久或关掉提示时仍给出下一步，避免卡住教学。
+        if ((!this.miningHintShown && this.miningHintWait >= 8) || (this.miningHintShown && !tutorial.current.value)) this.showMiningHint()
         break
       case 'S2_TALK':
         // 拟声句期间：到点撞破东门，刷出史莱姆并冻住（惊呼句读完才解冻开打）
@@ -386,21 +402,6 @@ export class PrologueDirector {
         break
       case 'CAMP_WALK':
         // 对白推进与静默计时全在对话系统，这里空转等结束回调
-        break
-      case 'BASE_REVEAL':
-        // 显影中同步脚本走位；0.5s 后世界已浮起轮廓，开第一句
-        this.tickBaseWalk(dt)
-        if (this.t > 0.5) {
-          this.step = 'BASE_TALK'
-          dialogue.start(PROLOGUE_TREE, PNODE.BASE_H_1, () => this.beginBaseFree())
-        }
-        break
-      case 'BASE_TALK':
-        // 走位与长对白并行，对白结束回调切 BASE_FREE
-        this.tickBaseWalk(dt)
-        break
-      case 'BASE_FREE':
-        // 自由操作：玩家自行走到东门口触发 onStoryExit
         break
       default:
         break
@@ -594,99 +595,11 @@ export class PrologueDirector {
   }
 
   /**
-   * 基地：黑场中静默切入基地房（veil 仍全黑），enterRoom 的 onRoomEnter 钩子
-   * 会调 setupBase 完成布景/显影；这里只负责切房。
+   * 黑场行路结束后直接交给正式基地；显影、站位、对白与新基地资源共用同一入口。
    */
   private beginBase(): void {
     this.step = 'DONE'
     this.host.onPrologueFinished(true)
   }
 
-  /**
-   * 基地房首次进入：注册手绘摆件与篝火光源、立灵梦 NPC，
-   * 启动黑→模糊→清晰显影与主角脚本走位；东/西门此时皆为红色封印态。
-   */
-  private setupBase(): void {
-    const room = this.host.room
-    const player = this.host.player
-
-    // —— 手绘摆件（参与全屋 y-sort；注册顺序无关，渲染按 y 重排） ——
-    room.addSortable(BASE_BED_POS.y + 10, (ctx) => drawBedroll(ctx, BASE_BED_POS.x, BASE_BED_POS.y))
-    room.addSortable(BASE_CRATE_B.y + 16, (ctx) => drawCrate(ctx, BASE_CRATE_B.x, BASE_CRATE_B.y, 30))
-    room.addSortable(BASE_CRATE_A.y + 16, (ctx) => drawCrate(ctx, BASE_CRATE_A.x, BASE_CRATE_A.y, 36))
-    room.addSortable(BASE_LANTERN_POS.y + 6, (ctx, time) => drawLantern(ctx, BASE_LANTERN_POS.x, BASE_LANTERN_POS.y, time))
-    room.addSortable(BASE_POT_POS.y + 12, (ctx) => drawOldPot(ctx, BASE_POT_POS.x, BASE_POT_POS.y))
-    room.addSortable(CAMPFIRE_POS.y + 12, (ctx, time) => drawCampfire(ctx, CAMPFIRE_POS.x, CAMPFIRE_POS.y, time))
-    // 篝火主光源（暖橙大范围）+ 一点核心强光照亮围坐的两人
-    room.addCustomLight(CAMPFIRE_POS.x, CAMPFIRE_POS.y - 12, 210, 1.05, '#ff9a3c', 0.2)
-    room.addCustomLight(CAMPFIRE_POS.x, CAMPFIRE_POS.y - 14, 110, 0.5, '#ffd28a', 0.12)
-
-    // 灵梦站到篝火东北侧（占位贴图，本轮不换）
-    const reimu = createReimuNpc(BASE_REIMU_POS.x, BASE_REIMU_POS.y)
-    this.reimu = reimu
-    room.addSortable(BASE_REIMU_POS.y, (ctx, time) => reimu.draw(ctx, time))
-
-    // 输入锁死、显影、走位起点＝西门落点（enterRoom 已把玩家放到西门内侧）
-    this.host.setStoryLock(true)
-    this.veil = 1
-    this.revealT = 0
-    this.startBaseWalk(player.x, player.y)
-    this.t = 0
-    this.step = 'BASE_REVEAL'
-  }
-
-  /** 初始化走位：起点＋三个路径点，逐段等速直线行进 */
-  private startBaseWalk(x0: number, y0: number): void {
-    this.basePts = [{ x: x0, y: y0 }, ...BASE_WALK_PATH.map((p) => ({ x: p.x, y: p.y }))]
-    this.baseSeg = 0
-    this.baseSegT = 0
-    this.baseWalking = true
-  }
-
-  /**
-   * 走位推进（每段按 BASE_WALK_SPEED 等速插值）：
-   * 直接写 player.x/y，并把 vx/vy/facing 同步成行进值——
-   * player 物理当帧已先跑过（输入为空），位置被拉回脚本路径，速度只用于走路姿态。
-   */
-  private tickBaseWalk(dt: number): void {
-    if (!this.baseWalking) return
-    const player = this.host.player
-    const b = this.basePts[this.baseSeg + 1]
-    if (!b) {
-      this.baseWalking = false
-      player.vx = 0
-      player.vy = 0
-      return
-    }
-    const a = this.basePts[this.baseSeg]
-    const dist = Math.hypot(b.x - a.x, b.y - a.y)
-    const dur = Math.max(0.01, dist / BASE_WALK_SPEED)
-    this.baseSegT += dt
-    const k = Math.min(1, this.baseSegT / dur)
-    const nx = a.x + (b.x - a.x) * k
-    const ny = a.y + (b.y - a.y) * k
-    player.vx = (nx - player.x) / Math.max(dt, 0.0001)
-    player.vy = (ny - player.y) / Math.max(dt, 0.0001)
-    player.x = nx
-    player.y = ny
-    player.facing = Math.atan2(b.y - a.y, b.x - a.x)
-    if (k >= 1) {
-      this.baseSeg++
-      this.baseSegT = 0
-      if (this.baseSeg >= this.basePts.length - 1) {
-        // 走完整条路径：停下，面朝屏幕正上方（背对镜头的背面像，像在眺望篝火与基地深处）
-        this.baseWalking = false
-        player.vx = 0
-        player.vy = 0
-        player.facing = -Math.PI / 2
-      }
-    }
-  }
-
-  /** 营地长对白全部播完：落完成标记并移交独立基地。 */
-  private beginBaseFree(): void {
-    this.step = 'BASE_FREE'
-    // 对白结束即移交独立基地，洞口出发留给基地模块处理。
-    this.onStoryExit('base')
-  }
 }

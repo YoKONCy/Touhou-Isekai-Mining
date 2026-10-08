@@ -4,6 +4,7 @@ import './content/vanillaPack'
 import './content/story'
 import { loadMods } from './content/mods/loader'
 import RootApp from './RootApp.vue'
+import { registerResourceCache } from './browser/resourceCache'
 import './styles.css'
 import './ui/game-ui.css'
 import './ui/hud-theme.css'
@@ -18,6 +19,7 @@ async function bootstrap(): Promise<void> {
   await loadMods()
   // 标题页不建档、不运行玩法；玩家启程后再加载场景与角色。
   createApp(RootApp).mount('#app')
+  registerResourceCache()
 }
 
 void bootstrap()

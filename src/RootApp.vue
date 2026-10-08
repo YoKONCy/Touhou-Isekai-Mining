@@ -6,6 +6,7 @@ import type { CharacterProfile } from './shared/profile'
 import { setPlayerAppearance } from './shared/playerAppearance'
 import { dialogue } from './game/dialogue/dialogueService'
 import { loadMineAssets } from './game/art/mineAssets'
+import { loadCampArtwork } from './game/art/campArtwork'
 import { loadPlayerRigAssets } from './game/art/rig/playerRig'
 import { sfx, type AudioSettings as AudioSettingsValues } from './game/audio/Sfx'
 import { t } from './i18n'
@@ -64,9 +65,9 @@ async function start(next: CharacterProfile): Promise<void> {
     phase.value = 'black'
     profile.value = null
     await nextTick()
-    const [mapReady, rigReady] = await Promise.all([loadMineAssets(), loadPlayerRigAssets(next.playerAppearance), transitionDelay(220)])
+    const [mapReady, rigReady, campReady] = await Promise.all([loadMineAssets(), loadPlayerRigAssets(next.playerAppearance), loadCampArtwork(), transitionDelay(220)])
     if (disposed) return
-    if (!mapReady || !rigReady) throw new Error('场景或角色资源未加载完成')
+    if (!mapReady || !rigReady || !campReady) throw new Error('矿洞、基地或角色资源未加载完成')
     setPlayerAppearance(next.playerAppearance)
     dialogue.setProfile(next)
     profile.value = next

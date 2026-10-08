@@ -8,6 +8,7 @@ let pending: Promise<boolean> | undefined
 let revision = 0
 
 export function campArtworkRevision(): number { return revision }
+export function campArtworkReady(): boolean { return !!ground && !!facilities }
 
 /** 两张资源全部就绪再切换场景，避免半张新背景配旧家具。 */
 export function loadCampArtwork(): Promise<boolean> {
@@ -24,7 +25,7 @@ export function loadCampArtwork(): Promise<boolean> {
   pending = Promise.all([load('ground'), load('facilities')]).then(([base, objects]) => {
     ground = base; facilities = objects; revision++
     return true
-  }).catch(error => { pending = undefined; console.warn('基地新美术暂未就绪，继续显示原场景。', error); return false })
+  }).catch(error => { pending = undefined; console.warn('基地资源加载失败，等待重试。', error); return false })
   return pending
 }
 

@@ -16,7 +16,7 @@ import { TileMap } from './tilemap'
 import { PlayerAnimator } from './art/rig/playerAnims'
 import { drawReimuRig } from './art/rig/reimuRig'
 import { CAMP_ENTITIES, CAMP_FACILITIES, CAMP_NPC_ANCHOR, CAMP_SCENERY_SOLIDS, campInside, campContainsCircle, drawCampGround, drawCampEntity, drawCampShadow, drawCampAtmosphere } from './art/campScene'
-import { loadCampArtwork, campArtworkRevision } from './art/campArtwork'
+import { loadCampArtwork, campArtworkRevision, campArtworkReady } from './art/campArtwork'
 import type { CampEntity } from './art/campScene'
 import { tutorial } from './dialogue/tutorial'
 import { sfx } from './audio/Sfx'
@@ -315,6 +315,8 @@ export class BaseModule extends CharacterModuleActions implements IGameModule {
     return { title: t(nearest.kind==='stove'&&this.character.smelting?.state==='ready'?'ui.production.claim':title), text: nearest.text ? t(nearest.text) : '', kind: nearest.kind }
   }
   update(dt:number,engine:EngineContext):void {
+    // 新基地尚未就绪时不开始入场对白与走位，也不把旧画面烘焙进缓存。
+    if(!campArtworkReady())return
     const input=engine.input
     if(this.deathStage==='none'&&this.fourth?.update(dt)){this.time+=dt;return}
     if(this.deathStage!=='none'){
@@ -365,6 +367,7 @@ export class BaseModule extends CharacterModuleActions implements IGameModule {
     if(point&&input.actionPressed('interact')){this.character.setFlag('tutorial.base.interacted',true);tutorial.dismiss();sfx.ensure();if(point.kind==='rumia'){this.fourth?.talk(()=>{this.message=t('story.fourth.fifth_opened');this.messageTime=8});return}if(point.kind==='exit'){if(this.fourth?.blockDeparture())return;if(canEnterMineFloor(this.character,2))this.setPanel('floors');else this.enterMineFloor(1);return}if(point.kind==='npc'){this.setPanel('npc');return}if(point.kind==='box'){this.setPanel('storage');return}if(point.kind==='pot'){this.setPanel('cooking');return}if(point.kind==='table'){this.interactWorktable();return}if(point.kind==='stove'){this.interactFurnace();return}if(point.kind==='radio'){sfx.radioClick();this.ctx.bus.emit('base:now-playing',sfx.nextBaseTrack());return}this.message=point.text;this.messageTime=10}
   }
   render(g:CanvasRenderingContext2D,engine:EngineContext):void {
+    if(!campArtworkReady()){g.fillStyle='#15131e';g.fillRect(0,0,engine.viewW,engine.viewH);return}
     this.scale=Math.min(engine.viewW/1440,engine.viewH/960);this.offsetX=(engine.viewW-1440*this.scale)/2;this.offsetY=(engine.viewH-960*this.scale)/2
     g.fillStyle='#15131e';g.fillRect(0,0,engine.viewW,engine.viewH);g.save();g.translate(this.offsetX,this.offsetY);g.scale(this.scale,this.scale)
     // 资源异步就绪后一次性重建地面与设施缓存，不能把加载前的过渡画面永久烘焙。

@@ -12,8 +12,8 @@ export const RELAY_REPORT_TREE = 'touhou:mine_relay_report'
 
 const metal = sequence(METAL_FIRST_TREE, 'story.mineRelay.metal', ['narration', 'hero', 'reimu', 'hero', 'reimu', 'narration', 'hero', 'reimu', 'reimu'])
 // sd-03：第一炉金属锭的烫手桥段，不能挂到序章营地拌嘴。
-bindStoryCG(metal, ['s5', 's6', 's7', 's8', 's9'], storyCGs.hotIngot)
-metal.nodes.s7.onEnter = () => sfx.hotIngot()
+bindStoryCG(metal, ['s6'], storyCGs.hotIngot)
+metal.nodes.s6.onEnter = () => sfx.hotIngot()
 metal.nodes.s8.autoNextMs = 950
 const intro = sequence(RELAY_INTRO_TREE, 'story.mineRelay.intro', ['narration', 'narration', 'narration'])
 intro.nodes.s1.onEnter = () => sfx.mineDistant()

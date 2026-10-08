@@ -16,7 +16,7 @@ export function drawSharedMineral(g:CanvasRenderingContext2D,ore:OreTile,a:OrePa
   const name=mineralSprites[ore.kind]
   if(!name)return false
   const x=(ore.col+.5)*CONFIG.tile+ore.offsetX,y=(ore.row+.5)*CONFIG.tile+ore.offsetY
-  if(!drawMineSprite(g,name,x-32,y-32,64,64))return false
+  if(!drawMineSprite(g,name,x-32,y-32,64,64,undefined,0,true))return false
   const wear=1-ore.hp/ore.maxHp
   g.save();g.translate(x,y)
   if(wear>.22){seam(g,[[-9,-5],[-3,-2],[-5,3],[0,7],[-1,13]],`rgba(40,33,46,${wear*.85})`,.8);if(wear>.6)seam(g,[[-4,1],[4,-3],[7,-7]],'#38303b99',.6)}
@@ -179,7 +179,7 @@ export function drawSceneMetal(g:CanvasRenderingContext2D,ore:OreTile,form:Metal
 /** 岩石材质各自拥有轮廓：块状花岗岩、层理砂岩与片状板岩。 */
 export function drawSceneStone(g:CanvasRenderingContext2D,ore:OreTile):void{
   const x=(ore.col+.5)*CONFIG.tile+ore.offsetX,y=(ore.row+.5)*CONFIG.tile+ore.offsetY,h=hash2(ore.col*3,ore.row*7)
-  if(drawMineStone(g,ore.rockMat,x,y,.97+h*.06))return
+  if(drawMineStone(g,ore.rockMat,x,y,.97+h*.06,true))return
   g.save();g.translate(x,y);g.scale(.94+hash2(ore.row*7,ore.col)*.09,.94+h*.07);g.lineJoin='round';g.lineCap='round'
   g.fillStyle='#211c2540';g.beginPath();g.ellipse(0,17,22,5,0,0,Math.PI*2);g.fill()
   if(ore.rockMat===0){

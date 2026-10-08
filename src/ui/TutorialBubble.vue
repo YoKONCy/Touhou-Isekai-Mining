@@ -67,7 +67,7 @@ const segments = computed<Seg[]>(() => {
   font-size: 15px;
   letter-spacing: 2px;
   line-height: 1.5;
-  white-space: nowrap;
+  white-space: normal;
   z-index: 30;
   cursor: pointer;
   pointer-events: auto;

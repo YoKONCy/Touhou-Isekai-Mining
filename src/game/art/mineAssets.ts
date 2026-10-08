@@ -1,4 +1,5 @@
 import atlasLayout from '../../../public/scenes/mine/atlas.json'
+import { drawCollectibleHighlight } from './collectibleHighlight'
 
 export type MineSprite = keyof typeof atlasLayout.parts
 let atlas: HTMLImageElement | undefined
@@ -26,7 +27,7 @@ export function mineFloorTexture(): HTMLImageElement | undefined { return floor 
 export function mineAssetsReady(): boolean { return !!atlas && !!floor }
 
 /** 群系着色只烘焙一次；所有实例仍从同一图集取材。 */
-export function drawMineSprite(g: CanvasRenderingContext2D, name: MineSprite, x: number, y: number, width: number, height: number, tint?: string, strength = 0): boolean {
+export function drawMineSprite(g: CanvasRenderingContext2D, name: MineSprite, x: number, y: number, width: number, height: number, tint?: string, strength = 0, collectible = false): boolean {
   if (!atlas) return false
   const p = atlasLayout.parts[name]
   // 切片仍用原始坐标；图片降低分辨率或恢复原件时按实际尺寸自动换算。
@@ -46,11 +47,13 @@ export function drawMineSprite(g: CanvasRenderingContext2D, name: MineSprite, x:
     }
     g.drawImage(stamp, x, y, width, height)
   } else g.drawImage(atlas, sx, sy, sw, sh, x, y, width, height)
+  if (collectible) drawCollectibleHighlight(g, name, x, y, width, height,
+    ctx => ctx.drawImage(atlas!, sx, sy, sw, sh, 0, 0, width, height))
   g.restore(); return true
 }
 
 /** 天然岩体用于摆件、墙脚装饰与可挖矿块，尺寸和碰撞分别由各自契约决定。 */
-export function drawMineStone(g: CanvasRenderingContext2D, variant: 0 | 1 | 2, x: number, y: number, scale = 1): boolean {
+export function drawMineStone(g: CanvasRenderingContext2D, variant: 0 | 1 | 2, x: number, y: number, scale = 1, collectible = false): boolean {
   const name = (['stone-granite','stone-sandstone','stone-slate'] as const)[variant]
-  return drawMineSprite(g, name, x - 22 * scale, y - 20 * scale, 44 * scale, 38 * scale)
+  return drawMineSprite(g, name, x - 22 * scale, y - 20 * scale, 44 * scale, 38 * scale, undefined, 0, collectible)
 }

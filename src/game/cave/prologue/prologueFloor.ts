@@ -1,9 +1,9 @@
 /**
- * 序章固定楼层：6 房直线链（醒来房 → 战斗教学 → 矿房 → 动静过场房 → 灵梦房 → 基地）
+ * 序章固定楼层：五个矿洞房间，末尾保留旧基地房间编号用于兼容。
  *
  * 纯手工 FloorPlan（不走 BSP），坐标按 CONFIG 30×20 格 × 48px 排布；
  * 每房的 ScriptedRoomSpec 决定刷怪/火把/门控，导演按房间 id 推进剧情。
- * 基地（R5）为常亮安全房：西门封印、东墙挂剧情出口门，踏入即转正式第一层。
+ * 基地演出统一由 BaseModule 使用正式新基地；旧 R5 入口直接转交，不绘制旧基地。
  */
 import { CONFIG } from '../../config'
 import { SLIME_BLUE_ID, SLIME_RED_ID, VENOM_GREEN_ID } from '../../../content/enemies/vanilla/ids'

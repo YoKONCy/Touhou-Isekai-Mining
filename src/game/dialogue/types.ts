@@ -70,7 +70,7 @@ export interface DialogueNode {
   portrait?: DialoguePortrait
   /** 本人图库中的情绪键；未知键回退本人基准。 */
   portraitEmotion?: string
-  /** 节点可显式声明CG，仍沿用原有对话推进与旁白规则。 */
+  /** CG 只用于无说话人的旁白/停顿节点，退场完成后才允许推进下一句。 */
   cg?: DialogueCG
   /** 台词 i18n 键；支持 {name} 形式插值（由 params 提供） */
   text?: string

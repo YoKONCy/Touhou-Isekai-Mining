@@ -12,6 +12,7 @@ import { ref, type Ref } from 'vue'
 import type { CharacterProfile } from '../../shared/profile'
 import { applyEffect } from './effects'
 import { setPlayerNameProvider } from '../../i18n'
+import { resolveDialogueCG } from './dialogueCG'
 import type {
   DialogueApi,
   DialogueChoice,
@@ -41,6 +42,8 @@ class DialogueService {
   private autoTimer = 0
   /** 自动停顿静默期（响应式：为真时点击/按键不得推进、Overlay 隐藏继续提示） */
   private readonly autoLockedR = ref(false)
+  private cgPending = false
+  private cgAdvanceQueued = false
 
   /** 注入角色档案（App 启动时） */
   setProfile(profile: CharacterProfile): void {
@@ -119,6 +122,8 @@ class DialogueService {
     const s = this.state.value
     if (!s) return
     if (this.autoLockedR.value) return
+    // 先记住玩家的继续请求，等 CG 完整退场再进入下一句，避免角色对白与插图重叠。
+    if (this.cgPending) { this.cgAdvanceQueued = true; return }
     if (s.choices.length > 0) return
     const next = s.node.next
     const tree = this.trees.get(s.treeId)!
@@ -126,8 +131,16 @@ class DialogueService {
     else this.end()
   }
 
+  /** 展示层在 CG 退场（或加载失败）后释放当前节点；旧节点的回调不能推进新剧情。 */
+  finishCG(sequence: number): void {
+    if (sequence !== this.seq.value || !this.cgPending) return
+    this.cgPending = false
+    if (this.cgAdvanceQueued) { this.cgAdvanceQueued = false; this.advance() }
+  }
+
   /** 选择一个选项（索引为已过滤后的可见选项序号） */
   choose(index: number): void {
+    if (this.cgPending) return
     const s = this.state.value
     if (!s) return
     const choice = s.choices[index]
@@ -145,6 +158,7 @@ class DialogueService {
       this.autoTimer = 0
     }
     this.autoLockedR.value = false
+    this.cgPending = false; this.cgAdvanceQueued = false
     this.state.value = null
     const cb = this.endCallback
     this.endCallback = null
@@ -172,6 +186,8 @@ class DialogueService {
       this.end()
       return
     }
+    this.cgPending = !!resolveDialogueCG(node)
+    this.cgAdvanceQueued = false
     if (this.profile) for (const e of node.effects ?? []) applyEffect(e, this.profile)
     this.state.value = {
       treeId: tree.id,
@@ -198,9 +214,7 @@ class DialogueService {
         this.autoTimer = 0
         this.autoLockedR.value = false
         // 到点自动走与点击完全相同的推进路径
-        const next = node.next
-        if (next && this.trees.get(tree.id)?.nodes[next]) this.enterNode(tree, next)
-        else this.end()
+        this.advance()
       }, node.autoNextMs)
     }
   }

@@ -281,5 +281,5 @@ export const prologueTree: DialogueTree = {
   }
 }
 
-// sd-01：现在我饿了 → 拖住衣领，仅这一段出现拖行 CG。
-bindStoryCG(prologueTree, [PNODE.S10_R_HUNGRY_A, PNODE.S10_H_DOTS, PNODE.S10_N_HURRY, PNODE.S10_R_HUNGRY_B, PNODE.S10_H_WAIT, PNODE.S10_N_PULL], storyCGs.reimuPull)
+// 拖行 CG 只配合「被她一把拉走」旁白，前后的角色对白不展示 CG。
+bindStoryCG(prologueTree, [PNODE.S10_N_PULL], storyCGs.reimuPull)

@@ -145,7 +145,7 @@ export const FOURTH_TREES: Record<string, DialogueTree> = {
   } },
 }
 
-// sd-04 仅咬手臂的 s3–s6；sd-05 仅打滚的 s1–s8，不包括抱小腿。
-bindStoryCG(FOURTH_TREES.rescue, ['s3', 's4', 's5', 's6'], storyCGs.rumiaBite)
-bindStoryCG(FOURTH_TREES.hungry, ['s1', 's2', 's3', 's4', 's5', 's6', 's7', 's8'], storyCGs.rumiaRoll)
+// CG 只在咬手臂与打滚的动作旁白出现，不覆盖角色对白或抱小腿桥段。
+bindStoryCG(FOURTH_TREES.rescue, ['s3'], storyCGs.rumiaBite)
+bindStoryCG(FOURTH_TREES.hungry, ['s1'], storyCGs.rumiaRoll)
 

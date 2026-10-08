@@ -19,6 +19,8 @@ export const storyCGs = {
 export function bindStoryCG(tree: DialogueTree, nodes: readonly string[], cg: DialogueCG): void {
   for (const id of nodes) {
     if (!tree.nodes[id]) throw new Error(`剧情 CG 绑定节点不存在：${tree.id}/${id}`)
-    tree.nodes[id].cg = cg
+    const node = tree.nodes[id]
+    if (!node.narration || node.speaker) throw new Error(`剧情 CG 只能绑定无说话人的旁白节点：${tree.id}/${id}`)
+    node.cg = cg
   }
 }
