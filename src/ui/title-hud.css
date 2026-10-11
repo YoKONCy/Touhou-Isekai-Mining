@@ -2,9 +2,9 @@
 body .title-hud-mask:is(.settings-mask,.records-mask,.confirm-mask) {
   background: radial-gradient(ellipse at 50% 42%, #12162c65, #050819bd);
   padding: 24px;
-  -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
-  font-family: 'Microsoft YaHei', 'Segoe UI', sans-serif;
+  -webkit-font-smoothing: none;
+  text-rendering: optimizeSpeed;
+  font-family: var(--font-body);
   color: #dcd8ef;
 }
 body .title-hud-mask .title-hud-panel {
@@ -16,7 +16,7 @@ body .title-hud-mask .title-hud-panel {
   background: radial-gradient(ellipse at 12% 0, #7165a11a, transparent 65%), linear-gradient(140deg, #182035, #101628);
   box-shadow: 0 24px 85px #03050caf, inset 0 1px #dfd8ff12;
   color: #dcd8ef;
-  font-family: 'Microsoft YaHei', 'Segoe UI', sans-serif;
+  font-family: var(--font-body);
 }
 body .title-hud-mask .title-hud-panel::before,
 body .title-hud-mask .title-hud-panel::after {
@@ -33,7 +33,7 @@ body .title-hud-mask .title-hud-panel::before { left: -1px; top: -1px; border-wi
 body .title-hud-mask .title-hud-panel::after { right: -1px; bottom: -1px; border-width: 0 1px 1px 0; }
 body .title-hud-mask .title-hud-panel h2 {
   color: #f1ebff;
-  font-family: 'KaiTi', 'STKaiti', '楷体', serif;
+  font-family: var(--font-sign);
   font-weight: 400;
   font-size: 34px;
   letter-spacing: 5px;
@@ -50,7 +50,7 @@ body .title-hud-mask .title-hud-action {
   background: none;
   box-shadow: none;
   color: #ded4f3;
-  font-family: 'KaiTi', 'STKaiti', '楷体', serif;
+  font-family: var(--font-body);
   font-size: 23px;
   letter-spacing: 4px;
   cursor: pointer;
@@ -91,7 +91,7 @@ body .title-hud-mask .confirm-panel footer { margin-top: 22px; gap: 24px; }
 /* 首页读取记录：深蓝记录条、细线与星光，与游戏内纸页分开。 */
 body .title-hud-mask .records-panel { width: min(710px, 100%); max-height: 86dvh; }
 body .title-hud-mask .records-panel header { border-color: #aaa0cc2e; padding-bottom: 21px; }
-body .title-hud-mask .records-close { color: #a69ebf; font-family: 'Segoe UI', sans-serif; font-weight: 200; font-size: 31px; padding: 4px; }
+body .title-hud-mask .records-close { color: #a69ebf; font-family: var(--font-body); font-weight: 200; font-size: 31px; padding: 4px; }
 body .title-hud-mask .records-close:hover { color: #f3e8ff; text-shadow: 0 0 14px #ac94d977; }
 body .title-hud-mask .records-close:focus-visible { outline: 1px solid #c0b0ee; }
 body .title-hud-mask .records-list { padding: 18px 4px 4px; gap: 13px; }
@@ -139,11 +139,11 @@ body .title-hud-mask .title-record-sheet.empty strong { color: #c6bfd8; font-siz
 body .title-hud-mask .title-record-sheet.empty > span { color: #aaa5be; }
 body .title-hud-mask .records-panel footer { padding-top: 22px; gap: 24px; }
 body .title-hud-mask .records-panel footer p { font-size: 12px; color: #bbb3ce; line-height: 1.8; }
-body .title-hud-mask .record-rename { top: 13px; right: 17px; color: #c9b8e4; font-family: 'Microsoft YaHei', sans-serif; font-size: 12px; }
+body .title-hud-mask .record-rename { top: 13px; right: 17px; color: #c9b8e4; font-family: var(--font-body); font-size: 12px; }
 body .title-hud-mask .record-rename:hover:enabled { color: #f6eeff; }
 body .title-hud-mask .record-rename:focus-visible { outline: 1px solid #c6b3ec; }
 body .title-hud-mask .title-rename-form { border-color: #a299c04d; color: #e0d5ef; }
-body .title-hud-mask .title-rename-form input { background: #0e1427; border-color: #a28bb766; color: #f1e7ff; font-family: 'Microsoft YaHei', sans-serif; }
+body .title-hud-mask .title-rename-form input { background: #0e1427; border-color: #a28bb766; color: #f1e7ff; font-family: var(--font-body); }
 body .title-hud-mask .title-rename-form input:focus { border-color: #d7c0f5; box-shadow: 0 0 12px #a588d51a; }
 body .title-hud-mask .title-rename-form input::placeholder { color: #b8acc8; }
 body .title-hud-mask .title-rename-form p { color: #bfb4cf; }
@@ -152,7 +152,7 @@ body .title-hud-mask .title-rename-form p { color: #bfb4cf; }
 body .title-hud-mask .settings-panel { width: min(470px, 100%); overflow-x: hidden; scrollbar-gutter: stable; }
 body .title-hud-mask .settings-panel h2 { margin: 15px 0 32px; }
 body .title-hud-mask .title-audio-settings { margin: 25px 0 32px; gap: 30px; }
-body .title-hud-mask .title-audio-settings label { display: grid; grid-template-columns: 66px minmax(0, 1fr) 52px; min-height: 28px; font-family: 'Microsoft YaHei', sans-serif; color: #e3dbf1; font-size: 15px; letter-spacing: 2px; gap: 18px; }
+body .title-hud-mask .title-audio-settings label { display: grid; grid-template-columns: 66px minmax(0, 1fr) 52px; min-height: 28px; font-family: var(--font-body); color: #e3dbf1; font-size: 15px; letter-spacing: 2px; gap: 18px; }
 body .title-hud-mask .title-audio-settings small { width: 52px; white-space: nowrap; color: #c5b7df; font-size: 12px; font-variant-numeric: tabular-nums; letter-spacing: 0; }
 /* 交互区域固定为整行高度，菱形只改变外观，不旋转原生滑块的命中区域。 */
 body .title-hud-mask .title-audio-settings input { width: 100%; height: 28px; margin: 0; padding: 0; border: 0; background: transparent; box-shadow: none; transform: none; transition: none; }
