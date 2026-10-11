@@ -1,3 +1,4 @@
+import { profiler } from '../performance/Profiler'
 export interface RasterSprite {
   image: HTMLCanvasElement
   x: number
@@ -26,21 +27,27 @@ export function drawSprite(ctx: CanvasRenderingContext2D, sprite: RasterSprite):
 export class SpriteCache {
   private readonly entries = new Map<string, RasterSprite>()
   private pixels = 0
+  private uses=new Map<string,number>()
+  private clock=0
   constructor(private readonly maxEntries = 96, private readonly maxPixels = 2 * 1024 * 1024) {}
 
   get(key: string, create: () => RasterSprite): RasterSprite {
     const existing = this.entries.get(key)
-    if (existing) return existing
+    if (existing) {this.uses.set(key,++this.clock);profiler.increment('cacheHits');return existing}
+    profiler.increment('cacheMisses')
     const sprite = create(), pixels = sprite.image.width * sprite.image.height
     // 超出整个预算的大图只绘制一次，不挤掉所有常用的小贴图。
     if (pixels > this.maxPixels) return sprite
     while (this.entries.size && (this.entries.size >= this.maxEntries || this.pixels + pixels > this.maxPixels)) {
-      const oldest = this.entries.keys().next().value!
+      let oldest='',age=Infinity
+      for(const [candidate,last] of this.uses)if(last<age){oldest=candidate;age=last}
       const removed = this.entries.get(oldest)!
       this.pixels -= removed.image.width * removed.image.height
       this.entries.delete(oldest)
+      this.uses.delete(oldest)
     }
     this.entries.set(key, sprite)
+    this.uses.set(key,++this.clock)
     this.pixels += pixels
     return sprite
   }

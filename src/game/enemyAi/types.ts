@@ -29,12 +29,14 @@ export interface ShotRequest {
   readonly projectileId: ProjectileId
   /** 显式角度用于波浪偏移；省略时由房间瞄准当前玩家。 */
   readonly angle?: number
+  readonly volley?: { count:number; spread:number }
   /** 配饰或其他独立发射点；普通怪省略时沿用身体边缘的出口。 */
   readonly origin?: { x: number; y: number }
 }
 
 /** AI 感知所需的最小玩家形状 */
 export interface PlayerLike {
+  readonly entityId?: string
   x: number
   y: number
   /** 视觉半径（旧字段，缺省受击半径时兜底） */
@@ -56,6 +58,7 @@ export interface PlayerLike {
 export interface EnemyAiHost {
   /** 同房间伙伴只读视图，不复制实体数组，也不跨房间索敌。 */
   readonly allies: readonly EnemyAlly[]
+  aiMemory: Record<string, unknown>
   x: number
   y: number
   readonly r: number
@@ -120,11 +123,14 @@ export interface EnemyAiHost {
 
   /** 共享导航：前瞻避障申报期望速度（会绕矿脉、不蹭墙） */
   wantVelocity(map: TileMap, ang: number, speed: number): { x: number; y: number }
+  /** 前往明确目的地，可绕过大型墙体并寻找建筑入口。 */
+  navigateTo(map:TileMap,x:number,y:number,speed:number):{x:number;y:number}
+  hasLineOfSight(map:TileMap,x:number,y:number):boolean
   /** 指数趋近目标速度 */
   approachVelocity(tvx: number, tvy: number, accel: number, dt: number): void
 }
 
-export interface EnemyAlly { x: number; y: number; r: number; alive: boolean; readonly def: EnemyDef }
+export interface EnemyAlly { readonly entityId?:string; x: number; y: number; r: number; alive: boolean; readonly def: EnemyDef }
 
 /** AI 模板：每帧由 Enemy.update 在击退/碰撞结算之前调用一次 think */
 export interface EnemyBrain {

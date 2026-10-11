@@ -17,7 +17,7 @@ const resources = [
 
 /** 深层素材沿用手绘物资图标，落地形状分别保留晶块、茎束和翼膜特征。 */
 export const deepMaterials: ItemDef[] = resources.map(([id, color], index) => ({
-  id, kind: 'material', tier: 1, maxStack: 9999, color, hi: index===4?'#f4f3ed':index===0?'#9ea6ab':'#d5c6a4', text: index===4?'#ece7dd':'#d3c6ae',
+  id, kind: 'material', maxStack: 9999, color, hi: index===4?'#f4f3ed':index===0?'#9ea6ab':'#d5c6a4', text: index===4?'#ece7dd':'#d3c6ae',
   icon: supplyIcon(shapes[index]!), tags: ['deep_cave_supply'],
   ground: index===0?drawCoalGround:index===3?drawBatWingGround:index===4?drawCrystalCoreGround:({ ctx, x, y }) => {
     ctx.save(); ctx.translate(x, y); ctx.strokeStyle = '#302b38'; ctx.lineWidth = 1.2; ctx.fillStyle = color

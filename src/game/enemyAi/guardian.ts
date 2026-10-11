@@ -1,14 +1,13 @@
-import type { EnemyBrain, EnemyAiHost, EnemyAlly } from './types'
+import type { EnemyBrain } from './types'
 
-interface GuardMemory { stage: 'guard' | 'windup' | 'lunge' | 'return'; originX: number; originY: number; returnT: number; returnDuration: number; ally?: EnemyAlly }
-const memories = new WeakMap<EnemyAiHost, GuardMemory>()
+interface GuardMemory { stage: 'guard' | 'windup' | 'lunge' | 'return'; originX: number; originY: number; returnT: number; returnDuration: number; allyId?: string }
 
 /** 站位、扑出和弹回独立于普通追击；伙伴阵亡后重新选择，独处时仍会迎击。 */
 export const guardianBrain: EnemyBrain = { id: 'guardian', think(h, dt, map, p, dist) {
   const c = h.def.guardian
   if (!c) return
-  let m = memories.get(h)
-  if (!m) { m = { stage: 'guard', originX: h.x, originY: h.y, returnT: 0, returnDuration: .5 }; memories.set(h, m) }
+  let m = h.aiMemory.guardian as GuardMemory | undefined
+  if (!m) { m = { stage: 'guard', originX: h.x, originY: h.y, returnT: 0, returnDuration: .5 }; h.aiMemory.guardian = m }
   if (!p.alive) { m.stage = 'guard'; h.guardianReboundProgress = -1; h.pounceState = 'none'; h.approachVelocity(0, 0, 12, dt); return }
   if (m.stage === 'return') {
     const dx = m.originX - h.x, dy = m.originY - h.y, d = Math.hypot(dx, dy)
@@ -19,7 +18,7 @@ export const guardianBrain: EnemyBrain = { id: 'guardian', think(h, dt, map, p, 
     }
     if (d < .1) { h.vx = h.vy = 0; return }
     const remaining = Math.max(dt, m.returnDuration - m.returnT + dt)
-    const v = h.wantVelocity(map, Math.atan2(dy, dx), Math.min(c.returnSpeed, d / remaining))
+    const v = h.navigateTo(map, m.originX, m.originY, Math.min(c.returnSpeed, d / remaining))
     h.vx = v.x; h.vy = v.y; return
   }
   if (m.stage === 'lunge') {
@@ -41,20 +40,27 @@ export const guardianBrain: EnemyBrain = { id: 'guardian', think(h, dt, map, p, 
     if (h.pounceT <= 0) { m.stage = 'lunge'; h.pounceState = 'lunge'; h.pounceT = c.lungeDuration; h.chargeHit = false; h.guardianDashCd = c.interval }
     return
   }
-  if (!m.ally?.alive || m.ally.def.guardian || Math.hypot(m.ally.x - h.x, m.ally.y - h.y) > 320) {
-    m.ally = undefined
+  // 隔着整栋建筑时先寻找门路；不能站在墙内侧反复朝外墙起扑。
+  const lineOfSight=h.hasLineOfSight(map,p.x,p.y)
+  if(!lineOfSight){
+    const v=h.navigateTo(map,p.x,p.y,c.speed)
+    h.approachVelocity(v.x,v.y,10,dt);return
+  }
+  let a = h.allies.find(ally => ally.entityId === m!.allyId && ally.alive && !ally.def.guardian)
+  if (!a || Math.hypot(a.x - h.x, a.y - h.y) > 320) {
+    a = undefined; m.allyId = undefined
     let best = Infinity
     for (const ally of h.allies) {
       if (!ally.alive || ally.def.guardian) continue
       const d = Math.hypot(ally.x - h.x, ally.y - h.y)
-      if (d < best) { m.ally = ally; best = d }
+      if (d < best) { a = ally; m.allyId = ally.entityId; best = d }
     }
   }
-  const a = m.ally, angle = Math.atan2(p.y - (a?.y ?? h.y), p.x - (a?.x ?? h.x))
+  const angle = Math.atan2(p.y - (a?.y ?? h.y), p.x - (a?.x ?? h.x))
   const gap = a ? Math.min(c.guardDistance, Math.hypot(p.x - a.x, p.y - a.y) * .55) : 0
   const tx = a ? a.x + Math.cos(angle) * gap : p.x, ty = a ? a.y + Math.sin(angle) * gap : p.y
   const targetDistance = Math.hypot(tx - h.x, ty - h.y)
-  const v = targetDistance > 8 ? h.wantVelocity(map, Math.atan2(ty - h.y, tx - h.x), Math.min(c.speed, targetDistance * 4)) : { x: 0, y: 0 }
+  const v = targetDistance > 8 ? h.navigateTo(map, tx, ty, Math.min(c.speed, targetDistance * 4)) : { x: 0, y: 0 }
   h.approachVelocity(v.x, v.y, 10, dt)
   if (dist < 145 && h.guardianDashCd <= 0 && h.canUseSkills) {
     m.stage = 'windup'; m.originX = h.x; m.originY = h.y

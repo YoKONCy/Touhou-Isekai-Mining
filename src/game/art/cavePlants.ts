@@ -2,10 +2,15 @@ import type { TileMap, DoorSlot } from '../tilemap'
 import { drawMineSprite, type MineSprite } from './mineAssets'
 
 interface Plant { x: number; y: number; size: number; seed: number; kind: 'fern' | 'grass' | 'root' | 'climber' | 'vine' | 'ceiling' }
+export interface HangingFruitAnchor { x:number; y:number; topY:number; seed:number }
 /** 每房独立生态装饰；脚底排序与高空遮挡分离，无碰撞、无采集。 */
 export class CavePlants {
   readonly ground: Plant[] = []
   private hanging: Plant[] = []
+  /** 只让向下悬垂的藤蔓结果，贴墙攀缘藤不参与；位置来自实际生态布局。 */
+  get fruitAnchors():readonly HangingFruitAnchor[] {
+    return this.hanging.filter(p=>p.kind==='vine'||p.kind==='ceiling').map(p=>({x:p.x,y:p.y+p.size-4,topY:p.y,seed:p.seed}))
+  }
   private sprites = new Map<Plant, HTMLCanvasElement>()
 
   /** 细叶、渐变和纹理一次烘焙，逐帧只提交小画布并作轻微整体摆动。 */

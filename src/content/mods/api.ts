@@ -12,6 +12,7 @@ import { projectiles } from '../projectiles/registry'
 import { minerals } from '../minerals/registry'
 import { propDefs } from '../props/registry'
 import { biomeDefs } from '../biomes/registry'
+import { searchEffects } from '../search/rules'
 
 /** 类别名 → 注册表单例（具名字段的字符串镜像） */
 const tables = {
@@ -20,7 +21,8 @@ const tables = {
   projectiles,
   minerals,
   props: propDefs,
-  biomes: biomeDefs
+  biomes: biomeDefs,
+  searchEffects
 } as const
 
 /** 构造一个 MOD 注册用 API 句柄（底层始终是同一份注册表单例） */
@@ -32,6 +34,7 @@ export function createPackApi(): PackApi {
     minerals,
     props: propDefs,
     biomes: biomeDefs,
+    searchEffects,
     registry<T extends { id: string }>(name: ApiRegistryName): Registry<T> {
       return tables[name] as unknown as Registry<T>
     }

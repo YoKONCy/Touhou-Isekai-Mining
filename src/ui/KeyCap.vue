@@ -5,17 +5,22 @@
  */
 import { computed } from 'vue'
 import { keymap, keyLabel, isMouseToken, type ActionId } from '../core/keymap'
+import { touchControls, viewport } from '../browser/display'
+import { t } from '../i18n'
 
 const props = defineProps<{ action: ActionId }>()
 const token = computed(() => keymap.primary(props.action))
 const isMouse = computed(() => isMouseToken(token.value))
 const label = computed(() => keyLabel(token.value))
+const touchLabel = computed(() => t(`ui.mobile.key.${props.action}`))
 </script>
 
 <template>
   <span class="keycap" :class="{ 'keycap-mouse': isMouse }">
     <!-- 鼠标左键：鼠标轮廓 + 左键区块高亮 -->
-    <svg v-if="isMouse" viewBox="0 0 24 28" width="17" height="20" aria-label="鼠标左键">
+    <template v-if="touchControls">{{ touchLabel }}</template>
+    <template v-else-if="viewport.lastInput==='gamepad'">{{ t(`ui.gamepad.key.${action}`) }}</template>
+    <svg v-else-if="isMouse" viewBox="0 0 24 28" width="17" height="20" aria-label="鼠标左键">
       <path
         d="M12 1.5 C6.4 1.5 3 5.6 3 11.2 L3 19.5 C3 23.6 6.9 26.5 12 26.5 C17.1 26.5 21 23.6 21 19.5 L21 11.2 C21 5.6 17.6 1.5 12 1.5 Z"
         fill="rgba(20,15,8,0.85)"

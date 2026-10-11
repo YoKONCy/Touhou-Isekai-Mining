@@ -1,3 +1,4 @@
+import { SnapshotCodec, type StateFields } from '../../core/simulation/snapshot'
 import type { CharacterProfile } from '../../shared/profile'
 import type { EngineContext } from '../../core/types'
 import type { ScriptedRoomSpec } from './dungeon/script'
@@ -20,6 +21,7 @@ import { resolveDialogueCG } from '../dialogue/dialogueCG'
 import { drawKedamaFur } from '../art/kedamaFur'
 import { t } from '../../i18n'
 import { sfx } from '../audio/Sfx'
+import { CONFIG } from '../config'
 
 type Phase = 'waiting' | 'intro' | 'battle' | 'phaseBreak' | 'half' | 'knockdown' | 'defeat' | 'restore' | 'rescueReady' | 'rescue' | 'leaving'
 /** 第四层末间导演只负责剧情节拍，BOSS 的战斗与伤害由正式实体负责。 */
@@ -44,21 +46,25 @@ export class FourthFloorDirector {
   private phaseBreakTime = 0
   private returnRequested = false
   private readonly animator = new PlayerAnimator()
+  captureSimulation(codec:SnapshotCodec):StateFields{return codec.capture(this,['profile','returnToBase','animator'])}
+  restoreSimulation(state:StateFields,codec:SnapshotCodec):void{codec.restore(this,state)}
   constructor(private readonly profile: CharacterProfile, private readonly returnToBase: () => void) {}
   get active(): boolean { return this.activeRoom !== null }
   get blocksInput(): boolean { return this.active && !['battle', 'rescueReady', 'waiting'].includes(this.phase) }
-  specForArena(): ScriptedRoomSpec { return { noOre: true, noProps: true, noNature: true, noFissure: true, noChest: true, noMonsterBurst: true, spawns: [], manualClear: true, suppressAutoClear: true, startLocked: true, ambient: { dimCenter: .35, dimEdge: .62, litCenter: .25, litEdge: .45 } } }
-  onRoomEnter(room: RoomRuntime, arena: boolean): void {
+  specForArena(): ScriptedRoomSpec { return { noOre: true, noProps: true, noNature: true, noFissure: true, noChest: true, noMonsterBurst: true, spawns: [], manualClear: true, suppressAutoClear: true, startLocked: true, ambient: { dimCenter: CONFIG.art.deepHollowAmbient.arenaDimCenter, dimEdge: CONFIG.art.deepHollowAmbient.arenaDimEdge, litCenter: .25, litEdge: .45 } } }
+  onRoomEnter(room: RoomRuntime, arena: boolean, restoring = false): void {
     if (!arena || this.profile.flagBool(FOURTH_FLAGS.rescued)) { this.activeRoom = null; return }
     if (this.activeRoom === room) return
     this.activeRoom = room
     sfx.setCaveMusic(false)
     const b = room.map.bounds
     this.rumiaX = b.right - 130; this.rumiaY = b.top + 145
-    this.boss = new KedamaBoss((b.left + b.right) / 2, (b.top + b.bottom) / 2 - 70)
-    if (this.profile.flagBool(FOURTH_FLAGS.won)) { this.boss.alive = false; this.boss.hp = 0; this.boss.mode = 'defeated'; this.boss.restoreProgress = 1; this.phase = 'rescueReady'; this.addRescuePoint() }
-    else { this.phase = 'waiting'; this.boss.shown = false; this.boss.entranceProgress = 0 }
-    room.addEnemy(this.boss)
+    this.boss = restoring ? room.snapshotEnemies.find(enemy=>enemy instanceof KedamaBoss) as KedamaBoss|null
+      : new KedamaBoss((b.left + b.right) / 2, (b.top + b.bottom) / 2 - 70)
+    if(!this.boss)throw new Error('首领快照缺少毛玉酱实体')
+    if (this.profile.flagBool(FOURTH_FLAGS.won)) { this.boss.alive = false; this.boss.hp = 0; this.boss.mode = 'defeated'; this.boss.restoreProgress = 1; this.phase = 'rescueReady'; if(!restoring)this.addRescuePoint() }
+    else { this.phase = 'waiting'; if(!restoring){this.boss.shown = false; this.boss.entranceProgress = 0} }
+    if(!restoring)room.addEnemy(this.boss)
     room.addSortable(this.rumiaY, (g, time) => {
       const pose = this.animator.build(Math.PI / 2)
       const x = this.biting && this.player ? this.player.x + 15 : this.rumiaX, y = this.biting && this.player ? this.player.y + 8 : this.rumiaY
@@ -85,9 +91,7 @@ export class FourthFloorDirector {
   private summonGuardian(): void {
     if (this.summoned || !this.boss || !this.activeRoom) return
     this.summoned = true
-    const normal = enemies.require('touhou:slime_guardian'), b = this.activeRoom.map.bounds
-    const x = Math.max(b.left + 55, Math.min(b.right - 55, this.boss.x + 85)), y = Math.max(b.top + 55, Math.min(b.bottom - 55, this.boss.y + 35))
-    this.guardian = new Enemy(x, y, normal.id, { ...normal, hp: normal.hp * 1.5 }); this.guardian.startBurrowSpawn(); this.guardian.alert(); this.activeRoom.addEnemy(this.guardian)
+    this.guardian = this.activeRoom.summonBossGuardian(this.boss)
   }
   update(dt: number, engine: EngineContext, room: RoomRuntime, player: Player): void {
     if (this.activeRoom !== room || !this.boss) return

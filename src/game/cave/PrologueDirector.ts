@@ -1,3 +1,4 @@
+import { randomCombat } from '../../core/simulation/random'
 /**
  * 序章导演（固定脚本楼层 S0~S10 的显式状态机）
  *
@@ -69,6 +70,9 @@ type Step =
   | 'S5_FIGHT'
   | 'S5_CLEAR_TALK'
   | 'S6_PASS'
+  | 'S6_SEARCH_WAIT'
+  | 'S6_SEARCH_TALK'
+  | 'S6_SEARCH'
   | 'S8_PASS'
   | 'S9_INTRO_TALK'
   | 'S9_FIGHT'
@@ -158,6 +162,13 @@ export class PrologueDirector {
     if (nearest) this.drawTargetGuide(g, camera, width, height, nearest.x, nearest.y, 'story.tut.mine_location')
   }
 
+  /** 第三房指向真实教学矿车；搜完即可结束引导，不要求背包必须有空位。 */
+  renderSearchGuide(g: CanvasRenderingContext2D, camera: Camera, width: number, height: number): void {
+    if (this.step !== 'S6_SEARCH' || this.host.roomId !== PROOT.MINE) return
+    const target = this.host.room.searchContainers.find(c => c.ref === 'tutorial-search')
+    if (target) this.drawTargetGuide(g, camera, width, height, target.x, target.y - 18, 'story.tut.search_location')
+  }
+
   private drawTargetGuide(g: CanvasRenderingContext2D, camera: Camera, width: number, height: number, worldX: number, worldY: number, labelKey: string): void {
     const sx = (worldX - Math.round(camera.x)) * camera.zoom, sy = (worldY - Math.round(camera.y)) * camera.zoom
     const x = Math.max(40, Math.min(width - 40, sx)), y = Math.max(88, Math.min(height - 140, sy))
@@ -213,6 +224,7 @@ export class PrologueDirector {
   /** 每次进入房间（含首次；BOOT 阶段忽略首房） */
   onRoomEnter(roomId: number): void {
     if (this.step === 'BOOT' || this.step === 'DONE') return
+    if (roomId !== PROOT.MINE && tutorial.current.value?.key.startsWith('story.tut.search')) tutorial.dismiss()
     if (this.entered.has(roomId)) return
     this.entered.add(roomId)
     const room = this.host.room
@@ -227,6 +239,8 @@ export class PrologueDirector {
         tutorial.show('story.tut.dodge', { durationMs: PERSIST_MS })
         this.step = 'S5_FIGHT'
       })
+    } else if (roomId === PROOT.MINE) {
+      this.step = this.host.profile.flagBool('tutorial.search.seen') ? 'S6_PASS' : 'S6_SEARCH_WAIT'
     } else if (roomId === PROOT.HINT_1) {
       // S7/S8：隔壁动静（s7 链到 s8 一次播完）；本房现在有怪，对白期间冻住防白挨打
       room.freezeEnemies(true)
@@ -244,6 +258,12 @@ export class PrologueDirector {
 
   /** 交互物成功触发（拾取/点火由房间结算完后回调） */
   onInteract(it: Interactable): void {
+    if (it.kind === 'search' && it.ref === 'tutorial-search') {
+      this.host.profile.setFlag('tutorial.search.seen', true)
+      tutorial.show('story.tut.search_take', { durationMs: 6000 })
+      this.step = 'S6_PASS'
+      return
+    }
     if (this.step === 'S1_PICK' && it.ref === 'pick') {
       // 先切到镐手持（对白期间手里就拿着镐）；端详链播完先提示看囊袋，
       // 看过囊袋后直接接挖矿教学，不要求玩家先猜出挖矿操作。
@@ -345,6 +365,20 @@ export class PrologueDirector {
     const { room, player } = this.host
 
     switch (this.step) {
+      case 'S6_SEARCH_WAIT':
+        if (this.host.roomId === PROOT.MINE && room.aliveCount === 0 && !dialogue.isActive) {
+          room.cancelSearches()
+          this.step = 'S6_SEARCH_TALK'
+          dialogue.start(PROLOGUE_TREE, PNODE.SEARCH_NOTICE, () => {
+            if (this.host.roomId !== PROOT.MINE) return
+            this.step = 'S6_SEARCH'
+            tutorial.show('story.tut.search', { durationMs: PERSIST_MS })
+          })
+        }
+        break
+      case 'S6_SEARCH':
+        if (this.host.roomId === PROOT.MINE && !tutorial.current.value) tutorial.show('story.tut.search', { durationMs: PERSIST_MS })
+        break
       case 'S0_MOVE':
         // 移动 240px（约 5 个瓦片）才触发发现镐子——给足苏醒后走动探索的时间
         if (Math.hypot(player.x - this.startX, player.y - this.startY) > 240) this.beginS1()
@@ -448,8 +482,8 @@ export class PrologueDirector {
       [0, -14]
     ]
     for (let i = 0; i < 30; i++) {
-      const ang = base + (Math.random() * 2 - 1) * 0.95
-      const d = minD + Math.random() * (maxD - minD)
+      const ang = base + (randomCombat() * 2 - 1) * 0.95
+      const d = minD + randomCombat() * (maxD - minD)
       const x = player.x + Math.cos(ang) * d
       const y = player.y + Math.sin(ang) * d
       if (probes.every(([ox, oy]) => !room.map.solidAtWorld(x + ox, y + oy))) return { x, y }

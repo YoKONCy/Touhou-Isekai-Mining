@@ -2,6 +2,7 @@
 import { nextTick, onBeforeUnmount, onMounted, shallowRef, ref, watch } from 'vue'
 import App from './App.vue'
 import TitleScreen from './ui/TitleScreen.vue'
+import { landscapeRequired } from './browser/display'
 import type { CharacterProfile } from './shared/profile'
 import { setPlayerAppearance } from './shared/playerAppearance'
 import { dialogue } from './game/dialogue/dialogueService'
@@ -95,6 +96,7 @@ onBeforeUnmount(() => {
 <template>
   <App v-if="profile" :profile="profile" @loaded="start" @new-game="showTitle('new')" @title="showTitle()"/>
   <TitleScreen v-else-if="phase !== 'black'" :key="titleKey" :initial-screen="initialScreen" @start="start"/>
+  <div v-if="profile&&landscapeRequired" class="orientation-notice" role="status"><span aria-hidden="true">↻</span><strong>{{ t('ui.mobile.rotate') }}</strong><small>{{ t('ui.mobile.rotate_hint') }}</small></div>
   <div v-if="entering" class="journey-transition" :class="phase" role="status" :aria-label="t('ui.title.loading')"></div>
   <p v-if="error" class="journey-error" role="alert">{{ t(error) }}</p>
 </template>

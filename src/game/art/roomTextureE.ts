@@ -54,8 +54,8 @@ export function createRoomTextureE(
   const W=cols*t,H=rows*t,wall=wt*t,art=resolveCaveArt(biomeCave,floor)
   const material=floorStyle??art.floor,variation=sceneStyle??art.scene
   // 所有楼层共用二倍采样的底图与北墙层；群系只改变材质参数和装饰叠层。
-  const mk=():[HTMLCanvasElement,CanvasRenderingContext2D]=>{const c=document.createElement('canvas');c.width=W*2;c.height=H*2;const g=c.getContext('2d')!;g.scale(2,2);return [c,g]}
-  const [base,bctx]=mk(),[face,fctx]=mk()
+  const mk=(height=H):[HTMLCanvasElement,CanvasRenderingContext2D]=>{const c=document.createElement('canvas');c.width=W*2;c.height=height*2;const g=c.getContext('2d')!;g.scale(2,2);return [c,g]}
+  const [base,bctx]=mk(),[face,fctx]=mk(Math.min(H,wall+t*3))
   bctx.fillStyle=ART.void;bctx.fillRect(0,0,W,H)
   drawCaveFloor(bctx,W,H,wall,seed,material)
   const backgroundRocks=drawFloorDecorations(bctx,W,H,wall,t,doors,seed,material,variation.boneFragments)

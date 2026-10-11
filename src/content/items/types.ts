@@ -13,7 +13,7 @@ import type { ContentId } from '../core/ids'
 export type ItemId = ContentId
 
 /** 物品大类（决定背包行为/图标/可装备槽） */
-export type ItemKind = 'material' | 'misc' | 'ammunition' | 'pick' | 'weapon' | 'armor' | 'consumable' | 'spellcard'
+export type ItemKind = 'material' | 'misc' | 'collectible' | 'ammunition' | 'pick' | 'weapon' | 'armor' | 'consumable' | 'spellcard'
 
 /** 装备槽位（纸娃娃）：装束槽为头/身/腿合并后的全身槽；饰品 4 槽同型 */
 export type EquipSlot =
@@ -77,7 +77,7 @@ export interface MeleeMove {
 
 /** 远程攻击契约；攻击间隔由武器行为决定起算时机。 */
 export interface RangedAttack {
-  type: 'boomerang' | 'tarot' | 'bow'
+  type: 'boomerang' | 'tarot' | 'bow' | 'livingGun'
   damage: number
   damageKind?: 'physical' | 'magic'
   /** 飞行速度，像素每秒。 */
@@ -91,8 +91,12 @@ export interface RangedAttack {
   attackInterval: number
   aoe?: import('./combatComponents').AoeFalloff
   ammoFamily?: 'arrow'
-  /** 松手释放的远程蓄力，倍率作用于武器与弹药合并后的数值。 */
-  charge?: { duration: number; damageMultiplier: number; speedMultiplier: number; accuracyCorrection?: number; nameKey: string; descriptionKey: string }
+  /** 弓可独立编排拉弦与收势；完整周期模式把蓄力也计入攻击间隔。 */
+  bowTiming?: { drawDuration: number; recoverDuration: number; intervalIncludesCharge?: boolean }
+  /** 远程蓄力默认松手释放，可声明蓄满自动释放；倍率作用于武器与弹药合计值。 */
+  charge?: { duration: number; damageMultiplier: number; speedMultiplier: number; accuracyCorrection?: number; autoRelease?: boolean; nameKey: string; descriptionKey: string }
+  /** 连续满蓄力的终结箭；倍率以未蓄力的武器与弹药合计值为基准。 */
+  chargedFinisher?: { count: number; damageMultiplier: number; speedMultiplier: number; damageKind: 'physical' | 'magic'; pierceObstacles: boolean; pierceEnemies: boolean; nameKey: string; descriptionKey: string }
 }
 
 /** 弹药仅从背包消费，所有加成为与武器原值合并的增量。 */
@@ -121,6 +125,12 @@ export interface SpellFxColors {
 
 /** 符卡效果定义（数据驱动；释放结算在引擎侧通用执行） */
 export interface SpellCardDef {
+  channelTime?:number
+  scope?:'room'
+  control?:{duration:number;bulletSpeedMultiplier:number;enemyEffects:readonly import('../../shared/statusEffects').StatusDefinition[]}
+  targetFx?:{duration:number;render:(g:CanvasRenderingContext2D,v:{x:number;y:number;age:number;duration:number;seed:number})=>void}
+  channelDraw?:(g:CanvasRenderingContext2D,v:{x:number;y:number;progress:number;time:number})=>void
+  sound?:()=>void
   /** 缺省为魔法伤害，显示与抗性结算使用同一个类型。 */
   damageKind?: 'physical' | 'magic'
   /** 释放所需灵力 */
@@ -149,9 +159,13 @@ export interface SpellCardDef {
 
 /** 食用效果，所有使用入口统一处理回复与附加状态。 */
 export interface ConsumableEffect {
+  /** 本次进食施加的饱腹秒数，缺省使用通用时长。 */
+  satiety?: number
   /** 食用回复生命 */
   heal?: number
   status?: import('../../shared/statusEffects').StatusDefinition
+  /** 复用同一状态时可调整本次食用持续时间。 */
+  statusDuration?: number
 }
 
 /* ---------- 图标（双轨：程序化 SVG / 外部图片） ---------- */
@@ -191,6 +205,12 @@ export type GroundRenderer = (view: GroundDropView) => void
 
 /** 持械手局部系的资源绘制参数。 */
 export interface HeldWeaponView {
+  /** 角色朝右时骨骼整体镜像；非对称枪械据此保持弹匣朝下。 */
+  mirrored?: boolean
+  /** 非对称器型按实际枪口方向保持竖直朝下，独立于人物镜像。 */
+  flipVertical?: boolean
+  /** 连射武器的短促机械后坐位移。 */
+  recoil?: number
   /** 普射与蓄力共用的拉弦进度，未拉弦时省略。 */
   drawProgress?: number
   bowPull?: number
@@ -276,13 +296,16 @@ export interface WeaponTrailView {
   strikeIndex?: number
 }
 
-export interface WeaponImpactView { x: number; y: number; angle: number; age: number; move: MeleeMove }
+/** 矩形范围的 range 沿 angle 向前延伸，width 沿垂直方向向左右各分一半。 */
+export interface WeaponImpactView { x: number; y: number; angle: number; age: number; move: MeleeMove; area?:{range:number;width:number;count:number;duration:number;seed:number} }
 /** 地面演出归所属房间计时和绘制，切房不会搬到下一间。 */
 export interface WeaponImpactInstance extends WeaponImpactView { duration: number; shake?: number; render: (ctx: CanvasRenderingContext2D, view: WeaponImpactView) => void }
 
 export interface WeaponChargeView {
   x: number
   y: number
+  /** 玩家瞄准朝向；聚气位置与前方技能范围共用此方向。 */
+  angle: number
   charging: boolean
   progress: number
   readyAge: number
@@ -295,6 +318,10 @@ export interface WeaponChargeView {
 
 /** 副手握点相对主手的柄轴偏移，权重负责平滑接握与松手。 */
 export interface WeaponGrip {
+  /** 主武器可交给远侧手；四向双手持枪时按实际可达握点选择。 */
+  weaponHand?: 'near' | 'far'
+  /** 图集手心相对小臂末端的偏移；只调整武器握点，不拉长衣袖。 */
+  palmOffset?: number
   offset: number
   weight: number
   /** 可指定朝左基底中的握点，用于主手握柄、副手握鞘等独立姿态。 */
@@ -312,17 +339,35 @@ export interface WeaponGrip {
   farBend?: 1 | -1
   /** 背身待机时把双手与腰侧附件放在衣身后层。 */
   inFront?: boolean
+  /** 独立安排副手前后层，可实现一手在身前、一手越肩背后的蓄势。 */
+  supportInFront?: boolean
+  /** 链条等附件可独立置于身后，避免跨肩连接线遮住面部。 */
+  accessoryInFront?: boolean
 }
 /** 动作只改变姿态，不移动实体碰撞中心。 */
-export interface WeaponBodyMotion { facing?: number; lean?: number; rootX?: number; rootY?: number; tilt?: number }
+export interface WeaponBodyMotion {
+  facing?: number; lean?: number; rootX?: number; rootY?: number; tilt?: number
+  /** 招式可覆盖近、远腿的骨角，用于抬膝与踢击；角度沿用角色的朝左镜像基底。 */
+  legs?: { near?: { thigh: number; shin: number; scale?: number }; far?: { thigh: number; shin: number; scale?: number } }
+}
 
 export interface WeaponResource {
+  /** 护甲结算前把同一次物理攻击按比例转成魔法，两部分共用暴击结果。 */
+  physicalToMagic?:number
+  /** 每次命中附加固定魔法伤害，独立扣魔抗与法术破甲，不吃力量、暴击或多目标衰减。 */
+  fixedMagicDamage?:number
+  /** 每刀判定开始时召唤独立残影；固定伤害不吃力量、暴击或多目标衰减。 */
+  echoAttack?:{damage:number;offset:number;fadeDuration:number;delay?:number;speedMultiplier?:number}
+  /** 每个被刀身命中的目标分别播放，残影不会再次触发。 */
+  hitFx?:{duration:number;render:(ctx:CanvasRenderingContext2D,view:WeaponImpactView)=>void}
   /** 不显示待机握持物；射击手势由远程行为单独驱动。 */
   hiddenHeld?: boolean
   /** 物品卡展示的技能摘要与逐项效果，文案仍走语言键。 */
   skillDescriptions?: { summaryKey: string; effects: readonly { nameKey: string; descriptionKey: string }[] }
-  /** 暴击被动由正式命中入口执行，不能被普通命中触发。 */
-  criticalPassive?: { multiplier: number; effects: readonly import('../../shared/statusEffects').StatusDefinition[]; nameKey: string; descriptionKey: string }
+  /** 暴击被动由正式命中入口执行；省略倍率沿用普攻，attacker 来源记录实际施加者。 */
+  criticalPassive?: { multiplier?: number; effects: readonly import('../../shared/statusEffects').StatusDefinition[]; nameKey: string; descriptionKey: string; source?: 'attacker' }
+  /** 仅由此武器完成击杀时乘到各物品原始掉落概率，数量和经验保持原值。 */
+  killDropPassive?: { chanceMultiplier: number; nameKey: string; descriptionKey: string }
   /** 按住蓄力、松手攻击；倍率独立于力量、暴击和多目标衰减。 */
   chargeAttack?: {
     /** 缺省使用普攻键；特殊键蓄力可与普通连击共存。 */
@@ -335,6 +380,9 @@ export interface WeaponResource {
     minimumMoveMultiplier: number
     /** 指定时整个蓄力阶段使用固定移速比例，而非渐变减速。 */
     moveMultiplier?: number
+    /** 蓄力期间原地站定并屏蔽闪避；松手取消或释放后立即解除。 */
+    immobilize?:boolean
+    cooldownBar?:{fill:string;background:string;glow:string}
     /** 未满蓄力的短闪打断，并阻止同一次持续按键立即重启蓄力。 */
     cancelOnShortDodgeBeforeReady?: boolean
     tiers: readonly { progress: number; multiplier: number }[]
@@ -344,12 +392,14 @@ export interface WeaponResource {
     readySound?: () => void
     /** 满蓄力释放定时连斩；各刀独立结算，期间允许移动与逐刀重新瞄准。 */
     burst?: { count: number; duration: number; cooldown: number; segments?: readonly number[]; move?: MeleeMove }
+    /** 固定矩形多轮空斩，不推进普攻动作；每轮物理、魔法分别扣抗性，无多目标衰减。 */
+    areaBurst?:{count:number;duration:number;range:number;width:number;physicalDamage:number;magicDamage:number;sound?:(index:number)=>void;render:(ctx:CanvasRenderingContext2D,view:WeaponImpactView)=>void}
     /** 蓄力档位可替换本次招式，普通攻击定义保持原值。 */
     move?: (move: MeleeMove, progress: number) => MeleeMove
     draw?: (ctx: CanvasRenderingContext2D, view: WeaponChargeView) => void
   }
   /** 接触进度统一地面演出、声音和震动，渲染实例交给所在房间保存。 */
-  impactFx?: { duration: number; delay?: number; contactProgress?: number; sound?: () => void; shake?: number; skillOnly?: boolean; render: (ctx: CanvasRenderingContext2D, view: WeaponImpactView) => void }
+  impactFx?: { duration: number; delay?: number; contactProgress?: number; sound?: () => void; shake?: number; skillOnly?: boolean; segments?: readonly number[]; render: (ctx: CanvasRenderingContext2D, view: WeaponImpactView) => void }
   /** 在当前攻击前摇内成功发起短翻滚，仅为这一击增加伤害，不跨连段继承。 */
   windupRollBonus?: { damageBonus: number; nameKey: string; conditionKey: string }
   heldEffects?: readonly import('../../shared/statusEffects').StatusDefinition[]
@@ -364,6 +414,8 @@ export interface WeaponResource {
   combo?: boolean
   /** 连击动作数量；不填写沿用三段，单动作武器可关闭 combo。 */
   comboLength?: number
+  /** 每完成指定次数的挥击，收招后强制休息；次数按判定开始计数，切换装备不重置。 */
+  comboRecovery?: { attacks: number; duration: number }
   /** 收招后继续保留连段的时间；零表示回到待机后重新从首段起手。 */
   comboWindow?: number
   drawHeld?: (ctx: CanvasRenderingContext2D, view: HeldWeaponView) => void
@@ -376,9 +428,11 @@ export interface WeaponResource {
   /** 手心局部系的纵向持握位移，用于突刺后引、送杆与收回。 */
   thrust?: (view: WeaponMotionView) => number
   supportGrip?: (view: WeaponMotionView) => WeaponGrip | undefined
+  /** 双手接握时复绘原有手掌并将副手置于武器上方，避免杆身遮住握持动作。 */
+  gripHandsOverWeapon?: boolean
   bodyMotion?: (view: WeaponMotionView) => WeaponBodyMotion | undefined
   /** 腰侧刀鞘等随人物姿态绘制的附件。 */
-  drawAccessory?: (ctx: CanvasRenderingContext2D, view: WeaponMotionView & { x: number; y: number; bodyFacing: number; hand: { x: number; y: number; angle: number }; supportHand: { x: number; y: number } }) => void
+  drawAccessory?: (ctx: CanvasRenderingContext2D, view: WeaponMotionView & { x: number; y: number; bodyFacing: number; hand: { x: number; y: number; angle: number }; supportHand: { x: number; y: number; angle?: number } }) => void
   eraseProjectiles?: { radius: number; blade: (view: WeaponBladeView) => readonly [{ x: number; y: number }, { x: number; y: number }] | undefined; descriptionKey?: string }
   customSwingFx?: boolean
   lockAim?: boolean
@@ -398,13 +452,16 @@ export interface ItemDef {
   id: ItemId
   /** 物品大类 */
   kind: ItemKind
-  /** 装备品质档 1~6（凡品/精良/夢幻/傳奇/萬象/寰宇，DESIGN_MEMO #53）；
-   *  仅非素材物品使用，素材/普通消耗品留空，与掉落演出档 tier 完全无关。 */
-  rarity?: 1 | 2 | 3 | 4 | 5 | 6
+  /** 装备品阶，掉落表现与搜索权重也读取此字段。 */
+  grade?: 1 | 2 | 3 | 4 | 5 | 6
+  /** 非装备稀有度：白、绿、蓝、紫、金、红、彩，只显示数字与颜色。 */
+  rarity?: 1 | 2 | 3 | 4 | 5 | 6 | 7
+  /** 仅在搜索容器内的占格尺寸，背包仍为单格。 */
+  searchFootprint?:readonly [number,number]
+  /** 成功带出一次后永久解锁，不作为普通背包物品保存。 */
+  unlockReward?: { kind: 'outfit' | 'decoration' | 'recipe'; flag: string }
   /** 可选风味文案语言键；只在背包详细说明中展示。 */
   flavorKey?: string
-  /** 掉落表现档位 1~5（决定掉落光柱/碎块表现，不代表物品品质） */
-  tier: 1 | 2 | 3 | 4 | 5
   /** 图标/碎块主体色 */
   color: string
   /** 高光色 */
@@ -418,7 +475,14 @@ export interface ItemDef {
   /** 可装备到哪个槽（pick/weapon/spellcard/outfit/trinket 类携带；'trinket'=饰品类通配） */
   equipSlot?: ItemEquipSlot
   /** 装备战斗属性；暴击率为0~1，穿透为抗性数值。 */
-  combat?: { critChance?: number; penetration?: number; physicalResist?: number; magicResist?: number; projectileReduction?: number }
+  combat?: { critChance?: number; meleeCritChance?:number; meleeWeaponDamageBonus?:number; penetration?: number; magicPenetration?:number; physicalResist?: number; magicResist?: number; projectileReduction?: number;projectileReductionRange?:readonly [number,number];spellCooldownReduction?:number;dodgeCooldownReduction?:number;dodgeDistanceBonus?:number;moveSpeedMultiplier?:number;dodgeCooldownMultiplier?:number;lightRadiusMultiplier?:number }
+  /** 每趟下矿只抽一次的装备祝福，换房与换装不重抽。 */
+  mineRunBuffs?:readonly import('../../shared/statusEffects').StatusDefinition[]
+  /** 最大耐久；当前值保存在每一件物品上，耗尽后保留物品但停用消耗型被动。 */
+  durability?:number
+  meleeHitEffect?:{effect:import('../../shared/statusEffects').StatusDefinition;durabilityCost:number;nameKey:string;descriptionKey:string}
+  /** 被动装备赋予远程蓄力短闪保护；暴击只加给此次保留下来的满蓄力射击。 */
+  rangedChargeRoll?: { critChance: number; nameKey: string; descriptionKey: string }
   /** 镐/武器的近战招式（数据驱动挥击） */
   melee?: MeleeMove
   /** 连段逐段快照招式，可混合判定或保持同类攻击；单段武器使用 melee 定义。 */

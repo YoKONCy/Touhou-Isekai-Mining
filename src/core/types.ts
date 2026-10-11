@@ -11,6 +11,8 @@ export interface Vec2 {
 
 /** 引擎对外暴露给场景的上下文 */
 export interface EngineContext {
+  captureTiming?(): { hitStop: number }
+  restoreTiming?(state: { hitStop: number }): void
   /** 视口 CSS 像素宽高 */
   readonly viewW: number
   readonly viewH: number
@@ -36,7 +38,7 @@ export interface EngineContext {
 export interface GameScene {
   /** 场景挂载时调用一次 */
   enter?(ctx: EngineContext): void
-  /** 每帧逻辑更新（dt 单位秒，已做上限裁剪与命中停顿处理） */
+  /** 渲染帧入口；根场景负责将真实时间分配为固定逻辑步。 */
   update(dt: number, ctx: EngineContext): void
   /** 每帧渲染（坐标系由场景自行通过相机管理） */
   render(ctx: CanvasRenderingContext2D, engine: EngineContext): void

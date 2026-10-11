@@ -1,0 +1,18 @@
+import { type ItemDef } from '../../types'
+import { supplyIcon } from '../materials/supplyAppearance'
+import { MISO_TOFU_SOUP_ID, BITTER_HERB_SOUP_ID, KEDAMA_JELLY_ID, GRILLED_MUSHROOM_ID, GRILLED_TOFU_ID } from '../ids'
+import { SOUP_REGEN, JELLY_REGEN } from '../../../statuses/cuisine'
+import { NAUSEA } from '../../../statuses/nausea'
+
+function bowl(broth: string, pieces: string): string {
+  return `<ellipse cx="24" cy="42" rx="17" ry="3" fill="#221d27" opacity=".35"/><path d="M6 23Q7 40 24 41Q41 40 42 23" fill="#867d70"/><path d="M9 29Q14 38 23 38M32 36L37 31" fill="none" stroke="#c5b48c" stroke-width="1.5"/><ellipse cx="24" cy="23" rx="18" ry="7" fill="#c2b193"/><ellipse cx="24" cy="23" rx="15" ry="4.8" fill="${broth}"/>${pieces}<path d="M14 12Q10 8 15 4M25 12Q30 7 26 3M34 13Q38 9 34 6" fill="none" stroke="#d3c8b2" opacity=".6"/>`
+}
+const tofuPieces='<g fill="#e3d6ac"><path d="M12 22L19 20L23 23L16 26Z"/><path d="M26 22L32 20L36 23L30 26Z"/></g><path d="M13 21L17 20M28 22L32 21" stroke="#fff0cf"/><path d="M20 23L23 21M25 26L27 24" stroke="#6d895c" stroke-width="2"/>'
+const plate='<ellipse cx="24" cy="40" rx="20" ry="4" fill="#33242c" opacity=".3"/><path d="M3 33L23 25L45 33L25 43Z" fill="#a68d69"/><path d="M5 33L25 40L43 33" fill="none" stroke="#d0b48a"/><path d="M6 36L24 42L43 35" stroke="#5e4939" fill="none"/>'
+export const cuisine: ItemDef[] = [
+  {id:MISO_TOFU_SOUP_ID,kind:'consumable',maxStack:8,color:'#c1a174',hi:'#e9d9b5',text:'#decdaa',tags:['food','dish','soup'],consume:{heal:30,status:SOUP_REGEN},icon:supplyIcon(bowl('#b9985e',tofuPieces))},
+  {id:BITTER_HERB_SOUP_ID,kind:'consumable',maxStack:8,color:'#7e8b61',hi:'#c6cba3',text:'#bac59a',tags:['food','dish','soup'],consume:{heal:60,status:NAUSEA,statusDuration:6},icon:supplyIcon(bowl('#65734e','<path d="M13 23L20 19L23 23L17 25M26 25L30 20L36 23L32 26" fill="#9ca875"/><path d="M16 23L21 22M29 24L33 22" stroke="#cad3a3"/>'))},
+  {id:GRILLED_MUSHROOM_ID,kind:'consumable',maxStack:8,color:'#b88050',hi:'#e3bc7c',text:'#d8b688',tags:['food','dish','grilled'],consume:{heal:40},icon:supplyIcon(plate+'<path d="M9 37L38 22M12 40L41 25" stroke="#be9c68" stroke-width="2"/><g fill="#8c573e"><path d="M8 27Q9 14 19 20Q27 25 17 30Z"/><path d="M20 22Q23 10 33 17Q40 22 30 26Z"/><path d="M27 31Q31 21 40 27Q46 33 36 36Z"/></g><path d="M12 23L17 26M15 21L21 24M25 18L31 21M29 17L35 20M33 29L38 32" stroke="#422e29" stroke-width="1.7"/><path d="M11 20L16 18M25 15L29 14M33 26L37 25" stroke="#d2a469"/>')},
+  {id:GRILLED_TOFU_ID,kind:'consumable',maxStack:8,color:'#b9945c',hi:'#ead6aa',text:'#dcc493',tags:['food','dish','grilled'],consume:{heal:40},icon:supplyIcon(plate+'<path d="M10 31L14 20L28 17L36 23L31 34L18 37Z" fill="#b58d50"/><path d="M14 20L28 17L36 23L22 27Z" fill="#e5c68c"/><path d="M22 27L36 23L31 34L18 37Z" fill="#c8a268"/><path d="M18 20L26 24M23 18L31 22M22 29L31 27M21 33L29 31" stroke="#76503a" stroke-width="1.5"/><path d="M14 22L12 29" stroke="#efdbb4"/>')},
+  {id:KEDAMA_JELLY_ID,kind:'consumable',maxStack:8,color:'#a7aebb',hi:'#e0e2cc',text:'#ccd2ce',tags:['food','dish','jelly'],consume:{heal:40,status:JELLY_REGEN},icon:supplyIcon('<ellipse cx="24" cy="41" rx="20" ry="5" fill="#b5a589"/><ellipse cx="24" cy="40" rx="16" ry="3" fill="#6f6464"/><path d="M9 35L12 18Q25 9 36 18L40 35Q25 43 9 35Z" fill="#8babb2"/><path d="M12 18Q24 11 36 18Q25 25 12 18Z" fill="#c0d3cd"/><path d="M13 24L12 33Q16 37 19 35L18 25M28 25L30 36L35 34L34 24" fill="#e0ddbd" opacity=".75"/><path d="M18 20L20 35M26 22L27 37" stroke="#75939c"/><path d="M16 16L20 14M13 25L12 29" stroke="#f1eed6" stroke-width="2"/><circle cx="19" cy="25" r="1.4" fill="#354751"/><circle cx="29" cy="25" r="1.4" fill="#354751"/><path d="M22 29Q24 32 27 29" fill="none" stroke="#354751"/>')}
+]

@@ -24,6 +24,7 @@ export type ActionId =
   | 'hand3'
   | 'panel'
   | 'map'
+  | 'pause' | 'spellA' | 'spellB' | 'quick1' | 'quick2' | 'quick3'
 
 /** 绑定记号：KeyboardEvent.code 或鼠标特殊记号 */
 export type BindToken = string
@@ -46,7 +47,8 @@ const DEFAULT_BINDINGS: Record<ActionId, BindToken[]> = {
   hand3: ['Digit3'],
   // 背包面板（CaveModule 实际读取 Tab/KeyI；绑定登记在此让教学键帽可渲染可改键）
   panel: ['Tab', 'KeyI'],
-  map: ['KeyM']
+  map: ['KeyM'],
+  pause: ['Escape'],spellA:['KeyE'],spellB:['KeyR'],quick1:['Digit4'],quick2:['Digit5'],quick3:['Digit6']
 }
 
 /** 记号是否鼠标键 */

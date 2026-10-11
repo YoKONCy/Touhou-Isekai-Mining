@@ -13,6 +13,7 @@ import { propCartWreck } from './cartWreck'
 import { propTimberCollapse } from './timberCollapse'
 import { propBrokenRails } from './brokenRails'
 import { propRockCollapse } from './rockCollapse'
+import { oldHellContainerDefs } from './oldHellContainers'
 
 export function registerVanillaProps(): void {
   propDefs.register(propBoulder)
@@ -24,4 +25,5 @@ export function registerVanillaProps(): void {
   propDefs.register(propTimberCollapse)
   propDefs.register(propBrokenRails)
   propDefs.register(propRockCollapse)
+  for(const definition of oldHellContainerDefs)propDefs.register(definition)
 }

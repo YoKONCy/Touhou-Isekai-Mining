@@ -1,3 +1,4 @@
+import { randomVisual } from '../../core/simulation/random'
 /**
  * 批次 F⑦（追加轮·二改）· 漂浮动态云层雾气
  *
@@ -15,6 +16,21 @@
  * fog=实体上空气云层。
  */
 import { CONFIG } from '../config'
+import { radialStamp } from '../../core/rendering/RadialStamp'
+import { drawSprite } from '../../core/rendering/SpriteCache'
+import { canvasViewport, visible, type Viewport } from '../../core/rendering/Viewport'
+import { profiler } from '../../core/performance/Profiler'
+const FOG_STOPS:readonly [number,string][]=[[0,'rgba(196,205,226,1)'],[.5,'rgba(176,186,208,.62)'],[1,'rgba(160,170,196,0)']]
+
+interface FogRaster {
+  image: HTMLCanvasElement
+  context: CanvasRenderingContext2D
+  left: number; top: number; width: number; height: number
+  time: number; opacity: number; alpha: number; roomW: number; roomH: number
+  density: number
+}
+// 渲染缓存放在模拟状态之外，避免图像资源进入快照。
+const rasters = new WeakMap<FogField, FogRaster>()
 
 /** 云块内的一个软圆瓣 */
 interface FogLobe {
@@ -56,35 +72,35 @@ export class FogField {
 
   /** 生成一块多瓣云：宽 320~620，6~10 个 lobe，中轴附近厚、两端薄 */
   private makePatch(): FogPatch {
-    const width = 320 + Math.random() * 300
+    const width = 320 + randomVisual() * 300
     const lobes: FogLobe[] = []
-    const n = 6 + Math.floor(Math.random() * 5)
+    const n = 6 + Math.floor(randomVisual() * 5)
     let halfW = 0
     for (let i = 0; i < n; i++) {
       // lobe 沿云长轴铺开：均匀位置 + 抖动，端部自动收小
       const along = i / (n - 1) // 0~1
       const endK = Math.sin(along * Math.PI) // 端部 0、中部 1
-      const ox = (along - 0.5) * width * (0.9 + Math.random() * 0.2) + (Math.random() - 0.5) * 40
-      const oy = (Math.random() - 0.5) * (46 + endK * 46)
-      const r = (64 + Math.random() * 52) * (0.55 + endK * 0.6)
+      const ox = (along - 0.5) * width * (0.9 + randomVisual() * 0.2) + (randomVisual() - 0.5) * 40
+      const oy = (randomVisual() - 0.5) * (46 + endK * 46)
+      const r = (64 + randomVisual() * 52) * (0.55 + endK * 0.6)
       halfW = Math.max(halfW, Math.abs(ox) + r)
       lobes.push({
         ox,
         oy,
         r,
-        phase: Math.random() * Math.PI * 2,
-        breath: 0.04 + Math.random() * 0.06
+        phase: randomVisual() * Math.PI * 2,
+        breath: 0.04 + randomVisual() * 0.06
       })
     }
     return {
-      nx: Math.random(),
-      ny: Math.random(),
-      vx: 0.006 + Math.random() * 0.01,
-      swayAmp: 8 + Math.random() * 16,
-      swayFreq: 0.06 + Math.random() * 0.08,
-      phase: Math.random() * Math.PI * 2,
-      baseA: 0.62 + Math.random() * 0.38,
-      breathFreq: 0.04 + Math.random() * 0.05,
+      nx: randomVisual(),
+      ny: randomVisual(),
+      vx: 0.006 + randomVisual() * 0.01,
+      swayAmp: 8 + randomVisual() * 16,
+      swayFreq: 0.06 + randomVisual() * 0.08,
+      phase: randomVisual() * Math.PI * 2,
+      baseA: 0.62 + randomVisual() * 0.38,
+      breathFreq: 0.04 + randomVisual() * 0.05,
       lobes,
       halfW
     }
@@ -94,11 +110,62 @@ export class FogField {
     this.t += dt
   }
 
+  get rasterBytes(): number {
+    const image = rasters.get(this)?.image
+    return image ? image.width * image.height * 4 : 0
+  }
+  releaseRenderResources(): void {
+    const cached = rasters.get(this)
+    if (cached) cached.image.width = cached.image.height = 1
+    rasters.delete(this)
+  }
+
   /**
    * 按房间像素尺寸全屋绘制；云块漂出边缘时在对侧补画整块副本（无缝）。
    */
   render(ctx: CanvasRenderingContext2D, w: number, h: number): void {
     if (!CONFIG.art.fog.enabled) return
+    const started=profiler.start(),view=canvasViewport(ctx)
+    const width = view.right - view.left, height = view.bottom - view.top
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+      this.drawPatches(ctx, w, h, view)
+      profiler.end('fog', started)
+      return
+    }
+    const density = Math.min(1, 960 / Math.max(width, height))
+    let cached = rasters.get(this)
+    if (!cached) {
+      const image = document.createElement('canvas')
+      cached = { image, context: image.getContext('2d')!, left: NaN, top: NaN, width: NaN, height: NaN, time: NaN, opacity: NaN, alpha: NaN, roomW: NaN, roomH: NaN, density }
+      rasters.set(this, cached)
+    }
+    if (cached.left !== view.left || cached.top !== view.top || cached.width !== width || cached.height !== height || cached.density !== density
+      || cached.time !== this.t || cached.opacity !== ctx.globalAlpha || cached.alpha !== CONFIG.art.fog.alpha || cached.roomW !== w || cached.roomH !== h) {
+      const pixelsW = Math.max(1, Math.ceil(width * density)), pixelsH = Math.max(1, Math.ceil(height * density))
+      if (cached.image.width !== pixelsW) cached.image.width = pixelsW
+      if (cached.image.height !== pixelsH) cached.image.height = pixelsH
+      const c = cached.context
+      c.setTransform(1, 0, 0, 1, 0, 0)
+      c.clearRect(0, 0, cached.image.width, cached.image.height)
+      c.setTransform(density, 0, 0, density, -view.left * density, -view.top * density)
+      // 每瓣的原始透明度一起合成，保留多瓣重叠处的云核厚度。
+      c.globalAlpha = ctx.globalAlpha
+      this.drawPatches(c, w, h, view)
+      cached.left = view.left; cached.top = view.top; cached.width = width; cached.height = height
+      cached.density = density; cached.time = this.t; cached.opacity = ctx.globalAlpha
+      cached.alpha = CONFIG.art.fog.alpha; cached.roomW = w; cached.roomH = h
+      profiler.increment('fogBakes')
+    } else profiler.increment('fogReuses')
+    ctx.save()
+    ctx.globalAlpha = 1
+    ctx.imageSmoothingEnabled = true
+    ctx.drawImage(cached.image, 0, 0, width * density, height * density, view.left, view.top, width, height)
+    ctx.restore()
+    profiler.end('fog',started)
+  }
+
+  /** 云瓣先在柔光贴图内合成；显示帧只往主画布覆盖一次。 */
+  private drawPatches(ctx: CanvasRenderingContext2D, w: number, h: number, view: Viewport): void {
     const t = this.t
     const span = 1.5
     for (const p of this.patches) {
@@ -108,10 +175,10 @@ export class FogField {
       const y = p.ny * h + Math.sin(t * p.swayFreq * Math.PI * 2 + p.phase) * p.swayAmp
       const breath = 0.82 + 0.18 * Math.sin(t * p.breathFreq * Math.PI * 2 + p.phase * 1.7)
       const a = CONFIG.art.fog.alpha * p.baseA * breath
-      this.drawCloud(ctx, p, x, y, t, a)
+      this.drawCloud(ctx, p, x, y, t, a,view)
       // 对侧副本：只有真正越界（云缘超出屏幕）时才补
-      if (x - p.halfW < 0) this.drawCloud(ctx, p, x + w, y, t, a)
-      else if (x + p.halfW > w) this.drawCloud(ctx, p, x - w, y, t, a)
+      if (x - p.halfW < 0) this.drawCloud(ctx, p, x + w, y, t, a,view)
+      else if (x + p.halfW > w) this.drawCloud(ctx, p, x - w, y, t, a,view)
     }
   }
 
@@ -122,22 +189,17 @@ export class FogField {
     x: number,
     y: number,
     t: number,
-    alpha: number
+    alpha: number,
+    view:Viewport
   ): void {
     if (alpha <= 0.001) return
     for (const l of p.lobes) {
       const k = 1 + l.breath * Math.sin(t * 0.5 + l.phase)
       const r = l.r * k
       const ly = y + l.oy + Math.sin(t * 0.3 + l.phase * 2.1) * 5
-      const g = ctx.createRadialGradient(x + l.ox, ly, r * 0.08, x + l.ox, ly, r)
-      // 核心偏亮（云的厚度）→ 中段灰蓝 → 外缘完全消散
-      g.addColorStop(0, `rgba(196,205,226,${alpha})`)
-      g.addColorStop(0.5, `rgba(176,186,208,${alpha * 0.62})`)
-      g.addColorStop(1, 'rgba(160,170,196,0)')
-      ctx.fillStyle = g
-      ctx.beginPath()
-      ctx.arc(x + l.ox, ly, r, 0, Math.PI * 2)
-      ctx.fill()
+      if(!visible(view,x+l.ox,ly,r))continue
+      ctx.save();ctx.imageSmoothingEnabled=true;ctx.translate(x+l.ox,ly);ctx.scale(r/128,r/128);ctx.globalAlpha*=alpha
+      drawSprite(ctx,radialStamp('fog:lobe',.08,FOG_STOPS));ctx.restore()
     }
   }
 }

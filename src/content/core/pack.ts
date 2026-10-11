@@ -17,6 +17,7 @@ import type { ProjectileDef } from '../projectiles/types'
 import type { MineralDef } from '../minerals/types'
 import type { PropDef } from '../props/types'
 import type { BiomeDef } from '../biomes/types'
+import type { SearchEffectDefinition } from '../search/types'
 
 /** 包清单（未来数据包可直接写成 pack.json） */
 export interface PackManifest {
@@ -41,6 +42,7 @@ export type ApiRegistryName =
   | 'minerals'
   | 'props'
   | 'biomes'
+  | 'searchEffects'
 
 /**
  * 注册入口拿到的 API 句柄：各类资源注册表统一从这里取，
@@ -66,6 +68,8 @@ export interface PackApi {
   readonly props: Registry<PropDef>
   /** 生物群系（房型投放表） */
   readonly biomes: Registry<BiomeDef>
+  /** 搜索经济的纯计算修正（幸运、事件或特殊词条）。 */
+  readonly searchEffects: Registry<SearchEffectDefinition>
   /** 按类别名取注册表（具名字段的字符串镜像，数据驱动/未来新类别兜底） */
   registry<T extends { id: string }>(name: ApiRegistryName): Registry<T>
 }

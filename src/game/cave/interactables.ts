@@ -7,7 +7,7 @@
  */
 import type { EquipSlot, ItemId } from '../../shared/itemDefs'
 
-export type InteractKind = 'item' | 'torch' | 'chest' | 'special'
+export type InteractKind = 'item' | 'torch' | 'chest' | 'special' | 'search'
 
 /** 一次交互同时结算的物品条目（主件或附带件通用） */
 export interface ItemGrant {

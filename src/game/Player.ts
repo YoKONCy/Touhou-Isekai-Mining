@@ -1,6 +1,13 @@
+import { ActionBuffer } from '../core/simulation/ActionBuffer'
+import { SnapshotCodec, type StateFields } from '../core/simulation/snapshot'
+import { MotionHistory } from '../core/simulation/interpolation'
+import { nextEntityId, emitSimulationEvent } from '../core/simulation/events'
+import { randomCombat,randomVisual } from '../core/simulation/random'
+import { renderMeleeEcho,type MeleeEcho } from './MeleeEchoes'
+import { simulationAppearance, withSimulationAppearance, withPlayerCostume, type PlayerAppearance, type PlayerCostume } from '../shared/playerAppearance'
 import { CONFIG, type DodgeKind, type DodgePhase, type SwingPhase } from './config'
 import type { Collider, TileMap } from './tilemap'
-import { getItemDef, type ItemId, type MeleeMove, type SpellCardDef } from '../shared/itemDefs'
+import { getItemDef, items, type ItemId, type MeleeMove, type SpellCardDef } from '../shared/itemDefs'
 import { PICK_RUSTY_ID, DOOMSDAY_ID } from '../content/items/vanilla/ids'
 import { sfx } from './audio/Sfx'
 import { drawDoomCrescents, drawDoomTransition } from '../content/items/vanilla/weapons/doomsday/effects'
@@ -12,21 +19,74 @@ import { drawRigWeapon } from './art/rig/weaponRig'
 import type { WeaponTrailView, WeaponImpactInstance, WeaponBladeSegment, WeaponMotionView } from '../content/items/types'
 import type { WeaponSweep, WeaponPhysics, WeaponCurveView } from '../content/items/types'
 import { resolveCircleProps, type Prop } from './art/props'
-import { calculateDamage, type DamageKind, type DerivedCombat } from '../shared/combat'
-import { rarityColor, COSMIC_RARITY, RARITY_DEFAULT_COLOR } from '../shared/rarity'
+import { applyFlatResistance, type DamageKind, type DerivedCombat, type PassiveEquipmentStats } from '../shared/combat'
+import { gradeColor, COSMIC_GRADE, QUALITY_DEFAULT_COLOR } from '../shared/itemQuality'
 import { itemName } from '../i18n'
 import { StatusEffects, SLAUGHTER_STANCE, type StatusDefinition } from '../shared/statusEffects'
 import { meleeForSegment, chargeMultiplier } from '../content/items/combatComponents'
 import { TarotState } from '../content/items/vanilla/weapons/tarot/state'
 import { BowState } from './ranged/BowState'
+import { Scp127State } from './ranged/Scp127State'
+import { profiler } from '../core/performance/Profiler'
 import type { Inventory } from '../shared/inventory'
+import { uniqueTrinketSlots,type Equipment } from '../shared/equipment'
+import { FOOD_COOLDOWN_SECONDS, SATIETY_ID, type FoodState } from '../shared/food'
+import { SATIETY } from '../content/statuses/cuisine'
 
 /** 批次 E：统一深描边色（与场景 artPalette.ink 同源） */
 const ART_INK = '#241a12'
+const NO_STATUS_DAMAGE:readonly number[]=[]
+export interface PlayerInput {
+  cancelActions?:boolean
+  moveX:number;moveY:number;pointerX:number;pointerY:number
+  dodgePressed:boolean;dodgeHeld:boolean;dodgeReleased:boolean
+  attackPressed:boolean;attackHeld:boolean;attackReleased?:boolean
+  specialPressed?:boolean;specialHeld?:boolean;specialReleased?:boolean
+}
 
 /** 玩家：移动 / 闪避 / 挥镐 三态状态机 + 受伤/死亡结算 */
 export class Player {
+  readonly entityId = nextEntityId('player')
+  /** 多玩家外观由参与者绑定；单人旧入口可继续沿用当前档案的选择。 */
+  appearance: PlayerAppearance | null = null
+  costume: PlayerCostume = 'default'
+  playerId: string | null = null
+  /** 搜索动作属于角色自身，所有本地参与者共用同一套骨骼动作。 */
+  searching = false
+  damageRevision = 0
+  setSearching(active: boolean): void {
+    if (this.searching === active) return
+    this.searching = active
+    this.animator.setSearching(active)
+    this.renderPoseCache = null
+    if (active) { this.cancelCharge(); this.bow.cancelGesture() }
+  }
+  protected readonly motionHistory = new MotionHistory()
+  /** 表现层统一使用插值位置，照明和雾中清晰区与人物贴图保持同步。 */
+  get renderPosition():{x:number;y:number}{
+    const offset=this.motionHistory.offset(this.x,this.y)
+    return {x:this.x+offset.x,y:this.y+offset.y}
+  }
+  private renderPoseCache:{facing:number;pose:ReturnType<PlayerAnimator['build']>}|null=null
+
+  private readonly inputBuffer = new ActionBuffer()
   readonly effects = new StatusEffects(this)
+  private statusDamageNumbers:number[]=[]
+  drainStatusDamage():readonly number[] {return this.statusDamageNumbers.length?this.statusDamageNumbers.splice(0):NO_STATUS_DAMAGE}
+  /** 附着在身上的灼烧不受护甲、伤害倍率或翻滚无敌影响；统一维护死亡与搜索中断。 */
+  takeStatusDamage(amount:number,_source:string):void {
+    const before=this.hp
+    this.takeHit(amount,0,'true',false,'status')
+    if(this.hp<before)this.statusDamageNumbers.push(before-this.hp)
+  }
+  food:FoodState = { remaining: 0, duration: FOOD_COOLDOWN_SECONDS, effects: [] }
+  bindFood(food: Player['food']):void {
+    if(this.food===food)return
+    this.food=food
+    this.effects.restoreSaved(food.effects,id=>id===SATIETY_ID?SATIETY:items.all().find(item=>item.consume?.status?.id===id)?.consume?.status)
+    this.saveFoodEffects()
+  }
+  saveFoodEffects():void { this.food.remaining=this.effects.remaining(SATIETY_ID)??0;this.effects.syncSaved('food:',this.food.effects) }
   x: number
   y: number
   vx = 0
@@ -76,15 +136,44 @@ export class Player {
   rangedCooldown = 0
   readonly tarot = new TarotState()
   readonly bow = new BowState()
+  readonly scp127 = new Scp127State()
   ammoInventory: Inventory | null = null
   rangedFlight: { item: ItemId; x: number; y: number; angle: number; remaining: number; returning: boolean; rotation: number; hits: Set<unknown>; attackPower: number; critChance: number; penetration: number; damageBonus?:number } | null = null
   attackPower = 0
   physicalResist = 0
   magicResist = 0
   attackSpeedMul = 1
-  equipmentCombat = { critChance: 0, penetration: 0, physicalResist: 0, magicResist: 0, projectileReduction: 0 }
+  equipmentCombat: PassiveEquipmentStats = { critChance: 0, meleeCritChance:0, meleeWeaponDamageBonus:0, penetration: 0, physicalResist: 0, magicResist: 0, projectileReduction: 0, spellCooldownReduction:0, dodgeCooldownReduction:0, dodgeDistanceBonus:0, preserveRangedChargeOnRoll: false, rangedChargeRollCritChance: 0,projectileReductionMin:0,projectileReductionMax:0,moveSpeedMultiplier:1,dodgeCooldownMultiplier:1 }
+  private mineRunToken:string|null=null
+  private spellChannelRemaining=0
+  private channelSpell:SpellCardDef|null=null
+  get isChanneling():boolean{return this.alive&&this.spellChannelRemaining>1e-8}
+  private equipmentSource:Equipment|null=null
+  private swingAccessoryEffects:StatusDefinition[]|null=null
+  private dodgeDistanceMul=1
+  bindEquipment(equipment:Equipment):void {this.equipmentSource=equipment}
+  beginMineRun(token:string):void {
+    if(this.mineRunToken===token)return
+    this.mineRunToken=token;this.effects.removeSource('equipment:mineRun')
+    if(!this.equipmentSource)return
+    for(const slot of uniqueTrinketSlots(this.equipmentSource)){
+      const id=this.equipmentSource.get(slot),buffs=id?getItemDef(id).mineRunBuffs:undefined
+      if(buffs?.length)this.effects.add(buffs[Math.floor(randomCombat()*buffs.length)]!,'equipment:mineRun',null)
+    }
+  }
+  /** 第一次实际命中才消耗耐久；缓存覆盖整次挥舞，包括跨帧和多段判定。 */
+  meleeAccessoryEffects():readonly StatusDefinition[] {
+    if(this.swingAccessoryEffects)return this.swingAccessoryEffects
+    const effects:StatusDefinition[]=[],seen=new Set<string>()
+    for(const slot of this.equipmentSource?uniqueTrinketSlots(this.equipmentSource):[]){
+      const stack=this.equipmentSource?.getStack(slot),passive=stack?getItemDef(stack.id).meleeHitEffect:undefined
+      if(!passive||seen.has(passive.effect.id)||!this.equipmentSource?.wear(slot,passive.durabilityCost))continue
+      effects.push(passive.effect);seen.add(passive.effect.id)
+    }
+    this.swingAccessoryEffects=effects;return effects
+  }
   private levelNoticeStart = -1
-  showLevelUp(): void { this.levelNoticeStart = performance.now() }
+  showLevelUp(): void { this.levelNoticeStart = (this.effectTime * 1000) }
 
   /** 切换手持时头顶弹名（只对真实物品生效；首次同步上膛，不弹） */
   private toolNoticeArmed = false
@@ -179,6 +268,9 @@ export class Player {
   /** 冷却按物品保存，切手持不能重置技能。 */
   private chargeCooldowns = new Map<ItemId, number>()
   private weaponBurst: { tool: ItemId; elapsed: number; index: number; count: number; duration: number; segments?: readonly number[]; move?: MeleeMove } | null = null
+  areaBurst:{weaponId:string;x:number;y:number;angle:number;age:number;duration:number;count:number;issued:number;range:number;width:number;physicalDamage:number;magicDamage:number;physicalPenetration:number;magicPenetration:number}|null=null
+  private get areaBurstActive():boolean{return !!this.areaBurst&&this.areaBurst.age<this.areaBurst.duration}
+  getWeaponSkillCooldown(id:string):number{return this.chargeCooldowns.get(id)??0}
   get weaponSkillCooldown(): number { return this.toolId ? this.chargeCooldowns.get(this.toolId) ?? 0 : 0 }
   get chargeProgress(): number { return this.charging ? Math.min(1, this.chargeElapsed / (this.weaponResource?.chargeAttack?.duration ?? 1)) : 0 }
   get swingChargeMultiplier(): number { return this.swingPhase === 'none' ? 1 : this.swingChargePower }
@@ -205,11 +297,16 @@ export class Player {
   private get swingEmpowered(): boolean { return this.doom.swingEmpowered || this.swingDamageBonus > 0 || this.swingChargePower > 1 || this.swingChargeFull }
   /** 武器连段当前段，具体招式与动作数量由资源声明。 */
   private weaponTrails: Array<WeaponTrailView & { duration: number; render: (ctx: CanvasRenderingContext2D, view: WeaponTrailView) => void }> = []
+  readonly meleeEchoes:MeleeEcho[]=[]
   private comboIndex = 0
   /** 连段输入缓冲（active 后半 / recover 内出现 held 即排队下一段） */
   private comboBuffer = false
   /** 收招后连段保留计时：0.25s 内再攻击=接续下一段，超时 comboIndex 归零 */
   private comboResetT = 0
+  /** 按武器记录已挥出的刀数，避免切换装备绕过连击恢复。 */
+  private comboAttacks = new Map<ItemId, number>()
+  private pendingAttackRecovery = 0
+  private attackRecovery = 0
   private readonly doom = new DoomsdayState()
   get doomHitIndex(): number { return this.doom.hitIndex }
   get doomSwingSerial(): number { return this.doom.swingSerial }
@@ -227,7 +324,7 @@ export class Player {
   get doomsdayCanActivate(): boolean { return this.isDoomsday && !this.doom.mode && this.doom.cooldown <= 0 }
   /** 充能条脉冲强度 1→0（0.5s 衰减窗） */
   get doomsdayCdPulse(): number {
-    const age = (performance.now() - this.doom.cdPulseAt) / 1000
+    const age = ((this.effectTime * 1000) - this.doom.cdPulseAt) / 1000
     return age >= 0 && age < 0.5 ? 1 - age / 0.5 : 0
   }
   /**
@@ -235,10 +332,11 @@ export class Player {
    * @returns 本次是否真正减免了冷却（调用端据此播放飘字与脉冲）
    */
   reduceDoomCooldown(seconds: number): boolean {
-    return this.doom.reduceCooldown(seconds)
+    return this.doom.reduceCooldown(seconds,this.effectTime)
   }
   startDoomsday(strikes: number): void {
-    if (!this.doomsdayCanActivate || strikes <= 0) return
+    if (this.isChanneling) return
+    if (!this.doomsdayCanActivate || strikes <= 0 || this.attackRecovery > 0 || this.pendingAttackRecovery > 0) return
     this.doom.start(strikes)
     this.effects.add(SLAUGHTER_STANCE, 'skill:doomsday')
     this.swingPhase = 'none'
@@ -299,6 +397,33 @@ export class Player {
     return this.comboIndex === 2 && this.swingPhase !== 'none'
   }
 
+  captureSimulation(codec: SnapshotCodec): StateFields {
+    const fields = codec.capture(this, ['equipmentSource','food','renderPoseCache','motionHistory','statusDamageNumbers', 'ammoInventory', 'weaponPhysics', 'weaponSweep', 'physicsMap', 'physicsHitTest', 'weaponTrails', 'trail', 'poseTrail', 'statusTrail', 'scp127', 'toolNotice', 'toolNoticeArmed', 'levelNoticeStart', 'hurtFlashAt', 'hurtFlashSeverity'])
+    fields.scp127 = this.scp127.captureSimulation(codec)
+    // 输出姿态是可重算的缓存，不能让是否绘制角色改变快照校验结果。
+    fields.animator={$type:'object',fields:codec.capture(this.animator,['out'])}
+    fields.weaponPhysics = this.weaponPhysics ? codec.encode(this.weaponPhysics) : null
+    fields.weaponSweep = this.weaponSweep ? codec.encode(this.weaponSweep) : null
+    return fields
+  }
+  restoreSimulation(state: StateFields, codec: SnapshotCodec, map?: TileMap): void {
+    const { scp127, weaponPhysics, weaponSweep, ...fields } = state
+    this.areaBurst=null
+    this.meleeEchoes.length=0
+    codec.restore(this, fields)
+    this.statusDamageNumbers.length=0
+    this.scp127.restoreSimulation(scp127 as StateFields, codec)
+    const definition = this.physicsTool ? getItemDef(this.physicsTool).weapon : null
+    this.weaponPhysics = definition?.createPhysics?.() ?? null
+    this.weaponSweep = definition?.createSweep?.() ?? null
+    if (weaponPhysics) this.weaponPhysics = codec.decode(weaponPhysics, this.weaponPhysics) as WeaponPhysics
+    if (weaponSweep) this.weaponSweep = codec.decode(weaponSweep, this.weaponSweep) as WeaponSweep
+    this.physicsHitTest = null
+    this.physicsMap = map ?? null
+    this.motionHistory.reset()
+    this.renderPoseCache=null
+  }
+
   constructor(x: number, y: number) {
     this.x = x
     this.y = y
@@ -306,22 +431,28 @@ export class Player {
 
   /** 更换手持近战招式与手持物（切换武器A/B/镐时由 CaveModule 同步）；null = 空手 */
   setMelee(move: MeleeMove | null, tool: ItemId | null): void {
+    withSimulationAppearance(this.appearance ?? simulationAppearance(),()=>this.setMeleeCurrent(move,tool))
+  }
+  private setMeleeCurrent(move: MeleeMove | null, tool: ItemId | null): void {
+    this.setSearching(false)
+    this.renderPoseCache=null
     if (this.toolId === DOOMSDAY_ID && tool !== DOOMSDAY_ID) this.cancelDoomsdayAction()
     const prev = this.toolId
     this.melee = move
+    if(tool!==this.toolId)this.inputBuffer.clear()
     this.toolId = tool
-    if (tool !== prev) { this.bow.cancelGesture(); this.projectileErasure.length = 0; this.cancelCharge(); this.resetWeaponPhysics(); this.comboResetT = 0 }
+    if (tool !== prev) { this.bow.cancelGesture(true); this.projectileErasure.length = 0; this.cancelCharge(); this.resetWeaponPhysics(); this.comboResetT = 0 }
     this.syncHeldEffects()
     // 首次 setMelee 是进房/初始化同步，只上膛避免开局自弹；之后手持真正变化才弹名。
     // 切到空手（tool=null）静默；重复同步同一 id 也不弹。
     if (!this.toolNoticeArmed) { this.toolNoticeArmed = true; return }
     if (tool && tool !== prev) {
-      const rarity = getItemDef(tool).rarity
+      const grade = getItemDef(tool).grade
       this.toolNotice = {
         name: itemName(tool),
-        color: rarityColor(rarity) ?? RARITY_DEFAULT_COLOR,
-        cosmic: rarity === COSMIC_RARITY,
-        start: performance.now()
+        color: gradeColor(grade) ?? QUALITY_DEFAULT_COLOR,
+        cosmic: grade === COSMIC_GRADE,
+        start: (this.effectTime * 1000)
       }
     }
   }
@@ -334,6 +465,10 @@ export class Player {
 
   /** 攻击增伤统一进入伤害乘区，近战实时读取，投射与连续符术在释放时快照。 */
   get outgoingDamageBonus():number{return this.effects.modify('damageDealt',1)-1}
+  get physicalDamageMultiplier():number{return this.effects.modify('physicalDamageDealt',1)}
+  get physicalOutgoingDamageBonus():number{return (1+this.outgoingDamageBonus)*this.physicalDamageMultiplier-1}
+  /** 仅近战武器结算读取，镐、远程弹体与符卡不使用此倍率。 */
+  get meleeWeaponDamageMultiplier():number{return this.activeToolId&&getItemDef(this.activeToolId).kind==='weapon'?Math.max(0,1+(this.equipmentCombat.meleeWeaponDamageBonus??0)):1}
 
   /** 当前动作手持物 id（挥击中读快照；矿脉门控/渲染分派共用） */
   get activeToolId(): ItemId | null {
@@ -361,15 +496,27 @@ export class Player {
   }
 
   /** 治疗（消耗品）；返回实际回复量 */
-  /** 食用成功后才添加状态，满血时保留食物。 */
+  /** 所有食用入口尊重状态系统的进食限制；带状态的料理满血也可吃。 */
   consumeItem(id: ItemId): boolean {
-    if (!this.alive) return false
+    if (!this.alive || this.isChanneling || this.effects.eatingDisabled) return false
     const effect = getItemDef(id).consume
     if (!effect) return false
-    if (effect.heal && this.heal(effect.heal) <= 0) return false
     if (!effect.heal && !effect.status) return false
-    if (effect.status) this.effects.add(effect.status, `food:${effect.status.id}`)
+    if (effect.heal && this.hp >= this.maxHp && !effect.status) return false
+    if (effect.heal && this.heal(effect.heal) <= 0 && !effect.status) return false
+    if (effect.status) this.effects.add(effect.status, `food:${effect.status.id}`, effect.statusDuration)
+    this.food.duration = Math.max(0, effect.satiety ?? FOOD_COOLDOWN_SECONDS)
+    if(this.food.duration>0)this.effects.add(SATIETY, 'food:satiety', this.food.duration)
+    this.saveFoodEffects()
+    this.setSearching(false)
     return true
+  }
+
+  restoreMana(amount: number): number {
+    if (!this.alive || amount <= 0) return 0
+    const before = this.mana
+    this.mana = Math.min(this.maxMana, this.mana + amount)
+    return this.mana - before
   }
 
   heal(amount: number): number {
@@ -380,7 +527,7 @@ export class Player {
     this.hp = Math.min(this.maxHp, this.hp + this.effects.modify('healing', event.amount))
     const real = this.hp - before
     this.effects.dispatch('healed', { amount: real })
-    if (real > 0) sfx.heal()
+    if (real > 0) { emitSimulationEvent({type:'heal',target:this.entityId,amount:real});sfx.heal() }
     return real
   }
 
@@ -389,6 +536,8 @@ export class Player {
    * 清除死亡/动作残留状态，原地以指定血量站起，并给 2 秒受创无敌防止围殴再死。
    */
   revive(hp: number): void {
+    this.areaBurst=null
+    this.meleeEchoes.length=0
     this.cancelCharge()
     this.swingRollBonus = 0
     this.clearStatusTrail()
@@ -431,7 +580,7 @@ export class Player {
 
   /** 符卡此刻能否释放（CD 已好且灵力够） */
   canCast(def: SpellCardDef): boolean {
-    return this.alive && this.spellCooldown <= 0 && this.mana >= this.effects.modify('manaCost', def.manaCost)
+    return this.alive && !this.isChanneling && (!def.channelTime||this.dodgePhase==='none') && this.spellCooldown <= 0 && this.mana >= this.effects.modify('manaCost', def.manaCost)
   }
 
   /**
@@ -440,46 +589,67 @@ export class Player {
    */
   castSpell(def: SpellCardDef): boolean {
     if (!this.canCast(def)) return false
+    this.setSearching(false)
     const manaCost = this.effects.modify('manaCost', def.manaCost)
     this.mana -= manaCost
-    this.spellCooldown = this.effects.modify('spellCooldown', def.cooldown)
+    this.spellCooldown = this.effects.modify('spellCooldown', def.cooldown)*Math.max(0,1-(this.equipmentCombat.spellCooldownReduction??0))
     this.lastSpellCdTotal = this.spellCooldown
     this.effects.dispatch('spell', { manaCost, cooldown: this.spellCooldown })
+    if(def.channelTime){
+      if(this.isDoomsday)this.finishDoomsday()
+      this.cancelCharge();this.bow.cancelGesture();if(this.swingPhase!=='none')this.finishSwing()
+      this.pendingDodge=false;this.inputBuffer.clear()
+      this.channelSpell=def;this.spellChannelRemaining=def.channelTime
+    }
     return true
   }
 
-  /** 受伤：扣血 + 受伤无敌帧 + 击退；已死亡或无敌中无效；剧情锁血时最多打到 1 滴 */
-  takeHit(amount: number, dirAngle: number, kind: DamageKind = 'physical', projectile = false): void {
-    if (!this.alive || this.isInvincible || this.debugGod) return
+  /** 普通命中产生无敌帧和击退；持续伤害走独立节拍，真实伤害绕过双抗与减伤倍率。 */
+  takeHit(amount: number, dirAngle: number, kind: DamageKind|'true' = 'physical', projectile = false, periodic:boolean|'status' = false): void {
+    // 地火保留闪避免伤；已经附着的状态跳伤不借用普通受伤或闪避无敌帧。
+    if (!this.alive || (periodic==='status' ? false : periodic ? this.untargetable||this.iFrameTimer>0 : this.isInvincible) || this.debugGod) return
     const event = { amount, kind, cancelled: false }
     this.effects.dispatch('beforeDamage', event)
     if (event.cancelled) return
-    const resisted = calculateDamage({base:Math.max(0, event.amount),resistance:kind === 'magic' ? this.magicResist + this.equipmentCombat.magicResist : this.physicalResist + this.equipmentCombat.physicalResist}).damage
-    const modified = this.effects.modify('damageTaken', kind === 'physical' ? this.effects.modify('physicalDamageTaken', resisted) : resisted)
-    // 木盾在最终弹幕伤害上固定扣除，不降低接触、近战或地面范围伤害。
-    const damage = Math.max(0, modified - (projectile ? this.equipmentCombat.projectileReduction : 0))
+    this.damageRevision++
+    this.setSearching(false)
+    const modified = kind==='true'?Math.max(0,event.amount):this.effects.modify('damageTaken',this.effects.modify(kind==='magic'?'magicDamageTaken':'physicalDamageTaken',Math.max(0,event.amount)))
+    const resistance=kind==='magic'?this.magicResist+this.equipmentCombat.magicResist:this.effects.modify('physicalResist',this.physicalResist+this.equipmentCombat.physicalResist)
+    // 装备与握持状态的固定弹幕减伤在最终结算相加，不作用于接触、近战或地面范围伤害。
+    const min=this.equipmentCombat.projectileReductionMin??0,max=this.equipmentCombat.projectileReductionMax??0
+    const randomReduction=projectile&&max>0?min+Math.floor(randomCombat()*(max-min+1)):0
+    const projectileReduction = projectile ? this.effects.modify('projectileReduction', this.equipmentCombat.projectileReduction + randomReduction) : 0
+    const damage = kind==='true'?modified:applyFlatResistance(modified,resistance,0,0,projectileReduction)
     const beforeHp = this.hp
     this.hp = Math.max(this.storyGuard ? 1 : 0, this.hp - damage)
     this.effects.dispatch('damaged', { amount: beforeHp - this.hp, kind })
-    this.hurtTimer = CONFIG.hurt.iFrame
+    if(this.hp<beforeHp)emitSimulationEvent({type:'damage',target:this.entityId,amount:beforeHp-this.hp,kind})
+    if(!periodic)this.hurtTimer = this.effects.modify('hurtIFrame',CONFIG.hurt.iFrame)
     if (this.hp < beforeHp) {
-      this.hurtFlashAt = performance.now()
+      if(this.charging&&this.weaponResource?.chargeAttack?.immobilize)this.cancelCharge()
+      this.hurtFlashAt = (this.effectTime * 1000)
       this.hurtFlashSeverity = Math.pow(1 - Math.max(0, Math.min(1, this.hp / this.maxHp)), 2)
       sfx.hurt()
     }
-    this.knockX = Math.cos(dirAngle) * CONFIG.hurt.knockback
-    this.knockY = Math.sin(dirAngle) * CONFIG.hurt.knockback
+    if(!periodic){this.knockX = Math.cos(dirAngle) * CONFIG.hurt.knockback
+    this.knockY = Math.sin(dirAngle) * CONFIG.hurt.knockback}
     if (this.hp <= 0 && !this.storyGuard) {
       this.cancelCharge()
       this.swingRollBonus = 0
       this.alive = false
+      this.spellChannelRemaining=0;this.channelSpell=null
+      this.inputBuffer.clear()
+      emitSimulationEvent({type:'death',target:this.entityId})
       this.clearStatusTrail()
       this.resetWeaponPhysics()
       this.effects.dispatch('death', {})
       this.effects.clear('death')
+      this.saveFoodEffects()
       this.rangedFlight = null
       this.bow.clear()
       this.tarot.clear()
+      this.scp127.clearFlights()
+      this.scp127.say('down')
       this.dodgePhase = 'none'
       this.afterDodgeEffects=[]
       this.swingPhase = 'none'
@@ -609,38 +779,35 @@ export class Player {
    * 每帧逻辑
    * @param pointerX 指针世界坐标
    */
-  update(
-    dt: number,
-    input: {
-      moveX: number
-      moveY: number
-      /** Shift 本帧刚按下 */
-      dodgePressed: boolean
-      /** Shift 当前按住 */
-      dodgeHeld: boolean
-      /** Shift 本帧刚松开 */
-      dodgeReleased: boolean
-      /** 攻击键本帧刚按下（边沿信号；武器点一下挥一下） */
-      attackPressed: boolean
-      /** 攻击键当前按住（电平信号；镐类工具长按自动连挥） */
-      attackHeld: boolean
-      attackReleased?: boolean
-      specialPressed?: boolean
-      specialHeld?: boolean
-      specialReleased?: boolean
-      pointerX: number
-      pointerY: number
-    },
-    map: TileMap,
-    /** J 批次：本房立体摆件（薄横线碰撞箱；玩家被挡、会沿线滑动） */
-    props: readonly Prop[] = []
-  ): void {
+  update(dt:number,input:PlayerInput,map:TileMap,props:readonly Prop[]=[]):void {
+    withSimulationAppearance(this.appearance ?? simulationAppearance(),()=>this.updateCurrent(dt,input,map,props))
+  }
+  private updateCurrent(dt:number,input:PlayerInput,map:TileMap,props:readonly Prop[]):void {
+    if(input.cancelActions){
+      this.cancelCharge();this.bow.cancelGesture();this.pendingDodge=false;this.inputBuffer.clear()
+      // 切换输入设备时取消旧手势，同一逻辑步的新按下仍可开始新的动作。
+      input={...input,attackHeld:input.attackPressed&&input.attackHeld,attackReleased:false,specialHeld:!!input.specialPressed&&input.specialHeld,specialReleased:false,dodgeHeld:input.dodgePressed&&input.dodgeHeld,dodgeReleased:false}
+    }
+    const rootedSkill=this.weaponResource?.chargeAttack,rootHeld=rootedSkill?.trigger==='special'?input.specialHeld:input.attackHeld
+    const rootCharge=rootedSkill?.immobilize&&this.dodgePhase==='none'&&!this.isChanneling&&!this.areaBurstActive
+      &&(this.charging||this.swingPhase==='none'&&this.attackRecovery===0&&this.pendingAttackRecovery===0&&this.weaponSkillCooldown<=dt&&rootHeld)
+    if(rootCharge&&rootHeld){input={...input,dodgePressed:false,dodgeHeld:false,dodgeReleased:false};this.pendingDodge=false}
+    if(this.isChanneling){
+      this.spellChannelRemaining=Math.max(0,this.spellChannelRemaining-dt)
+      input={...input,attackPressed:false,attackHeld:false,attackReleased:false,specialPressed:false,specialHeld:false,specialReleased:false,dodgePressed:false,dodgeHeld:false,dodgeReleased:false}
+      this.pendingDodge=false;this.inputBuffer.clear()
+      if(this.spellChannelRemaining<=1e-8)this.channelSpell=null
+    }
+    this.renderPoseCache=null
+    this.motionHistory.capture(this.x, this.y)
+    this.inputBuffer.update(dt)
     const c = CONFIG.player
     this.projectileErasure.length = 0
     const previousBladeMotion = this.weaponResource?.eraseProjectiles ? this.heldMotion() : undefined
     const previousBladeTool = this.activeToolId
+    this.effectTime += dt
+    if(this.areaBurst&&this.areaBurst.age>=this.areaBurst.duration&&this.areaBurst.issued>=this.areaBurst.count)this.areaBurst=null
     if (this.alive) {
-      this.effectTime += dt
       for (const [id, cooldown] of this.chargeCooldowns) {
         const remaining = Math.max(0, cooldown - dt)
         if (remaining === 0) this.chargeCooldowns.delete(id)
@@ -653,6 +820,19 @@ export class Player {
     }
     for (const trail of this.weaponTrails) trail.age += dt
     this.weaponTrails = this.weaponTrails.filter(trail => trail.age < trail.duration)
+    for(let i=this.meleeEchoes.length-1;i>=0;i--){
+      const echo=this.meleeEchoes[i]!;echo.age+=dt
+      if(echo.age>=echo.duration){this.meleeEchoes.splice(i,1);continue}
+      const resource=getItemDef(echo.weaponId).weapon
+      if(!resource)continue
+      const delay=echo.delay??0,elapsed=echo.age-delay,waiting=elapsed<0,active=elapsed<echo.activeDuration
+      const progress=waiting?echo.age/Math.max(.001,delay):active?elapsed/Math.max(.001,echo.activeDuration):(elapsed-echo.activeDuration)/Math.max(.001,echo.duration-delay-echo.activeDuration)
+      echo.motion={...echo.motion,phase:waiting?'windup':active?'active':'recover',timer:(waiting?echo.move.windup*.5:active?echo.move.active:echo.move.recover)*(1-Math.min(1,progress)),time:(echo.motion.time??0)+dt}
+      const pose=this.animator.sampleWeaponPose(echo.angle,resource.armAim?.(echo.motion)??echo.angle,resource.armBend?.(echo.motion)??0,resource.bodyMotion?.(echo.motion),resource.supportGrip?.(echo.motion))
+      // 残影停在召唤点，保留起手步态；双臂、躯干与刀身按自己的进度共同挥舞。
+      for(const key of ['thighNear','shinNear','thighFar','shinFar'] as const)pose.bone[key]=echo.pose.bone[key]
+      echo.pose=pose
+    }
     for (const trail of this.doom.crescents) trail.life -= dt
     this.doom.crescents = this.doom.crescents.filter(trail => trail.life > 0)
 
@@ -694,9 +874,15 @@ export class Player {
     // —— 状态与计时器按同一逻辑时间推进 ——
     this.syncHeldEffects()
     this.effects.update(dt)
+    if(!this.alive){this.saveFoodEffects();return}
+    this.food.remaining = this.effects.remaining(SATIETY_ID) ?? 0
+    // 连击后的强制休息使用模拟秒数，不受攻速加成影响。
+    this.attackRecovery = Math.max(0, this.attackRecovery - dt)
+    if(this.food.remaining>0||this.food.effects.length)this.saveFoodEffects()
     this.tarot.tick(dt)
+    this.scp127.tickPose(dt, !!this.activeToolId && getItemDef(this.activeToolId).ranged?.type === 'livingGun' && (input.attackHeld || input.attackPressed) && this.dodgePhase === 'none')
     if(this.bow.tick(dt,input.attackHeld,input.attackReleased,this.facing))sfx.bowReady()
-    if(this.dodgePhase!=='none')this.bow.cancelGesture()
+    if(this.dodgePhase==='long'||this.dodgePhase==='short'&&!this.equipmentCombat.preserveRangedChargeOnRoll)this.bow.cancelGesture()
     const cdBefore = this.dodgeCooldown
     this.dodgeCooldown = Math.max(0, this.dodgeCooldown - dt)
     // CD 刚好归零的边沿 → 触发"闪避就绪"轻冲击
@@ -746,8 +932,8 @@ export class Player {
     if (this.dodgePhase === 'short') {
       // 翻滚：高速定向团身前滚，移动输入无效，结束立刻恢复自由
       const d = c.dodge.short
-      targetVx = Math.cos(this.dodgeAngle) * d.speed
-      targetVy = Math.sin(this.dodgeAngle) * d.speed
+      targetVx = Math.cos(this.dodgeAngle) * d.speed*this.dodgeDistanceMul
+      targetVy = Math.sin(this.dodgeAngle) * d.speed*this.dodgeDistanceMul
       this.dodgeTimer -= dt
       if (this.dodgeTimer <= 0) this.finishDodge()
     } else if (this.dodgePhase === 'long') {
@@ -755,8 +941,8 @@ export class Player {
       const d = c.dodge.long
       this.trailTick -= dt
       if (this.longPhase === 'burst') {
-        targetVx = Math.cos(this.dodgeAngle) * d.speed
-        targetVy = Math.sin(this.dodgeAngle) * d.speed
+        targetVx = Math.cos(this.dodgeAngle) * d.speed*this.dodgeDistanceMul
+        targetVy = Math.sin(this.dodgeAngle) * d.speed*this.dodgeDistanceMul
         this.dodgeTimer -= dt
         // 冲刺沿途留下稀疏残影（"些许"即可）
         if (this.trailTick <= 0) {
@@ -777,8 +963,8 @@ export class Player {
         }
       } else {
         // 后撤滑行：目标速度骤降，由指数减速曲线形成自然减速滑步
-        targetVx = Math.cos(this.dodgeAngle) * d.coastSpeed
-        targetVy = Math.sin(this.dodgeAngle) * d.coastSpeed
+        targetVx = Math.cos(this.dodgeAngle) * d.coastSpeed*this.dodgeDistanceMul
+        targetVy = Math.sin(this.dodgeAngle) * d.coastSpeed*this.dodgeDistanceMul
         this.coastTimer -= dt
         // 滑行中偶发贴身残影
         if (this.trailTick <= 0) {
@@ -799,7 +985,7 @@ export class Player {
       if (len > 0) {
         const charge = this.weaponResource?.chargeAttack
         const chargeSpeed = this.charging ? charge?.moveMultiplier ?? 1 - (1 - (charge?.minimumMoveMultiplier ?? 1)) * this.chargeProgress : 1
-        const moveSpeed = this.effects.modify('moveSpeed', c.speed * this.speedMul) * chargeSpeed
+        const moveSpeed = this.effects.modify('moveSpeed', c.speed * this.speedMul) * chargeSpeed*(this.equipmentCombat.moveSpeedMultiplier??1)
         targetVx = (input.moveX / len) * moveSpeed
         targetVy = (input.moveY / len) * moveSpeed
       } else {
@@ -809,6 +995,7 @@ export class Player {
     }
 
     // 帧率独立的加减速（指数趋近）
+    if(this.charging&&this.weaponResource?.chargeAttack?.immobilize){targetVx=targetVy=0;this.vx=this.vy=this.knockX=this.knockY=0}
     const k = 1 - Math.exp(-c.accel * dt)
     this.vx += (targetVx - this.vx) * k
     this.vy += (targetVy - this.vy) * k
@@ -860,14 +1047,25 @@ export class Player {
       this.comboResetT -= dt
       if (this.comboResetT <= 0) this.comboIndex = 0
     }
-    const canStartSwing = this.dodgePhase === 'none' || this.dodgePhase === 'short'
+    const canStartSwing = !this.isChanneling && !this.areaBurstActive && this.attackRecovery === 0 && this.pendingAttackRecovery === 0 && (this.dodgePhase === 'none' || this.dodgePhase === 'short')
+    if(dt>0&&!canStartSwing&&input.attackPressed&&!this.weaponResource?.chargeAttack&&!this.holdingPick)this.inputBuffer.offer('attack')
+    if(dt>0&&canStartSwing&&this.inputBuffer.consume('attack'))input={...input,attackPressed:true}
+    const rangedCooldownBefore = this.rangedCooldown
     this.rangedCooldown = Math.max(0, this.rangedCooldown - dt)
+    // 消去浮点尾差，400ms等整逻辑帧周期不能因残留极小正数多等一帧。
+    if(this.rangedCooldown<1e-8)this.rangedCooldown=0
     const ranged = this.toolId ? getItemDef(this.toolId).ranged : undefined
-    const rangedSignal = this.weaponResource?.autoRepeat ? input.attackPressed || input.attackHeld : input.attackPressed
-    if (ranged && rangedSignal && canStartSwing && this.swingPhase === 'none' && (ranged.type !== 'boomerang' || !this.rangedFlight) && this.rangedCooldown === 0) {
+    if (ranged?.type === 'tarot') {
+      const interval = this.tarot.attackInterval(ranged.attackInterval)
+      if (interval < ranged.attackInterval) this.rangedCooldown = Math.min(this.rangedCooldown, interval)
+    }
+    // 弓接收持续按住的输入，冷却结束后自动起拉；是否自动放箭由各弓的蓄力资源声明。
+    const rangedSignal = ranged?.type === 'bow' || this.weaponResource?.autoRepeat ? input.attackPressed || input.attackHeld : input.attackPressed
+    if (ranged && ranged.type !== 'livingGun' && rangedSignal && canStartSwing && this.swingPhase === 'none' && (ranged.type !== 'bow' || !this.bow.busy) && (ranged.type !== 'boomerang' || !this.rangedFlight) && this.rangedCooldown === 0) {
       const deviation = Math.max(0, this.shootingDeviation + ranged.accuracyPenalty) * Math.PI / 180
       const item = getItemDef(this.toolId!)
-      const angle = this.facing + (Math.random() * 2 - 1) * deviation
+      // 弓在拉弦起点独立采样；不要在等动作或缺箭时消耗额外随机数。
+      const angle = ranged.type === 'bow' ? this.facing : this.facing + (randomCombat() * 2 - 1) * deviation
       if (ranged.type === 'bow') {
         if(this.dodgePhase==='none'){
           const interval=this.bow.start(this,this.toolId!,this.ammoInventory)
@@ -875,7 +1073,8 @@ export class Player {
         }
       } else if (ranged.type === 'tarot') {
         if (this.tarot.fire(this, angle, this.x + Math.cos(angle) * 12, this.y - 5 + Math.sin(angle) * 12)) {
-          this.rangedCooldown = ranged.attackInterval
+          emitSimulationEvent({type:'shot',source:this.entityId,weapon:this.activeToolId!})
+          this.rangedCooldown = this.tarot.attackInterval(ranged.attackInterval)
           sfx.swing('slash')
         }
       } else {
@@ -883,7 +1082,8 @@ export class Player {
         angle,
         remaining: Math.hypot(input.pointerX - this.x, input.pointerY - this.y), returning: false, rotation: 0, hits: new Set(),
         attackPower: 0, critChance: this.rangedCritChance + (item.combat?.critChance ?? 0) + this.equipmentCombat.critChance,
-        penetration: (item.combat?.penetration ?? 0) + this.equipmentCombat.penetration,damageBonus:this.outgoingDamageBonus }
+        penetration: (item.combat?.penetration ?? 0) + this.equipmentCombat.penetration,damageBonus:this.physicalOutgoingDamageBonus }
+      emitSimulationEvent({type:'shot',source:this.entityId,weapon:this.activeToolId!})
       sfx.swing('slash')
       }
     }
@@ -898,7 +1098,16 @@ export class Player {
       // 按资源段数接续动作；镐和单动作武器始终使用第 0 段。
       const seg = chargedWeapon ? this.chargeSegment : this.holdingSword && this.comboResetT > 0 ? (this.comboIndex + 1) % this.comboLength : 0
       const burst = this.weaponResource?.chargeAttack?.burst
-      if (burst && chargeRelease !== null && chargeRelease >= 1 - 1e-8 && this.weaponSkillCooldown === 0 && this.toolId) {
+      const area=chargeComponent?.areaBurst
+      if(area&&chargeSkillReleased&&this.weaponSkillCooldown===0&&this.toolId){
+        const weapon=getItemDef(this.toolId),seed=randomVisual()*10000
+        this.areaBurst={weaponId:this.toolId,x:this.x,y:this.y,angle:this.facing,age:0,issued:0,count:area.count,duration:area.duration,range:area.range,width:area.width,
+          physicalDamage:area.physicalDamage,magicDamage:area.magicDamage,physicalPenetration:weapon.combat?.penetration??0,magicPenetration:weapon.combat?.magicPenetration??0}
+        this.chargeCooldowns.set(this.toolId,chargeComponent?.cooldown??0);this.comboBuffer=false;this.inputBuffer.clear()
+        this.weaponImpacts.push({x:this.x,y:this.y,angle:this.facing,age:0,move:this.melee,duration:area.duration+.1,
+          area:{range:area.range,width:area.width,count:area.count,duration:area.duration,seed},render:area.render})
+        if(!area.sound)sfx.swing('slash')
+      }else if (burst && chargeRelease !== null && chargeRelease >= 1 - 1e-8 && this.weaponSkillCooldown === 0 && this.toolId) {
         this.weaponBurst = { tool: this.toolId, elapsed: 0, index: -1, ...burst }
         this.chargeCooldowns.set(this.toolId, burst.cooldown)
         burstStarted = true
@@ -956,15 +1165,22 @@ export class Player {
     this.animator.setArmAim(this.swingArmAim(), this.swingArmBend())
     const motion = this.heldMotion()
     const rangedType=this.activeToolId?getItemDef(this.activeToolId).ranged?.type:undefined
-    this.animator.setWeaponMotion(rangedType==='bow'?this.bow.bodyMotion:rangedType==='tarot'?this.tarot.bodyMotion:motion?this.weaponResource?.bodyMotion?.(motion):undefined,
-      rangedType==='bow'?this.bow.grip(this.facing):motion?this.weaponResource?.supportGrip?.(motion):undefined)
+    this.animator.setWeaponMotion(rangedType==='livingGun'?this.scp127.bodyMotion():rangedType==='bow'?this.bow.bodyMotion:rangedType==='tarot'?this.tarot.bodyMotion:motion?this.weaponResource?.bodyMotion?.(motion):undefined,
+      rangedType==='livingGun'?this.scp127.grip(this.facing,this.animator.bodyFacing):rangedType==='bow'?this.bow.grip(this.facing):motion?this.weaponResource?.supportGrip?.(motion):undefined)
+    if(rangedType==='livingGun'&&rangedSignal&&canStartSwing&&this.dodgePhase==='none'&&this.swingPhase==='none'&&this.rangedCooldown===0&&this.scp127.fire(this,getPlayerHandAnchor(this.x,this.y,this.animator.build(this.facing)))){
+      // 扣回当前帧越过冷却终点的时间，90ms 连射不被整帧取整成固定 100ms。
+      const overshoot = rangedCooldownBefore > 0 ? Math.max(0, dt - rangedCooldownBefore) : 0
+      this.rangedCooldown = Math.max(0, ranged!.attackInterval - overshoot)
+    }
     if(rangedType==='bow'&&this.bow.release(this,this.ammoInventory,getPlayerHandAnchor(this.x,this.y,this.animator.build(this.facing)))){
       this.rangedCooldown=Math.max(this.rangedCooldown,this.bow.cooldownAfterRelease)
+      emitSimulationEvent({type:'shot',source:this.entityId,weapon:this.activeToolId!})
       sfx.bowRelease(this.bow.lastShotCharged)
     }
     this.updateProjectileErasure(dt, previousBladeMotion, previousBladeTool, prevX, prevY)
     this.updateWeaponPhysics(dt, map)
     this.updateStatusTrail(dt, prevX, prevY)
+    this.renderPoseCache={facing:this.facing,pose:this.animator.build(this.facing)}
   }
 
   /** 在真实骨骼握点上取样枪刃，并连接相邻刃段；只在拥有此组件的武器判定期执行。 */
@@ -1030,7 +1246,24 @@ export class Player {
     const sm = this.swingMelee
     this.swingPhase = 'active'
     this.swingStrikeIndex = 0
+    const recovery = this.weaponResource?.comboRecovery
+    if (recovery && this.swingToolId) {
+      const attacks = (this.comboAttacks.get(this.swingToolId) ?? 0) + 1
+      this.comboAttacks.set(this.swingToolId, attacks % Math.max(1, recovery.attacks))
+      if (attacks >= recovery.attacks) this.pendingAttackRecovery = recovery.duration
+    }
     this.weaponResource?.sound?.('active', this.comboIndex, this.swingEmpowered)
+    const echo=this.weaponResource?.echoAttack,resource=this.weaponResource,motion=this.heldMotion()
+    if(echo&&resource&&motion&&sm&&this.swingToolId){
+      const sample:WeaponMotionView={...motion,phase:'windup',timer:sm.windup*.5}
+      const pose=this.animator.sampleWeaponPose(this.swingBaseAngle,resource.armAim?.(sample)??this.swingBaseAngle,resource.armBend?.(sample)??0,resource.bodyMotion?.(sample),resource.supportGrip?.(sample))
+      const side=(randomCombat()-.5)*echo.offset*2,behind=4+randomCombat()*echo.offset*.5
+      const angle=this.swingBaseAngle,delay=Math.max(0,echo.delay??0),activeDuration=sm.active/Math.max(.05,this.effects.modify('attackSpeed',this.attackSpeedMul)*Math.max(.1,echo.speedMultiplier??1))
+      this.meleeEchoes.push({x:this.x-Math.cos(angle)*behind-Math.sin(angle)*side,y:this.y-Math.sin(angle)*behind+Math.cos(angle)*side,
+        angle,weaponId:this.swingToolId,age:0,delay,activeDuration,duration:delay+activeDuration+echo.fadeDuration,damage:echo.damage,
+        magicPenetration:getItemDef(this.swingToolId).combat?.magicPenetration??0,move:{...sm},hitIds:new Set(),pose,motion:sample,
+        appearance:this.appearance??simulationAppearance(),costume:this.costume})
+    }
     this.emitWeaponImpact(0)
     const trail = this.weaponResource?.trail
     if (trail) this.weaponTrails.push({ x: this.x, y: this.y, angle: this.swingBaseAngle, startAngle: this.doom.liftStart, chargePower: this.swingChargePower, chargeFull: this.swingChargeFull, strikeIndex: this.swingStrikeIndex, segment: this.comboIndex, age: 0, empowered: this.swingEmpowered, burst: !!this.weaponBurst, activeDuration: this.weaponBurst ? sm!.active : (sm?.active ?? 0) / Math.max(1, sm?.repeatHits ?? 1) / this.effects.modify('attackSpeed', this.attackSpeedMul), ...trail })
@@ -1042,6 +1275,8 @@ export class Player {
   private emitWeaponImpact(progress?: number): void {
     const impact = this.weaponResource?.impactFx, move = this.swingMelee
     if (!impact || !move || this.swingImpactIssued || impact.skillOnly && !this.swingChargeFull) return
+    // 多段武器可限定触地演出段号，横扫与花棍不会误播下劈的地面效果。
+    if (impact.segments && !impact.segments.includes(this.comboIndex)) return
     if (this.swingPhase !== 'active' && this.swingPhase !== 'recover') return
     const p = progress ?? (this.swingPhase === 'recover' ? 1 : Math.max(0, 1 - this.swingTimer / move.active))
     if (p + 1e-8 < (impact.contactProgress ?? 0)) return
@@ -1075,15 +1310,22 @@ export class Player {
 
   private finishSwing(): void {
     const comboWindow = this.weaponResource?.comboWindow ?? .25
+    const resting = this.pendingAttackRecovery > 0
+    if (resting) {
+      this.attackRecovery = Math.max(this.attackRecovery, this.pendingAttackRecovery)
+      this.pendingAttackRecovery = 0
+      this.inputBuffer.clear()
+    }
     this.swingPhase = 'none'; this.swingMelee = null; this.swingToolId = null
     this.swingChargePower = 1; this.swingChargeFull = false; this.comboBuffer = false
-    this.comboResetT = comboWindow
-    if (comboWindow === 0) this.comboIndex = 0
+    this.comboResetT = resting ? 0 : comboWindow
+    if (resting || comboWindow === 0) this.comboIndex = 0
   }
 
   private updateCharge(dt: number, input: { attackPressed: boolean; attackHeld: boolean; attackReleased?: boolean; specialPressed?: boolean; specialHeld?: boolean; specialReleased?: boolean }): number | null {
     const component = this.weaponResource?.chargeAttack
-    if (!component || !this.alive || this.dodgePhase === 'long') { this.cancelCharge(); return null }
+    if (!component || !this.alive || this.dodgePhase === 'long' || this.attackRecovery > 0 || this.pendingAttackRecovery > 0) { this.cancelCharge(); return null }
+    if(this.areaBurstActive||component.immobilize&&this.dodgePhase!=='none'){this.cancelCharge();return null}
     if (component.cancelOnShortDodgeBeforeReady && this.dodgePhase === 'short' && !this.charging) return null
     if (this.swingPhase !== 'none') {
       if (this.charging) this.cancelCharge()
@@ -1155,6 +1397,10 @@ export class Player {
 
   /** 起手一段挥击：快照招式/手持物、锁基准角、记录段号 */
   private startSwing(seg: number, chargeProgress = 0): void {
+    if (this.attackRecovery > 0 || this.pendingAttackRecovery > 0) return
+    this.swingAccessoryEffects=null
+    // 需强制恢复的武器按实际挥出次数选段，松手或换武器不会跳过第二刀。
+    if (this.toolId && getItemDef(this.toolId).weapon?.comboRecovery) seg = (this.comboAttacks.get(this.toolId) ?? 0) % this.comboLength
     this.swingRollBonus = 0
     this.swingMoveProgress = 0; this.swingStrikeIndex = 0; this.swingImpactIssued = false
     this.swingChargePower = chargeMultiplier(this.weaponResource?.chargeAttack, chargeProgress)
@@ -1188,7 +1434,7 @@ export class Player {
 
   /** 触发一次闪避 */
   private startDodge(kind: DodgeKind, moveX: number, moveY: number): void {
-    this.bow.cancelGesture()
+    this.bow.onDodge(kind,this.equipmentCombat.preserveRangedChargeOnRoll,this.equipmentCombat.rangedChargeRollCritChance)
     // 战斧未蓄满时短闪打断；蓄满保留，其余武器继续读取各自规则。
     if (kind === 'long' || kind === 'short' && this.weaponResource?.chargeAttack?.cancelOnShortDodgeBeforeReady && this.chargeProgress < 1 - 1e-8) this.cancelCharge()
     const c = CONFIG.player
@@ -1201,7 +1447,8 @@ export class Player {
     this.dodgePhase = kind
     sfx.dodge()
     this.dodgeTimer = d.duration
-    this.dodgeCooldown = this.effects.modify('dodgeCooldown', d.cooldown)
+    this.dodgeDistanceMul=1+(this.equipmentCombat.dodgeDistanceBonus??0)
+    this.dodgeCooldown = this.effects.modify('dodgeCooldown', d.cooldown)*Math.max(0,1-(this.equipmentCombat.dodgeCooldownReduction??0))*(this.equipmentCombat.dodgeCooldownMultiplier??1)
     this.lastDodgeCdTotal = this.dodgeCooldown
     this.effects.dispatch('dodge', { kind, cooldown: this.dodgeCooldown })
     this.iFrameTimer = d.iFrame
@@ -1221,7 +1468,11 @@ export class Player {
     // 批次 F②：短闪触发骨骼团身翻滚（时长与判定短闪同源同步）
     if (kind === 'short') this.animator.startRoll(this.dodgeAngle, d.duration)
     // 长闪打断当前挥击（重位移的代价）；短闪完全不影响武器前后摇，可与攻击丝滑连按
-    if (kind === 'long') { this.swingPhase = 'none'; this.swingRollBonus = 0 }
+    if (kind === 'long') {
+      if (this.pendingAttackRecovery > 0) this.finishSwing()
+      else this.swingPhase = 'none'
+      this.swingRollBonus = 0
+    }
   }
 
   /** 翻滚或长闪滑行结束后再启动奖励计时，死亡和复活均取消待发奖励。 */
@@ -1291,7 +1542,7 @@ export class Player {
    */
   private heldMotion() {
     const move = this.swingMelee ?? this.melee
-    return move ? { move, phase: this.swingPhase, timer: this.swingTimer, aim: this.charging ? this.facing : this.swingBaseAngle, facing: this.facing, bodyFacing: this.animator.bodyFacing, time: this.animator.motionTime, gaitPhase: this.animator.gaitPhase, gaitWeight: this.animator.gaitWeight, comboQueued: this.comboBuffer, charging: this.charging, chargeProgress: this.chargeProgress, chargePower: this.swingChargeMultiplier, burst: !!this.weaponBurst, chargeFull: this.swingChargeFull, strikeIndex: this.swingStrikeIndex, segment: this.charging ? this.chargeSegment : this.comboIndex, liftStart: this.doom.liftStart, empowered: this.swingEmpowered } : undefined
+    return move ? { move, phase: this.swingPhase, timer: this.swingTimer, aim: this.charging ? this.facing : this.areaBurstActive?this.areaBurst!.angle:this.swingBaseAngle, facing: this.facing, bodyFacing: this.animator.bodyFacing, time: this.animator.motionTime, gaitPhase: this.animator.gaitPhase, gaitWeight: this.animator.gaitWeight, comboQueued: this.comboBuffer, charging: this.charging, chargeProgress: this.chargeProgress, chargePower: this.swingChargeMultiplier, burst: !!this.weaponBurst||this.areaBurstActive, chargeFull: this.swingChargeFull, strikeIndex: this.swingStrikeIndex, segment: this.charging ? this.chargeSegment : this.comboIndex, liftStart: this.doom.liftStart, empowered: this.swingEmpowered } : undefined
   }
 
   private swingArmAim(): number | null {
@@ -1355,7 +1606,7 @@ export class Player {
     const n = this.toolNotice
     if (!n) return
     const DUR = 1.2
-    const age = (performance.now() - n.start) / 1000
+    const age = ((this.effectTime * 1000) - n.start) / 1000
     if (age >= DUR) { this.toolNotice = null; return }
     const ease = 1 - Math.pow(1 - Math.min(1, age / DUR), 3)
     ctx.save()
@@ -1365,7 +1616,7 @@ export class Player {
     ctx.strokeStyle = '#171924bb'
     ctx.lineWidth = 2.5
     // 寰宇档：白金底上缓慢流转虹彩，其余档直接用品质主色
-    ctx.fillStyle = n.cosmic ? `hsl(${(performance.now() / 28) % 360}, 75%, 72%)` : n.color
+    ctx.fillStyle = n.cosmic ? `hsl(${((this.effectTime * 1000) / 28) % 360}, 75%, 72%)` : n.color
     const y = this.y - 40 - ease * 12
     ctx.strokeText(n.name, this.x, y)
     ctx.fillText(n.name, this.x, y)
@@ -1373,8 +1624,16 @@ export class Player {
   }
 
   render(ctx: CanvasRenderingContext2D): void {
+    const started = profiler.start()
+    const offset = this.motionHistory.offset(this.x, this.y)
+    ctx.save(); ctx.translate(offset.x, offset.y)
+    try { withSimulationAppearance(this.appearance ?? simulationAppearance(), () => withPlayerCostume(this.costume,()=>this.renderCurrent(ctx))) } finally { ctx.restore(); profiler.end('playersRender', started) }
+  }
+
+  private renderCurrent(ctx: CanvasRenderingContext2D): void {
+    for(const echo of this.meleeEchoes)renderMeleeEcho(ctx,echo)
     this.renderCharge(ctx, 'behind')
-    const notice=(performance.now()-this.levelNoticeStart)/1000
+    const notice=((this.effectTime * 1000)-this.levelNoticeStart)/1000
     const levelUpActive=this.levelNoticeStart>=0&&notice<1.8
     if(levelUpActive){
       const ease=1-Math.pow(1-Math.min(1,notice/1.8),3)
@@ -1468,20 +1727,26 @@ export class Player {
         this.renderRollDust(ctx, p)
       }
       // 武器在持械手局部系层内绘制（自动跟手臂挥砍、分前后层；团身时收起）
-      const rigTool = rolling || this.rangedFlight?.item === this.activeToolId || (this.activeToolId && getItemDef(this.activeToolId).weapon?.hiddenHeld) ? null : this.activeToolId
+      const rigTool = this.searching || rolling || this.rangedFlight?.item === this.activeToolId || (this.activeToolId && getItemDef(this.activeToolId).weapon?.hiddenHeld) ? null : this.activeToolId
       const thrust = this.swingThrust()
       ctx.save()
       ctx.globalAlpha = flashing ? 0.45 : 1
-      const pose = this.animator.build(this.facing), motion = this.heldMotion()
+      if(!this.renderPoseCache||this.renderPoseCache.facing!==this.facing)this.renderPoseCache={facing:this.facing,pose:this.animator.build(this.facing)}
+      const pose=this.renderPoseCache.pose,motion=this.heldMotion()
       const accessory = rigTool ? getItemDef(rigTool).weapon?.drawAccessory : undefined
+      const handsOverWeapon = !!rigTool && (getItemDef(rigTool).ranged?.type === 'livingGun'
+        || !!getItemDef(rigTool).weapon?.gripHandsOverWeapon && (pose.supportGripWeight ?? 0) > .01)
       const hand = drawPlayerRig(ctx, this.x, this.y, pose, {
+        cacheBody: true,
         hurt: this.hurtTimer > 0,
+        supportInFront: handsOverWeapon,
+        gripHandsOverWeapon: handsOverWeapon,
         drawAccessory: accessory && motion ? (g) => accessory(g, { ...motion, x: this.x + pose.rootX, y: this.y + pose.rootY, bodyFacing: dirAngle(pose.dir), hand: getPlayerHandAnchor(this.x, this.y, pose), supportHand: getPlayerSupportHandAnchor(this.x, this.y, pose) }) : undefined,
         drawSupportWeapon: rigTool && motion && getItemDef(rigTool).weapon?.drawOffhand
           ? g => getItemDef(rigTool).weapon!.drawOffhand!(g, { motion }) : undefined,
         drawWeapon:
           rigTool !== null
-            ? (wctx) => drawRigWeapon(wctx, rigTool, { thrust, motion: this.heldMotion(),drawProgress:getItemDef(rigTool).ranged?.type==='bow'?this.bow.drawProgress:undefined,bowPull:this.bow.pullDistance,bowReleaseProgress:this.bow.releaseProgress,bowCharged:this.bow.charged,ammoNocked:this.bow.nocked,ammunitionId:this.bow.ammunitionId, empowered: rigTool === DOOMSDAY_ID && (this.doom.mode || (this.swingPhase !== 'none' && this.doom.swingEmpowered)), time: performance.now() / 1000 })
+            ? (wctx) => drawRigWeapon(wctx, rigTool, { thrust, mirrored:pose.dir==='right', flipVertical:getItemDef(rigTool).ranged?.type==='livingGun'?this.scp127.flipVertical:undefined, recoil:getItemDef(rigTool).ranged?.type==='livingGun'?this.scp127.recoil:undefined, motion,drawProgress:getItemDef(rigTool).ranged?.type==='bow'?this.bow.drawProgress:undefined,bowPull:this.bow.pullDistance,bowReleaseProgress:this.bow.releaseProgress,bowCharged:this.bow.charged,ammoNocked:this.bow.nocked,ammunitionId:this.bow.ammunitionId, empowered: rigTool === DOOMSDAY_ID && (this.doom.mode || (this.swingPhase !== 'none' && this.doom.swingEmpowered)), time: (this.effectTime * 1000) / 1000 })
             : undefined
       })
       if (rigTool && getItemDef(rigTool).weapon?.curve) whipHand = hand
@@ -1580,7 +1845,7 @@ export class Player {
       this.renderPick(ctx, pose.ox, pose.oy)
     }
 
-    if (this.weaponPhysics && this.activeToolId) {
+    if (!this.searching && this.weaponPhysics && this.activeToolId) {
       if (this.dodgePhase === 'short') {
         const hand = this.weaponHand()
         ctx.save(); ctx.translate(hand.x, hand.y); ctx.rotate(hand.angle)
@@ -1588,7 +1853,7 @@ export class Player {
       }
       this.weaponPhysics.render(ctx)
     }
-    if (this.weaponResource?.drawCurve && this.meleeMove && this.dodgePhase !== 'short') this.weaponResource.drawCurve(ctx, { x: this.x, y: this.y, facing: this.facing, aim: this.swingBaseAngle, phase: this.swingPhase, timer: this.swingTimer, move: this.meleeMove, points: this.weaponCurve(whipHand), hand: whipHand ?? { x: this.x, y: this.y, angle: this.facing } })
+    if (!this.searching && this.weaponResource?.drawCurve && this.meleeMove && this.dodgePhase !== 'short') this.weaponResource.drawCurve(ctx, { x: this.x, y: this.y, facing: this.facing, aim: this.swingBaseAngle, phase: this.swingPhase, timer: this.swingTimer, move: this.meleeMove, points: this.weaponCurve(whipHand), hand: whipHand ?? { x: this.x, y: this.y, angle: this.facing } })
     // —— 挥击轨迹（slash 扇形拖尾 / stab 窄矩形突进，仅判定窗口） ——
     const swing = this.getSwing()
     if (!CONFIG.art.slice) this.renderDoomCrescents(ctx, 'all')
@@ -1632,8 +1897,10 @@ export class Player {
   }
 
   private renderCharge(ctx: CanvasRenderingContext2D, layer: 'behind' | 'front'): void {
+    const channel=this.channelSpell
+    if(layer==='front'&&this.isChanneling&&channel?.channelTime)channel.channelDraw?.(ctx,{x:this.x,y:this.y,progress:1-this.spellChannelRemaining/channel.channelTime,time:this.effectTime})
     if (!this.alive || (!this.charging && this.chargeReadyAge < 0 && this.weaponSkillCooldown <= 0)) return
-    this.weaponResource?.chargeAttack?.draw?.(ctx, { x: this.x, y: this.y, charging: this.charging,
+    this.weaponResource?.chargeAttack?.draw?.(ctx, { x: this.x, y: this.y, angle:this.facing, charging: this.charging,
       progress: this.chargeProgress, readyAge: this.chargeReadyAge, cooldown: this.weaponSkillCooldown, maxCooldown: this.weaponResource?.chargeAttack?.burst?.cooldown ?? this.weaponResource?.chargeAttack?.cooldown,
       burstProgress: this.weaponBurst ? this.weaponBurst.elapsed / this.weaponBurst.duration : undefined, time: this.effectTime, layer })
   }
@@ -1879,7 +2146,7 @@ export class Player {
     if (this.weaponResource?.curve) return
     if (toolId && this.weaponResource?.legacyHeld) {
       ctx.save(); ctx.translate(ax, ay); ctx.rotate(this.swingArmAim() ?? this.facing - 0.5)
-      drawRigWeapon(ctx, toolId, { thrust: this.swingThrust(), motion: this.heldMotion(), empowered: this.doom.mode || (this.swingPhase !== 'none' && this.doom.swingEmpowered), time: performance.now() / 1000 })
+      drawRigWeapon(ctx, toolId, { thrust: this.swingThrust(), motion: this.heldMotion(), empowered: this.doom.mode || (this.swingPhase !== 'none' && this.doom.swingEmpowered), time: (this.effectTime * 1000) / 1000 })
       ctx.restore()
       return
     }

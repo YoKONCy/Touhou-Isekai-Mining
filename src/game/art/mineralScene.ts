@@ -2,6 +2,7 @@ import type { OrePalette } from '../../content/minerals/types'
 import type { OreTile } from '../tilemap'
 import { ART, hash2 } from './artPalette'
 import { CONFIG } from '../config'
+import { paintSilverOre } from './silverOreArt'
 import { drawMineStone, drawMineSprite, type MineSprite } from './mineAssets'
 import { MINERAL_COPPER_ID, MINERAL_IRON_ID, MINERAL_GOLD_ID, MINERAL_RUBY_ID, MINERAL_SALT_ROCK_ID, MINERAL_COAL_ID } from '../../content/minerals/vanilla/ids'
 
@@ -56,7 +57,7 @@ function paintSharedMetal(g:CanvasRenderingContext2D,form:MetalForm,a:OrePalette
 }
 
 type Point=readonly [number,number]
-export type MetalForm='copper'|'iron'|'gold'
+export type MetalForm='copper'|'iron'|'gold'|'silver'
 interface Sprite {image:HTMLCanvasElement;outline:Path2D}
 const sprites=new WeakMap<OreTile,Sprite>()
 
@@ -163,7 +164,7 @@ export function drawSceneMetal(g:CanvasRenderingContext2D,ore:OreTile,form:Metal
   if(!sprite){
     const image=document.createElement('canvas');image.width=image.height=128
     const ctx=image.getContext('2d')!;ctx.scale(2,2);ctx.translate(32,32);ctx.lineJoin='round';ctx.lineCap='round'
-    const outline=paintSharedMetal(ctx,form,a)??(form==='copper'?copper(ctx,ore,a):form==='iron'?iron(ctx,ore,a):gold(ctx,ore,a))
+    const outline=form==='silver'?paintSilverOre(ctx):paintSharedMetal(ctx,form,a)??(form==='copper'?copper(ctx,ore,a):form==='iron'?iron(ctx,ore,a):gold(ctx,ore,a))
     sprite={image,outline};sprites.set(ore,sprite)
   }
   const x=(ore.col+.5)*CONFIG.tile+ore.offsetX,y=(ore.row+.5)*CONFIG.tile+ore.offsetY

@@ -30,10 +30,10 @@ export const biomeCave: BiomeDef = {
   floorEnemyAverages: {1:4,2:6,3:7},
   floorExitBudgets: { 1: [5, 6] },
   oreRange: {
-    start: [6, 8],
-    normal: [14, 18],
-    reward: [26, 30],
-    exit: [10, 12]
+    start: [3, 4],
+    normal: [7, 9],
+    reward: [13, 15],
+    exit: [5, 6]
   },
   tags: ['vanilla', 'underground']
 }

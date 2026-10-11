@@ -1,4 +1,6 @@
+import { MotionHistory } from './simulation/interpolation'
 import type { Vec2 } from './types'
+import { compactLayout } from '../browser/display'
 
 /**
  * 2D 跟随相机
@@ -8,6 +10,10 @@ import type { Vec2 } from './types'
  * - 内置 trauma 制屏幕震动：震屏随 trauma 平方衰减，越抖越轻
  */
 export class Camera {
+  private framing:{width:number;height:number}|null=null
+  private readonly motionHistory = new MotionHistory()
+  get renderX(): number { return this.x + this.motionHistory.offset(this.x, this.y).x }
+  get renderY(): number { return this.y + this.motionHistory.offset(this.x, this.y).y }
   /** 视口左上角的世界坐标 */
   x = 0
   y = 0
@@ -59,10 +65,19 @@ export class Camera {
   private updateZoom(): void {
     const bw = Math.max(1, this.bounds.right - this.bounds.left)
     const bh = Math.max(1, this.bounds.bottom - this.bounds.top)
-    this.zoom = Math.max(this.viewW / bw, this.viewH / bh)
+    // 紧凑视口按纵向取景，宽屏自然显示更多世界；小房间仍受边界约束。
+    this.zoom = compactLayout.value
+      ? Math.max(this.viewH / Math.min(bh, this.framing?.height ?? bh, 640), this.viewW / bw)
+      : Math.max(this.viewW / Math.min(bw,this.framing?.width??bw), this.viewH / Math.min(bh,this.framing?.height??bh))
   }
 
-  /** 切换房间时更换世界边界并立刻钳制（房间级相机；本游戏房间同尺寸，zoom 不变） */
+  /** 世界范围扩大时保留角色显示大小，通过相机跟随探索，避免把整张大地图缩进一屏。 */
+  setFraming(width:number,height:number):void {
+    this.framing={width:Math.max(1,width),height:Math.max(1,height)}
+    this.updateZoom();this.clampPosition()
+  }
+
+  /** 切换房间时更换世界边界，视野尺度可由独立取景范围保持。 */
   setBounds(bounds: { left: number; top: number; right: number; bottom: number }): void {
     this.bounds = bounds
     this.updateZoom()
@@ -71,6 +86,7 @@ export class Camera {
 
   /** 立刻把相机中心放到指定点（切场景/出生时用） */
   snapTo(center: Vec2): void {
+    this.motionHistory.reset()
     this.x = center.x - this.visibleW / 2
     this.y = center.y - this.visibleH / 2
     this.clampPosition()
@@ -78,6 +94,7 @@ export class Camera {
 
   /** 每帧跟随目标点 */
   follow(target: Vec2, dt: number): void {
+    this.motionHistory.capture(this.x, this.y)
     const tx = target.x - this.visibleW / 2
     const ty = target.y - this.visibleH / 2
     // 帧率独立的指数平滑
@@ -104,7 +121,7 @@ export class Camera {
   apply(ctx: CanvasRenderingContext2D): void {
     const s = this.currentShake()
     ctx.scale(this.zoom, this.zoom)
-    ctx.translate(-Math.round(this.x + s.x), -Math.round(this.y + s.y))
+    ctx.translate(-Math.round(this.renderX + s.x), -Math.round(this.renderY + s.y))
   }
 
   /** 每帧逻辑末尾推进震动衰减 */

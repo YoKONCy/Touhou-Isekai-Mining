@@ -7,7 +7,7 @@ import { drawIronSpear, drawGroundIronSpear, IRON_SPEAR_ICON } from './appearanc
 const def:ItemDef={
   ...stoneSpear,id:SPEAR_IRON_ID,
   color:'#82939c',hi:'#dce2d8',text:'#cedbdc',
-  combat:{...stoneSpear.combat,penetration:12,critChance:.08},
+  combat:{...stoneSpear.combat,penetration:2,critChance:.08},
   melee:{...stoneSpear.melee!,damage:23,aoe:stoneSpear.melee!.aoe?{...stoneSpear.melee!.aoe}:undefined},
   icon:IRON_SPEAR_ICON,ground:drawGroundIronSpear,
   weapon:{...stoneSpear.weapon!,drawHeld:drawIronSpear,trail:stoneSpear.weapon!.trail?{...stoneSpear.weapon!.trail}:undefined},

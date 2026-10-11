@@ -7,7 +7,7 @@ import { CONFIG } from '../../../../../game/config'
 import { sfx } from '../../../../../game/audio/Sfx'
 import { getItemDef } from '../../../registry'
 import { DOOMSDAY_ID } from '../../ids'
-import { calculateDamage, damageLabel } from '../../../../../shared/combat'
+import { damageLabel } from '../../../../../shared/combat'
 import { t } from '../../../../../i18n'
 import { doomsdayBurst, doomsdayBeamHit } from './audio'
 
@@ -32,12 +32,11 @@ export class DoomsdayRoom {
   private doomDamage(e: Enemy, base: number, p: Player, host: RoomHost, area = false): void {
     if (!e.canBeHit) return
     const equipment = getItemDef(DOOMSDAY_ID).combat
-    const result = calculateDamage({ base, attackPower: p.attackPower, coefficient: 0.5,damageBonus:p.outgoingDamageBonus,
-      resistance: e.def.combat.physicalResist,
+    const result = e.resolveDamage({ base, attackPower: p.attackPower, coefficient: 0.5,damageBonus:p.physicalOutgoingDamageBonus,
       penetration: (equipment?.penetration ?? 0) + p.equipmentCombat.penetration,
-      critChance: (equipment?.critChance ?? 0) + p.equipmentCombat.critChance,
-      area, aoeReduction: e.def.combat.aoeReduction })
-    e.takeDamage(result.damage, Math.atan2(e.y - p.y, e.x - p.x), 520, 0.3)
+      critChance: (equipment?.critChance ?? 0) + p.equipmentCombat.critChance+(p.equipmentCombat.meleeCritChance??0),
+      area, aoeReduction: e.def.combat.aoeReduction,falloff:(e.def.combat.meleeDamageTakenMultiplier??1)*(1+(p.equipmentCombat.meleeWeaponDamageBonus??0)) },'physical')
+    e.takeDamage(result.damage, Math.atan2(e.y - p.y, e.x - p.x), 520, 0.3,'physical')
     this.room.fx.combatDamage(e.x, e.y - 18, result.damage, 'physical', result.critical)
     if (!e.alive) { this.doomsdayMarks.delete(e); this.room.onEnemyKilled(e, host) }
   }

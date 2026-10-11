@@ -28,12 +28,28 @@ export interface RoomDoorRef {
   dir: Dir
 }
 
+/** 地形与门口都是纯数据；非矩形房间不再根据包围盒反推门的位置。 */
+export interface RoomTerrain {
+  cols: number
+  rows: number
+  seed: number
+  tiles: number[]
+  doors: Array<{doorId:number;col:number;row:number;arrivalCol:number;arrivalRow:number}>
+  /** 门道与入口净空，装饰、建筑及后续资源生成均需避让。 */
+  reserved: number[]
+  /** 天然岩台、断柱与承重岩柱；占地与墙体碰撞一致，外观高度独立于网格尺寸。 */
+  rockFormations?: Array<{kind:'terrace'|'broken'|'pillar';cells:number[];height:number;seed:number}>
+  buildings: Array<{col:number;row:number;width:number;height:number;variant:0|1;seed:number;containers:Array<{col:number;row:number;large:boolean;id?:import('../../../content/props/types').PropId}>}>
+}
+
 export interface RoomDef {
   id: number
   /** 在楼层槽位网格上的坐标（小地图/门朝向用） */
   sx: number
   sy: number
   kind: RoomKind
+  /** 楼层规划好的额外敌人，不参加普通怪池抽取。 */
+  extraEnemies?:string[]
   /** 限时怪物房独立于基础房型，计时结束即可通行。 */
   encounter?: 'survival'
   /** 炉骸分配在整层生成时固定，每房最多两座。 */
@@ -44,6 +60,11 @@ export interface RoomDef {
   floor?: number
   /** 群系负责地貌色板、采矿预算与刷怪数量，缺省沿用旧矿洞。 */
   biomeId?: import('../../../content/biomes/types').BiomeId
+  terrain?: RoomTerrain
+  /** 搜索经济的区域标签、特殊字段和本房覆写，不影响地貌与基础房型。 */
+  searchRegion?: string
+  searchFields?: import('../../../content/search/types').SearchFields
+  searchProfile?: import('../../../content/search/types').SearchProfile
   /** 专属房间地标只影响布景，不代替房型和门控。 */
   landmark?: 'kedama_arena'
   /** 距撤离点（裂隙房）的 BFS 步数——越接近撤离点刷怪权重范围越大 */

@@ -38,7 +38,9 @@ interface DataItemJson {
   /** 包内短 id（实际注册 id 自动加 "清单id:" 前缀） */
   id: string
   kind: ItemKind
-  tier: 1 | 2 | 3 | 4 | 5
+  grade?:ItemDef['grade']
+  rarity?:ItemDef['rarity']
+  searchFootprint?:ItemDef['searchFootprint']
   color: string
   hi: string
   text: string
@@ -103,7 +105,8 @@ function buildDataPack(json: DataPackJson, folder: string): LoadedPack {
       // 自动注入命名空间前缀，包间 id 永不撞车
       id: `${json.id}:${raw.id}`,
       kind: raw.kind,
-      tier: raw.tier,
+      ...(['weapon','pick','armor','spellcard'].includes(raw.kind)?{grade:raw.grade??1}:{rarity:raw.rarity??1}),
+      searchFootprint:raw.searchFootprint,
       color: raw.color,
       hi: raw.hi,
       text: raw.text,

@@ -1,7 +1,8 @@
+import { SnapshotCodec, type StateFields } from '../core/simulation/snapshot'
 /**
  * 角色档案（账号级持久化状态）
  *
- * 这是矿洞模块与未来基地模块共享的唯一运行时档案：
+ * 每名玩家独立持有一份档案，跨场景共用；普通存档目前保存键鼠主控档案：
  * - 装备/背包/快捷槽三件套从 CaveModule 上移至此（跨模块、跨刷新、跨死亡保持）
  * - 同时承载仓库、货币、基地状态、NPC 名册、剧情 flag、战斗成长、回合数
  * - 唯一序列化入口：toJSON/fromJSON，SaveService 负责把它写进 IndexedDB
@@ -9,10 +10,15 @@
  * 纯数据层：不依赖 Canvas / Vue / Dexie。
  */
 import { Equipment } from './equipment'
-import { Inventory } from './inventory'
+import { Inventory,type ItemStack } from './inventory'
 import { QuickSlots } from './quickSlots'
 import type { ItemId } from './itemDefs'
 import { CONFIG } from '../game/config'
+import { LivingGunReserve, type LivingGunSave } from './livingGun'
+import { ItemDiscovery, discoverCarried, type DiscoverySave } from './discovery'
+import type { SavedStatus } from './statusEffects'
+import { FOOD_COOLDOWN_SECONDS, SATIETY_ID, type FoodState } from './food'
+import { SOUP_ID, SALT_SOUP_ID, FOOD_ONIGIRI_ID } from '../content/items/vanilla/ids'
 import {
   createCombatStats,
   grantExp,
@@ -37,7 +43,7 @@ export interface CurrencyState {
 }
 
 /** 仓库格（与背包同形；空槽为 null） */
-export type StorageSlot = { id: ItemId; qty: number } | null
+export type StorageSlot = ItemStack | null
 
 /** 炉内批次随档案保存；加热与待领取分开，满背包不会吞成品。 */
 export interface SmeltingBatch {
@@ -54,8 +60,14 @@ export interface SaveProfile {
     name?: string
     /** 旧档缺省为哥哥；只影响角色外观与对应立绘、CG。 */
     appearance?: 'brother' | 'sister'
+    costume?: 'default' | 'old_miner'
     equipment: ReturnType<Equipment['toJSON']>
+    equipmentDurability?:ReturnType<Equipment['durabilityJSON']>
     inventory: ReturnType<Inventory['toJSON']>
+    inventoryCapacity?: number
+    inventoryStackLimit?: number
+    /** 垃圾桶暂存格；旧档缺省为空，点击销毁前仍可取回。 */
+    trash?: ReturnType<Inventory['toJSON']>
     quickSlots: ReturnType<QuickSlots['toJSON']>
     /** 当前手持槽序号：0 武器A / 1 武器B / 2 镐 */
     selected: number
@@ -63,6 +75,12 @@ export interface SaveProfile {
   /** 基地仓库（60 格） */
   storage: StorageSlot[]
   smelting?: SmeltingBatch | null
+  livingGun?: LivingGunSave
+  discovery?: DiscoverySave
+  foodCooldown?: number
+  foodDuration?: number
+  foodEffects?: SavedStatus[]
+  pendingSearchUnlocks?: string[]
   currency: CurrencyState
   /** 基地相关状态 */
   base: {
@@ -100,9 +118,19 @@ export const STORAGE_ROWS = 5
  * toJSON/fromJSON 负责与存档 JSON 互转。
  */
 export class CharacterProfile {
+  captureSimulation(codec = new SnapshotCodec()): StateFields { return codec.capture(this) }
+  restoreSimulation(state: StateFields, codec = new SnapshotCodec()): void { codec.restore(this, state) }
+
   readonly equipment = new Equipment()
-  readonly inventory = new Inventory(CONFIG.inventory.cols, CONFIG.inventory.rows)
+  readonly inventory = new Inventory(CONFIG.inventory.cols, CONFIG.inventory.rows, 20)
   readonly quickSlots = new QuickSlots()
+  readonly trash = new Inventory(1, 1)
+  readonly livingGun = new LivingGunReserve()
+  readonly discovery = new ItemDiscovery()
+  /** 随身食用状态跟随档案跨场景，剩余时间由角色的状态系统同步。 */
+  readonly food:FoodState = { remaining: 0, duration: FOOD_COOLDOWN_SECONDS, effects: [] }
+  readonly pendingSearchUnlocks = new Set<string>()
+  costume: 'default' | 'old_miner' = 'default'
   /** 基地仓库（背包同构容器，存取拖拽面板在基地批次做） */
   readonly storage = new Inventory(STORAGE_COLS, STORAGE_ROWS)
 
@@ -146,13 +174,23 @@ export class CharacterProfile {
       character: {
         name: this.playerName,
         appearance: this.playerAppearance,
+        costume: this.costume,
         equipment: this.equipment.toJSON(),
+        equipmentDurability:this.equipment.durabilityJSON(),
         inventory: this.inventory.toJSON(),
+        inventoryCapacity: this.inventory.size,
+        inventoryStackLimit: 20,
+        trash: this.trash.toJSON(),
         quickSlots: this.quickSlots.toJSON(),
         selected: this.selected
       },
       storage: this.storage.toJSON(),
       smelting: this.smelting ? { ...this.smelting } : null,
+      livingGun: this.livingGun.toJSON(),
+      discovery: this.discovery.toJSON(),
+      foodDuration: this.food.duration,
+      foodEffects: this.food.effects.map(effect=>({...effect})),
+      pendingSearchUnlocks: [...this.pendingSearchUnlocks],
       currency: { ...this.currency },
       base: { level: this.baseLevel },
       npcs: [...this.npcs],
@@ -182,12 +220,34 @@ export class CharacterProfile {
     const ch = data.character
     this.playerName = typeof ch?.name === 'string' ? ch.name.trim() : ''
     this.playerAppearance = ch?.appearance === 'sister' ? 'sister' : 'brother'
+    this.costume = ch?.costume === 'old_miner' && data.flags?.['unlock.costume.old_miner'] === true ? 'old_miner' : 'default'
+    this.pendingSearchUnlocks.clear()
+    for(const id of data.pendingSearchUnlocks??[])if(typeof id==='string')this.pendingSearchUnlocks.add(id)
     if (ch?.equipment) this.equipment.fromJSON(ch.equipment)
-    if (ch?.inventory) this.inventory.fromJSON(ch.inventory)
+    this.equipment.restoreDurability(ch?.equipmentDurability)
+    if (Array.isArray(data.storage)) this.storage.fromJSON(data.storage)
+    if (ch?.inventory) {
+      // 囊袋升级只扩格子；旧档的堆叠加成取消，超限物品由下方迁移到仓库保留。
+      this.inventory.materialStack = 20
+      const capacity = Number(data.flags?.['base.bag.stage']) > 0 ? 12 : 10
+      this.inventory.slots.length=capacity;this.inventory.slots.fill(null);this.inventory.rows=Math.ceil(capacity/this.inventory.cols)
+      const preserve = (stack: NonNullable<StorageSlot>): void => {
+        const left = stack.qty - this.storage.add(stack.id, stack.qty,stack.durability)
+        if (left > 0) {
+          // 仓库已满时增加迁移保留格，旧物品不能因新背包规则消失。
+          this.storage.expand(this.storage.size + Math.ceil(left / this.storage.stackLimit(stack.id)))
+          this.storage.add(stack.id, left,stack.durability)
+        }
+      }
+      this.inventory.fromJSON(ch.inventory.slice(0,capacity), preserve)
+      for(const stack of ch.inventory.slice(capacity))if(stack)preserve(stack)
+    }
+    this.trash.clear()
+    if (Array.isArray(ch?.trash)) this.trash.fromJSON(ch.trash)
     if (ch?.quickSlots) this.quickSlots.fromJSON(ch.quickSlots)
     if (typeof ch?.selected === 'number') this.selected = ch.selected
-    if (Array.isArray(data.storage)) this.storage.fromJSON(data.storage)
     const batch = data.smelting
+    this.livingGun.fromJSON(data.livingGun)
     // 旧档已经投料的最多 20 锭批次完整保留；新批次由制作规则限制为 8 锭。
     this.smelting = batch && typeof batch.id === 'string' && Number.isInteger(batch.qty) && batch.qty >= 1 && batch.qty <= 20
       && Number.isInteger(batch.startedRound) && batch.startedRound >= 0 && (batch.state === 'heating' || batch.state === 'ready')
@@ -196,6 +256,19 @@ export class CharacterProfile {
     if (typeof data.base?.level === 'number') this.baseLevel = data.base.level
     if (Array.isArray(data.npcs)) this.npcs = [...data.npcs]
     if (data.flags && typeof data.flags === 'object') this.flags = { ...data.flags }
+    if(Number(this.flags['base.bag.stage'])>1)this.flags['base.bag.stage']=1
+    this.discovery.fromJSON(data.discovery)
+    if (!data.discovery) {
+      discoverCarried(this, true)
+      if(this.flagBool('quest.reimu.cooking.done'))this.discovery.unlock(SOUP_ID)
+      if(this.flagBool('quest.saltSoup.done'))this.discovery.unlock(SALT_SOUP_ID)
+      if(data.starterGiven)this.discovery.unlock(FOOD_ONIGIRI_ID)
+    }
+    this.food.effects = (Array.isArray(data.foodEffects)?data.foodEffects:[]).filter(effect=>typeof effect.id==='string'&&typeof effect.source==='string'&&effect.source.startsWith('food:')).map(effect=>({...effect}))
+    this.food.duration = typeof data.foodDuration==='number'&&Number.isFinite(data.foodDuration)&&data.foodDuration>0?data.foodDuration:FOOD_COOLDOWN_SECONDS
+    if(!this.food.effects.some(effect=>effect.id===SATIETY_ID)&&typeof data.foodCooldown==='number'&&Number.isFinite(data.foodCooldown)&&data.foodCooldown>0)
+      this.food.effects.push({id:SATIETY_ID,source:'food:satiety',remaining:Math.min(FOOD_COOLDOWN_SECONDS,data.foodCooldown),elapsed:0})
+    this.food.remaining = this.food.effects.find(effect=>effect.id===SATIETY_ID)?.remaining??0
     if (data.combat) {
       this.combat = {
         level: data.combat.level ?? 1,

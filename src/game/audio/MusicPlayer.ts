@@ -93,7 +93,13 @@ export const MUSIC_TRACKS = {
     { src: 'audio/cave/Cave3.mp3', nameKey: 'cave.music.track3' },
     { src: 'audio/cave/Cave4.mp3', nameKey: 'cave.music.track4' }
   ],
+  old_hell: [
+    { src: 'audio/old-hell/Infeno3.mp3', nameKey: 'old_hell.music.track3' },
+    { src: 'audio/old-hell/Infeno1.mp3', nameKey: 'old_hell.music.track1' },
+    { src: 'audio/old-hell/Infeno4.mp3', nameKey: 'old_hell.music.track4' },
+    { src: 'audio/old-hell/Infeno2.mp3', nameKey: 'old_hell.music.track2' }
+  ],
   trial: { src: 'audio/boss/Trial1.mp3', nameKey: 'trial.music' },
   kedama: { src: 'audio/boss/KedamaEvolution.mp3', nameKey: 'story.fourth.music' },
   base: [{ src: 'audio/base/Base1.mp3', nameKey: 'base.radio.track1', resume: false }]
-} satisfies { title: MusicTrack; cave: MusicTrack[]; trial: MusicTrack; kedama: MusicTrack; base: MusicTrack[] }
+} satisfies { title: MusicTrack; cave: MusicTrack[]; old_hell: MusicTrack[]; trial: MusicTrack; kedama: MusicTrack; base: MusicTrack[] }

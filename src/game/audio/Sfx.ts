@@ -1,3 +1,5 @@
+import { presentationRequest, isHeadless } from '../../core/simulation/presentation'
+import { randomAudio } from '../../core/simulation/random'
 /**
  * 程序合成音效引擎 v2（WebAudio，零音频资源）。
  *
@@ -22,6 +24,7 @@ export type { AudioSettings } from './AudioMixer'
 type FleshKind = 'slime' | 'venom' | 'bat'
 
 type AmbientStop = { stop: () => void }
+type MusicScene = 'title' | 'cave' | 'old_hell' | 'trial' | 'kedama' | 'base'
 
 export class AudioEngine {
   private ctx: AudioContext | null = null
@@ -31,25 +34,29 @@ export class AudioEngine {
   private envBus: GainNode | null = null
   private musicBus: GainNode | null = null
   readonly music = new MusicPlayer(() => this.ctx && this.musicBus ? { context: this.ctx, bus: this.musicBus } : null)
-  private musicScene: 'title' | 'cave' | 'trial' | 'kedama' | 'base' | null = null
+  private musicScene: MusicScene | null = null
   private baseTrackIndex = 0
 
   /** 背景音乐互斥；关闭其他场景不误停当前音乐。 */
-  private setMusic(scene: 'title' | 'cave' | 'trial' | 'kedama' | 'base', enabled: boolean): void {
+  private setMusic(scene: MusicScene, enabled: boolean): void {
     if (!enabled && this.musicScene !== scene) return
     const entering = this.musicScene !== scene
     this.musicScene = enabled ? scene : null
     if (!enabled) { this.music.select(null); return }
-    if (scene === 'cave') {
-      // 每趟矿洞随机起曲，之后顺序轮播；重复启用不打断当前音乐。
-      if (entering) this.music.selectPlaylist(MUSIC_TRACKS.cave, Math.floor(Math.random() * MUSIC_TRACKS.cave.length))
+    if (scene === 'cave' || scene === 'old_hell') {
+      // 每个环境使用独立歌单，随机起曲后顺序轮播；重复启用不打断当前音乐。
+      const tracks=MUSIC_TRACKS[scene]
+      if (entering) this.music.selectPlaylist(tracks, Math.floor(randomAudio() * tracks.length))
     } else {
       this.music.select(scene === 'base' ? MUSIC_TRACKS.base[this.baseTrackIndex] : scene === 'title' ? MUSIC_TRACKS.title : scene === 'kedama' ? MUSIC_TRACKS.kedama : MUSIC_TRACKS.trial)
     }
     this.ensure()
   }
   setTitleMusic(enabled: boolean): void { this.setMusic('title', enabled) }
-  setCaveMusic(enabled: boolean): void { this.setMusic('cave', enabled) }
+  setCaveMusic(enabled: boolean, environment: 'cave' | 'old_hell' = 'cave'): void {
+    // 离矿入口统一停止当前矿洞环境，调用方无需记住之前使用哪张歌单。
+    this.setMusic(!enabled && this.musicScene === 'old_hell' ? 'old_hell' : environment, enabled)
+  }
   setTrialMusic(enabled: boolean): void { this.setMusic('trial', enabled) }
   setKedamaMusic(enabled: boolean): void { this.setMusic('kedama', enabled) }
   setBaseMusic(enabled: boolean): void { this.setMusic('base', enabled) }
@@ -86,13 +93,13 @@ export class AudioEngine {
     const data = buffer.getChannelData(0)
     let low = 0
     for (let i = 0; i < data.length; i++) {
-      low = low * .985 + (Math.random() * 2 - 1) * .015
+      low = low * .985 + (randomAudio() * 2 - 1) * .015
       data[i] = low * .7
     }
-    for (let at = .4; at < 18.6; at += .3 + Math.random() * .9) {
-      const length = Math.floor(c.sampleRate * (.015 + Math.random() * .05))
-      const start = Math.floor(at * c.sampleRate), volume = .08 + Math.random() * .13
-      for (let j = 0; j < length; j++) data[start + j] += (Math.random() * 2 - 1) * volume * Math.exp(-j / (length * .16))
+    for (let at = .4; at < 18.6; at += .3 + randomAudio() * .9) {
+      const length = Math.floor(c.sampleRate * (.015 + randomAudio() * .05))
+      const start = Math.floor(at * c.sampleRate), volume = .08 + randomAudio() * .13
+      for (let j = 0; j < length; j++) data[start + j] += (randomAudio() * 2 - 1) * volume * Math.exp(-j / (length * .16))
     }
     const source = c.createBufferSource(), filter = c.createBiquadFilter(), gain = c.createGain()
     source.buffer = buffer; source.loop = true
@@ -117,6 +124,7 @@ export class AudioEngine {
 
   /** 懒初始化 + 解锁（首次用户手势调用，重复调用安全） */
   ensure(): void {
+    if (typeof window === 'undefined') return
     if (!this.ctx) {
       const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
       if (!AC) return
@@ -165,11 +173,11 @@ export class AudioEngine {
   // ============================================================
 
   private rand(a: number, b: number): number {
-    return a + Math.random() * (b - a)
+    return a + randomAudio() * (b - a)
   }
   /** ±5% 全局扰动：同种音每次不完全一样（挖矿一小时不折磨耳朵） */
   private j(x: number, amt = 0.05): number {
-    return x * (1 + (Math.random() * 2 - 1) * amt)
+    return x * (1 + (randomAudio() * 2 - 1) * amt)
   }
 
   /** 同类事件节流：间隔内只放第一声 */
@@ -191,7 +199,7 @@ export class AudioEngine {
     const buf = c.createBuffer(2, len, rate)
     for (let ch = 0; ch < 2; ch++) {
       const d = buf.getChannelData(ch)
-      for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, decay)
+      for (let i = 0; i < len; i++) d[i] = (randomAudio() * 2 - 1) * Math.pow(1 - i / len, decay)
       ;[0.011, 0.019, 0.031, 0.037].forEach((t, k) => {
         const idx = Math.floor(t * rate)
         if (idx < len) d[idx] = (ch ? -0.5 : 0.6) * (1 - k * 0.18)
@@ -208,12 +216,12 @@ export class AudioEngine {
     if (type === 'brown') {
       let last = 0
       for (let i = 0; i < len; i++) {
-        const w = Math.random() * 2 - 1
+        const w = randomAudio() * 2 - 1
         last = (last + 0.02 * w) / 1.02
         d[i] = last * 3.2
       }
     } else {
-      for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1
+      for (let i = 0; i < len; i++) d[i] = randomAudio() * 2 - 1
     }
     return buf
   }
@@ -622,7 +630,7 @@ export class AudioEngine {
     )
     this.fm({ f: this.j(1320 + hpRatio * 360), ratio: 2.47, index: 42, dur: 0.05, vol: 0.055 * v, rev: 0.06 })
     this.osc({ wave: 'sine', f0: this.j(92 + hpRatio * 30), f1: 52, dur: 0.055, vol: 0.34 * v })
-    const n = 2 + (Math.random() < 0.5 ? 1 : 0)
+    const n = 2 + (randomAudio() < 0.5 ? 1 : 0)
     for (let i = 0; i < n; i++) {
       this.noise({
         dur: this.rand(0.012, 0.026),
@@ -651,7 +659,7 @@ export class AudioEngine {
         f0: this.rand(700, 3800),
         q: this.rand(1.5, 4.5),
         vol: this.rand(0.05, 0.16) * size,
-        at: Math.pow(Math.random(), 1.8) * 0.16,
+        at: Math.pow(randomAudio(), 1.8) * 0.16,
         pan: this.rand(-0.8, 0.8),
         rev: 0.18
       })
@@ -691,6 +699,23 @@ export class AudioEngine {
   /** 木弓纤维拉紧与松弦，声音随自动拉弦/释放节点触发。 */
   bowDraw():void {this.ensure();this.noise({dur:.28,curve:this.sweep(240,620),q:.75,vol:.065,env:'swell'});this.noise({dur:.12,type:'lowpass',f0:450,vol:.035,env:'swell'})}
   bowReady():void {this.ensure();this.noise({dur:.055,type:'bandpass',f0:740,q:.7,vol:.045})}
+  /** 活体枪保留枪口爆裂与高速破空，混入短促湿腔喷吐，连射不堆积长尾。 */
+  scp127Shot():void {
+    this.ensure();if(!this.gate('scp127-shot',.05))return
+    this.noise({dur:.018,type:'highpass',f0:3800,vol:.23})
+    this.noise({dur:.055,type:'lowpass',f0:6200,vol:.14})
+    this.osc({wave:'sawtooth',f0:245,f1:62,dur:.075,vol:.095,lp:1250,attack:.003})
+    this.noise({dur:.07,curve:this.sweepArch(850,2100,430),q:1.6,vol:.085,env:'whip',at:.005})
+    this.noise({dur:.038,curve:this.sweep(7600,3300),q:.85,vol:.075,at:.009})
+    this.noise({dur:.018,type:'bandpass',f0:2400,q:2.4,vol:.055,at:.03})
+  }
+  /** 原创电子拟声：短元音分节，带两个固定共振区，不使用采样台词。 */
+  scp127Voice(syllable:number,urgent=false):void {
+    this.ensure();if(!this.gate('scp127-voice',.075))return
+    const pitch=(urgent?210:160)+Math.sin(syllable*2.1)*22
+    this.osc({wave:'sawtooth',f0:pitch,f1:pitch*(syllable%3===0?1.16:.93),dur:.085,vol:.085,lp:1450,attack:.009})
+    this.osc({wave:'triangle',f0:720+Math.sin(syllable)*85,f1:640,dur:.075,vol:.044,lp:2100,attack:.008})
+  }
   private readonly bowReleaseBuffers=new Map<boolean,AudioBuffer>()
   bowRelease(charged=false):void {
     this.ensure();const c=this.ctx,bus=this.sfxBus,rev=this.rev;if(!c||!bus||!rev)return
@@ -787,7 +812,7 @@ export class AudioEngine {
         f0: this.rand(150, 700),
         q: this.rand(1, 3),
         vol: this.rand(0.05, 0.14),
-        at: Math.pow(Math.random(), 1.5) * 0.14,
+        at: Math.pow(randomAudio(), 1.5) * 0.14,
         pan,
         rev: 0.2
       })
@@ -803,7 +828,23 @@ export class AudioEngine {
     for(let i=0;i<6;i++)this.noise({dur:.025+i*.004,type:'bandpass',f0:420+i*270,q:1.8,vol:.09-i*.009,at:.035+i*.028,pan,rev:.2})
   }
 
-  /** 毒液怪吐弹：straight=湿气泡上挑 blip；ring=一圈齐喷的厚湿 chuff */
+  /** 焰灵预警的升调火鸣，爆发的低冲击与岩浆黏地的短噗响。 */
+  fireBurst(kind:'warning'|'burst'|'splat'|'shoot',pan=0):void {
+    this.ensure()
+    if(!this.gate(`fire:${kind}`,kind==='burst' ? .08 : kind==='warning' ? .04 : .05))return
+    if(kind==='warning'){
+      this.osc({wave:'sine',f0:220,f1:720,dur:.95,vol:.09,attack:.05,pan,rev:.12})
+      this.noise({dur:.85,type:'bandpass',curve:[450,1300,2400],q:.6,vol:.09,env:'swell',pan})
+    }else if(kind==='burst'){
+      this.osc({wave:'sine',f0:140,f1:42,dur:.3,vol:.19,pan,rev:.15})
+      this.noise({dur:.26,type:'lowpass',curve:[3400,1200,250],q:.6,vol:.24,pan,rev:.12})
+    }else{
+      this.osc({wave:'sine',f0:kind==='shoot'?170:120,f1:55,dur:.16,vol:.09,pan})
+      this.noise({dur:kind==='shoot' ? .18 : .12,type:'bandpass',curve:[1300,2200,450],q:.7,vol:.12,pan})
+    }
+  }
+
+  /** 毒液怪吐弹：直线弹为湿气泡上挑，环弹为一圈齐喷的厚湿气声。 */
   enemyShoot(kind: 'straight' | 'ring', pan = 0): void {
     this.ensure()
     if (!this.gate(`shoot:${kind}`, kind === 'ring' ? 0.12 : 0.05)) return
@@ -933,7 +974,7 @@ export class AudioEngine {
         f0: this.rand(300, 1400),
         q: this.rand(1, 3),
         vol: this.rand(0.05, 0.13),
-        at: delay + 0.12 + Math.pow(Math.random(), 1.4) * 0.2,
+        at: delay + 0.12 + Math.pow(randomAudio(), 1.4) * 0.2,
         pan,
         rev: 0.15
       })
@@ -967,7 +1008,7 @@ export class AudioEngine {
     let grit = 0
     for (let n = 0; n < data.length; n++) {
       const t = n / c.sampleRate
-      const white = Math.random() * 2 - 1
+      const white = randomAudio() * 2 - 1
       // 一阶滤波按真实采样率设置，分离压力、声体与破裂三个频段。
       low += (1 - Math.exp(-2 * Math.PI * 240 / c.sampleRate)) * (white - low)
       mid += (1 - Math.exp(-2 * Math.PI * 1800 / c.sampleRate)) * (white - mid)
@@ -1054,7 +1095,7 @@ export class AudioEngine {
     const timer = setTimeout(() => {
       this.footstep(who)
       // 主角步幅大、约 0.46~0.58s 一步；灵梦步幅小、约 0.5~0.64s 一步
-      const next = who === 'hero' ? 0.46 + Math.random() * 0.12 : 0.5 + Math.random() * 0.14
+      const next = who === 'hero' ? 0.46 + randomAudio() * 0.12 : 0.5 + randomAudio() * 0.14
       this.scheduleFootstep(who, next)
     }, delay * 1000)
     this.footTimers.push(timer)
@@ -1075,8 +1116,8 @@ export class AudioEngine {
    */
   private footstep(who: 'hero' | 'reimu'): void {
     const hero = who === 'hero'
-    const step = 0.82 + Math.random() * 0.36 // 每步落地力度 ±18%
-    const pan = (hero ? -0.22 : 0.24) + (Math.random() - 0.5) * 0.08
+    const step = 0.82 + randomAudio() * 0.36 // 每步落地力度 ±18%
+    const pan = (hero ? -0.22 : 0.24) + (randomAudio() - 0.5) * 0.08
     const vol = hero ? 1 : 0.72
     const pitch = hero ? 1 : 1.12
     const rev = 0.14
@@ -1084,7 +1125,7 @@ export class AudioEngine {
     // ① 低频肉垫"噗"（起音稍快、尾音自然散）
     this.osc({
       wave: 'sine',
-      f0: 70 * pitch * (0.94 + Math.random() * 0.12),
+      f0: 70 * pitch * (0.94 + randomAudio() * 0.12),
       f1: 36 * pitch,
       dur: 0.14,
       vol: 0.09 * vol * step,
@@ -1107,11 +1148,11 @@ export class AudioEngine {
     // ③ 质感层
     if (hero) {
       // 主角：28% 概率踏到碎石——极短带通"咔嚓"
-      if (Math.random() < 0.28) {
+      if (randomAudio() < 0.28) {
         this.noise({
           dur: 0.05,
           type: 'bandpass',
-          f0: 680 + Math.random() * 320,
+          f0: 680 + randomAudio() * 320,
           q: 4,
           vol: 0.05 * step,
           pan,
@@ -1124,7 +1165,7 @@ export class AudioEngine {
       this.noise({
         dur: 0.045,
         type: 'bandpass',
-        f0: 1250 + Math.random() * 260,
+        f0: 1250 + randomAudio() * 260,
         q: 5,
         vol: 0.045 * step,
         pan,
@@ -1133,7 +1174,7 @@ export class AudioEngine {
       })
     }
     // 12% 概率衣料/装备摩擦的一声细"沙"（左右不绑定，模拟两人并排走的细碎动静）
-    if (Math.random() < 0.12) {
+    if (randomAudio() < 0.12) {
       this.noise({
         dur: 0.09,
         type: 'highpass',
@@ -1195,7 +1236,7 @@ export class AudioEngine {
     this.wetNoise({ dur: 0.18, curve: [hi, hi * 0.7, 420, 240, 160], q: 1.2, vol: 0.28 * v, wob: 7, wobDepth: 100 })
     this.osc({ wave: 'sine', f0: this.j(210), f1: 60, dur: 0.14, vol: 0.2 * v, attack: 0.015 })
     // 2~3 颗上升小气泡（胶体里逸出的泡）
-    const n = 2 + (Math.random() < 0.5 ? 1 : 0)
+    const n = 2 + (randomAudio() < 0.5 ? 1 : 0)
     for (let i = 0; i < n; i++) {
       const f0 = this.rand(260, 420)
       this.osc({
@@ -1343,9 +1384,9 @@ export class AudioEngine {
       this.noise({
         dur: 0.05,
         type: 'highpass',
-        f0: 1400 + Math.random() * 900,
-        vol: 0.1 + Math.random() * 0.08,
-        at: Math.random() * 0.35
+        f0: 1400 + randomAudio() * 900,
+        vol: 0.1 + randomAudio() * 0.08,
+        at: randomAudio() * 0.35
       })
     }
   }
@@ -1395,7 +1436,7 @@ export class AudioEngine {
         f0: this.rand(520, 1700),
         q: this.rand(1, 2.6),
         vol: this.rand(0.04, 0.1),
-        at: 0.08 + Math.pow(Math.random(), 0.8) * 1.75
+        at: 0.08 + Math.pow(randomAudio(), 0.8) * 1.75
       })
     }
     this.osc({ wave: 'sine', f0: 52, f1: 40, dur: 0.3, vol: 0.08, at: 0.9, attack: 0.05 })
@@ -1440,7 +1481,74 @@ export class AudioEngine {
     this.noise({ dur: 0.03, type: 'highpass', f0: 2200, vol: 0.09 })
     this.noise({ dur: 0.09, type: 'bandpass', f0: 2400, vol: 0.035, at: 0.02 })
   }
+
+  /** 低频迸发与错开的阴沉回声。 */
+  darkEcho():void {
+    this.ensure()
+    this.osc({wave:'sine',f0:94,f1:38,dur:.75,vol:.19,attack:.018,rev:.35})
+    this.fm({f:66,ratio:1.47,index:2.4,dur:.58,vol:.1,rev:.3})
+    this.noise({dur:.62,type:'lowpass',curve:[800,430,180],q:.8,vol:.17,env:'swell',buf:this.brown??undefined,rev:.28})
+    for(let i=0;i<3;i++)this.osc({wave:'sine',f0:112-i*18,f1:60-i*9,dur:.32,vol:.06,at:i*.1,rev:.32,attack:.012})
+  }
+
+  /** 打开容器的短木响与布料展开，覆盖HUD入场的三百毫秒。 */
+  searchOpen():void {
+    this.ensure()
+    this.modal(164,[1,2.12,3.8],[.11,.045,.02],[.13,.08,.05],{vol:1,rev:.08})
+    this.noise({dur:.22,type:'bandpass',curve:[700,1600,1000],q:.65,vol:.095,env:'swell',at:.035})
+  }
+  /** 封存铁柜先断开沉重锁扣，再拖动旧铰链，最后落下一点积灰。 */
+  sealedCabinetOpen():void {
+    this.ensure()
+    if(!this.gate('search:sealed-open',.3))return
+    this.modal(122,[1,2.71,4.38],[.2,.075,.035],[.26,.16,.09],{vol:1,rev:.13})
+    this.noise({dur:.07,type:'highpass',f0:2100,vol:.1})
+    this.noise({dur:.36,type:'bandpass',curve:[460,1250,380],q:1.2,vol:.12,env:'swell',at:.055,rev:.07})
+    this.osc({wave:'sine',f0:88,f1:42,dur:.18,vol:.12,at:.08,attack:.004})
+    this.noise({dur:.2,type:'lowpass',curve:[1000,420,180],vol:.07,at:.2,env:'swell'})
+  }
+  /** 搜索按低频节拍发声，不逐帧创建音频节点。 */
+  searchRummage(): void {
+    this.ensure()
+    if (!this.gate('search:rummage', .2)) return
+    this.noise({dur:.12,type:'bandpass',curve:[1050,1850,1250],q:.65,vol:.085,env:'swell'})
+    this.noise({dur:.055,type:'highpass',f0:2800,vol:.025,at:.075})
+    this.osc({wave:'sine',f0:180,f1:115,dur:.045,vol:.035,at:.018})
+  }
+  /** 材料、装备和稀有发现分别采用轻响、双音与短和弦。 */
+  searchReveal(kind: 'ordinary' | 'equipment' | 'rare' | 'legendary', empty = false,level=1): void {
+    this.ensure()
+    this.noise({dur:.045,type:'highpass',f0:2200,vol:empty ? .025 : .07})
+    if (empty) return
+    const rank=Math.max(1,Math.min(7,level))
+    const notes=rank>=7?[523.25,659.25,783.99,1046.5,1568]:kind==='legendary'?[523.25,659.25,783.99,1046.5]:kind==='rare'?[659.25,880,1318.5]:kind==='equipment'||rank>=2?[440,659.25]:[390]
+    notes.forEach((f,i)=>this.osc({wave:'triangle',f0:f,dur:.13+rank*.035,vol:rank>=4?.085:.07,at:i*.055,rev:.08+rank*.018,attack:.005}))
+    if(rank>=4){
+      this.fm({f:1046.5,ratio:2.005,index:8,dur:.35+rank*.025,vol:.034,rev:.22})
+      this.osc({wave:'sine',f0:196,f1:147,dur:.16,vol:.045})
+    }
+  }
+  /** 拿取用短促实音确认，不与稀有发现的和弦争抢。 */
+  searchTake():void {
+    this.ensure()
+    this.modal(240,[1,2.1,3.6],[.08,.035,.012],[.1,.06,.04],{vol:1,rev:.04})
+    this.noise({dur:.045,type:'bandpass',f0:1700,vol:.075,env:'swell'})
+  }
 }
 
 /** 全局单例 */
-export const sfx = new AudioEngine()
+const audioEngine = new AudioEngine()
+const immediate = new Set(['ensure','dispose','applySettings','toggleMute','nextBaseTrack','gate','sweep','sweepArch'])
+const methods = new Map<PropertyKey, unknown>()
+/** 战斗发出声音请求，实际 WebAudio 调用位于表现阶段；无头驱动不创建音频设备。 */
+export const sfx: AudioEngine = new Proxy(audioEngine, {
+  get(target,key) {
+    if(isHeadless()&&key==='ensure')return()=>{}
+    if(isHeadless()&&key==='gate')return()=>false
+    const value=Reflect.get(target,key,target)
+    if(typeof value!=='function')return value
+    if(methods.has(key))return methods.get(key)
+    const method=immediate.has(String(key))?value.bind(target):(...args:unknown[])=>presentationRequest(()=>value.apply(target,args))
+    methods.set(key,method);return method
+  }
+})

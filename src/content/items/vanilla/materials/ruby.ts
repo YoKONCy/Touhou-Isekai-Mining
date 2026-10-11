@@ -6,7 +6,6 @@ import { svgIcon, type ItemDef } from '../../types'
 const def: ItemDef = {
   id: RUBY_ID,
   kind: 'material',
-  tier: 3,
   color: '#a43c50',
   hi: '#e7a0a1',
   text: '#dfa0a1',

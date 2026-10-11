@@ -9,9 +9,12 @@ import { itemName, itemDesc, t } from '../i18n'
 import { sfx } from '../game/audio/Sfx'
 import ItemIcon from './ItemIcon.vue'
 import { useHorizontalBrowse } from './useHorizontalBrowse'
+import { cookingRecipes, type CookingMethod } from '../shared/cookingRecipes'
+import GrillVignette from './GrillVignette.vue'
 
-const props=defineProps<{profile:CharacterProfile;tick:number;revision:number;repaired:boolean;done:boolean;message:string}>()
-const emit=defineEmits<{action:[kind:'repair'|'cook',id?:string,quantity?:number,complete?:(success:boolean)=>void]}>()
+const props=withDefaults(defineProps<{profile:CharacterProfile;tick:number;revision:number;repaired:boolean;done:boolean;message:string;station?:'pot'|'grill'}>(),{station:'pot'})
+const method=ref<CookingMethod>(props.station)
+const emit=defineEmits<{action:[kind:'repair'|'cook',id?:string,quantity?:number,complete?:(success:boolean)=>void,method?:CookingMethod]}>()
 const selected=ref(SOUP_ID),preset=ref<number|'custom'>(1),customValue=ref('1'),customInput=ref<HTMLInputElement|null>(null)
 const phase=ref<'idle'|'stirring'|'reveal'|'success'>('idle')
 const cooked=ref<{id:string;qty:number}|null>(null)
@@ -21,9 +24,10 @@ let mounted=true
 const busy=computed(()=>phase.value!=='idle')
 const simmering=computed(()=>phase.value==='stirring')
 const {strip:ingredientStrip,beginBrowse,moveBrowse,endBrowse,leaveBrowse,browseWheel}=useHorizontalBrowse()
-const saltUnlocked=computed(()=>{void props.tick;void props.revision;return props.profile.flagBool('recipe.saltSoup.unlocked')})
-const browseRecipes=computed(()=>saltUnlocked.value?[SOUP_ID,SALT_SOUP_ID]:[SOUP_ID])
-const recipe=computed(()=>selected.value===SALT_SOUP_ID&&saltUnlocked.value?SALT_SOUP_RECIPE:SOUP_RECIPE)
+const definitions=computed(()=>{void props.tick;void props.revision;return cookingRecipes(props.profile,method.value)})
+const browseRecipes=computed(()=>definitions.value.map(recipe=>recipe.id))
+const saltUnlocked=computed(()=>browseRecipes.value.length>1)
+const recipe=computed(()=>definitions.value.find(recipe=>recipe.id===selected.value)??definitions.value[0]??SOUP_RECIPE)
 const quantity=computed(()=>preset.value==='custom'?Number(customValue.value):preset.value)
 const batch=computed(()=>scaleRecipe(recipe.value,quantity.value))
 const quantityValid=computed(()=>!!batch.value)
@@ -65,17 +69,20 @@ function perform(){
   if(!props.repaired){emit('action','repair');return}
   const output=batch.value
   if(!output)return
-  emit('action','cook',output.id,quantity.value,success=>{if(success)animateResult(output.id,output.qty)})
+  emit('action','cook',output.id,quantity.value,success=>{if(success)animateResult(output.id,output.qty)},method.value)
 }
 onBeforeUnmount(()=>{mounted=false;clearTimeout(animationTimer)})
 </script>
 
 <template>
   <div class="cook-layout">
+    <nav v-if="station==='grill'" class="cooking-methods"><button v-for="m in (['grill','smoke'] as const)" :key="m" :class="{chosen:method===m}" :disabled="busy" @click="method=m">{{t(`ui.cooking.method.${m}`)}}</button></nav>
+    <div v-if="repaired&&definitions.length===0" class="smoke-empty"><GrillVignette/><p>{{t('ui.cooking.smoke_empty')}}</p></div>
+    <template v-else>
     <aside class="recipe-book" :class="{'has-recipes':repaired&&saltUnlocked}">
       <div class="book-binding" aria-hidden="true"></div>
       <div class="paper-tab">{{ t(repaired ? 'ui.cooking.recipes' : 'ui.camp.maintenance') }}</div>
-      <span class="folio">{{ t('ui.cooking.camp_record') }} · {{recipe.id===SALT_SOUP_ID?'02':'01'}}</span>
+      <span class="folio">{{ t('ui.cooking.camp_record') }} · {{String(Math.max(0,browseRecipes.indexOf(recipe.id))+1).padStart(2,'0')}}</span>
       <nav v-if="repaired&&saltUnlocked" class="soup-recipes" :aria-label="t('ui.cooking.recipes')"><button v-for="id in browseRecipes" :key="id" :class="{selected:recipe.id===id}" :aria-pressed="recipe.id===id" :disabled="busy" @click="selected=id"><ItemIcon :id="id" :size="24"/><span>{{itemName(id)}}</span></button></nav>
       <div class="recipe-illustration" aria-hidden="true">
         <ItemIcon v-if="repaired" :id="recipe.id" :size="128"/>
@@ -92,10 +99,10 @@ onBeforeUnmount(()=>{mounted=false;clearTimeout(animationTimer)})
           </g>
         </svg>
       </div>
-      <span class="recipe-category">{{ t(repaired ? 'ui.cooking.soup_category' : 'ui.cooking.repair_category') }}</span>
+      <span class="recipe-category">{{ t(repaired ? `ui.cooking.method.${method}` : 'ui.cooking.repair_category') }}</span>
       <h2>{{ repaired ? itemName(recipe.id) : t('base.pot.name') }}</h2>
       <div class="recipe-rule" aria-hidden="true"><span>◆</span></div>
-      <p class="recipe-note">{{ repaired&&recipe.id===SALT_SOUP_ID?itemDesc(recipe.id):t(!repaired ? 'ui.cooking.repair_description' : done ? 'ui.cooking.soup_description' : 'ui.cooking.trial_description') }}</p>
+      <p class="recipe-note">{{ repaired&&(recipe.id!==SOUP_ID||station==='grill')?itemDesc(recipe.id):t(!repaired ? 'ui.cooking.repair_description' : done ? 'ui.cooking.soup_description' : 'ui.cooking.trial_description') }}</p>
       <div v-if="repaired" class="health-label">
         <span class="health-cross" aria-hidden="true">✚</span>
         <div><strong>{{ t('ui.cooking.heal', { amount: heal }) }}</strong><small>{{ t('ui.cooking.consume_hint') }}</small></div>
@@ -111,7 +118,7 @@ onBeforeUnmount(()=>{mounted=false;clearTimeout(animationTimer)})
       </div>
       <div class="hearth" aria-hidden="true">
         <div class="hearth-glow" v-if="repaired"></div>
-        <svg class="cauldron" viewBox="0 0 360 225">
+        <svg v-if="station==='pot'" class="cauldron" viewBox="0 0 360 225">
           <defs>
             <linearGradient id="cooking-iron" x1="0" y1="0" x2="1" y2=".7"><stop stop-color="#797b77"/><stop offset=".32" stop-color="#535957"/><stop offset="1" stop-color="#323338"/></linearGradient>
             <linearGradient id="cooking-rim" x2="0" y2="1"><stop stop-color="#b7b59b"/><stop offset=".4" stop-color="#7a807a"/><stop offset="1" stop-color="#414747"/></linearGradient>
@@ -170,6 +177,7 @@ onBeforeUnmount(()=>{mounted=false;clearTimeout(animationTimer)})
           </g>
           <path d="M130 139 L144 141 M209 146 L222 142 M135 117 L157 119" stroke="#a6b0a0" opacity=".13"/>
         </svg>
+        <GrillVignette v-else :working="simmering"/>
         <div v-if="cooked&&(phase==='reveal'||phase==='success')" class="cook-result" :class="{celebrating:phase==='success'}" :style="{'--reveal-duration':REVEAL_MS+'ms'}" role="status" aria-live="polite">
           <div class="result-halo" aria-hidden="true"></div>
           <div class="result-portrait"><ItemIcon :id="cooked.id" :size="112"/><b>×{{cooked.qty}}</b></div>
@@ -197,10 +205,13 @@ onBeforeUnmount(()=>{mounted=false;clearTimeout(animationTimer)})
       </div>
       <p class="cook-feedback" :class="{ success: !!message }" role="status" aria-live="polite">{{busy?t(phase==='success'?'ui.cooking.success':phase==='reveal'?'ui.cooking.serving':'ui.cooking.stirring'):message||status}}</p>
     </main>
+    </template>
   </div>
 </template>
 
 <style scoped>
+.cooking-methods{grid-column:1/-1;display:flex;gap:10px;border-bottom:1px solid #aa8c5644;padding-bottom:12px}.cooking-methods button{padding:7px 18px;color:#c4b18d;border:1px solid #9d805244;background:#211b22;font:inherit;font-size:12px;cursor:pointer}.cooking-methods .chosen{color:#f2dba9;border-color:#c1a16a;background:#6a513933}.smoke-empty{grid-column:1/-1;text-align:center;padding:20px;color:#c5b08c;font-size:12px}.smoke-empty svg{max-height:230px}
+
 .quantity-options input[type='number']{appearance:textfield;-moz-appearance:textfield}
 .quantity-options input[type='number']::-webkit-inner-spin-button,
 .quantity-options input[type='number']::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}

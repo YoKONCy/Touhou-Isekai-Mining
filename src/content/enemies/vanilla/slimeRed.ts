@@ -21,8 +21,8 @@ const def: EnemyDef = {
   radius: 14,
   exp: 5,
   combat: {
-    physicalResist: 8,
-    magicResist: 5,
+    physicalResist: 2,
+    magicResist: 1,
     contactDamage: 10,
     // 攻击节拍与 pouncer.attackInterval 对齐：扑中/扑空都是 2 秒一轮
     attackCd: 2.0,

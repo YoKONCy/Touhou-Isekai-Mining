@@ -1,3 +1,4 @@
+import { randomCombat } from '../../core/simulation/random'
 /**
  * 通用内容注册表（工程化 L0）
  *
@@ -19,11 +20,32 @@ export interface RegisterOptions {
 }
 
 export class Registry<T extends RegisteredEntry> {
+  static revision = 0
+  private static referenceCache: Map<string, unknown> | null = null
   private static readonly instances = new Set<Registry<RegisteredEntry>>()
   private readonly map = new Map<string, T>()
   /** 资源类别名（仅报错信息用） */
   constructor(private readonly kindName = 'content') {
     Registry.instances.add(this)
+  }
+
+  /** 快照只引用内容定义的稳定路径；函数和绘制器仍由当前内容包提供。 */
+  static references(): Map<string, unknown> {
+    if(Registry.referenceCache)return Registry.referenceCache
+    const result = new Map<string, unknown>()
+    const visited = new WeakSet<object>()
+    const visit = (value: unknown, path: string): void => {
+      if ((typeof value !== 'object' || value === null) && typeof value !== 'function') return
+      result.set(path, value)
+      if (visited.has(value as object)) return
+      visited.add(value as object)
+      for (const [key, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(value))) {
+        if ('value' in descriptor) visit(descriptor.value, `${path}/${encodeURIComponent(key)}`)
+      }
+    }
+    for (const registry of Registry.instances) for (const [id, definition] of registry.map) visit(definition, `${registry.kindName}/${encodeURIComponent(id)}`)
+    Registry.referenceCache=result
+    return result
   }
 
   /** 保存全部注册表的条目映射；失败时撤销新增与覆盖，保留原有定义的引用及顺序。 */
@@ -46,6 +68,7 @@ export class Registry<T extends RegisteredEntry> {
     }
     for (const { entries } of snapshots) for (const def of entries.values()) capture(def)
     return () => {
+      Registry.revision++;Registry.referenceCache=null
       for (const { target, descriptors } of definitions) {
         for (const key of Reflect.ownKeys(target)) {
           if (!Object.hasOwn(descriptors, key)) Reflect.deleteProperty(target, key)
@@ -70,6 +93,7 @@ export class Registry<T extends RegisteredEntry> {
       throw new Error(`[registry] ${this.kindName} id 重复注册：${def.id}（覆盖请显式传 { override: true }）`)
     }
     this.map.set(def.id, def)
+    Registry.revision++;Registry.referenceCache=null
   }
 
   /** 查表（不存在返回 undefined；调用方自行兜底） */
@@ -109,7 +133,7 @@ export class Registry<T extends RegisteredEntry> {
  * 刷怪/掉落等"内容混编"入口统一走这里——加新内容只要给权重即可，
  * 引擎侧不认识任何具体 id。
  */
-export function weightedPick<T>(entries: readonly T[], weightOf: (e: T) => number, rng: () => number = Math.random): T | null {
+export function weightedPick<T>(entries: readonly T[], weightOf: (e: T) => number, rng: () => number = randomCombat): T | null {
   let total = 0
   for (const e of entries) total += Math.max(0, weightOf(e))
   if (total <= 0) return null

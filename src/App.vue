@@ -1,16 +1,14 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, provide, reactive, ref, shallowRef, watch } from 'vue'
 import { GameEngine } from './core/GameEngine'
 import { ModuleManager } from './core/ModuleManager'
-import { CONFIG } from './game/config'
 import type { GameEvents, RunStats, UIPanelKind } from './game/gameEvents'
 import { CaveModule } from './game/cave/CaveModule'
 import { BaseModule } from './game/BaseModule'
 import { TrialModule } from './game/TrialModule'
 import type { ModuleActions } from './shared/moduleActions'
 import { findItemDef } from './shared/itemDefs'
-import { t, itemName } from './i18n'
-import { SWORD_RUSTY_ID, PICK_RUSTY_ID } from './content/items/vanilla/ids'
+import { t } from './i18n'
 import { deriveCombat } from './shared/combat'
 import type { CharacterProfile } from './shared/profile'
 import { PROFILE_KEY } from './core/save/saveService'
@@ -19,6 +17,7 @@ import Hotbar from './ui/Hotbar.vue'
 import StatusEffectsHud from './ui/StatusEffectsHud.vue'
 import type { StatusSnapshot } from './shared/statusEffects'
 import InventoryPanel from './ui/InventoryPanel.vue'
+import WardrobePanel from './ui/WardrobePanel.vue'
 import BigMap from './ui/BigMap.vue'
 import NeighborMap from './ui/NeighborMap.vue'
 import PauseMenu from './ui/PauseMenu.vue'
@@ -32,11 +31,22 @@ import DialogueOverlay from './ui/DialogueOverlay.vue'
 import TutorialBubble from './ui/TutorialBubble.vue'
 import FloorTitle from './ui/FloorTitle.vue'
 import DevConsole from './ui/DevConsole.vue'
+import { simulationContentVersion } from './game/simulation/BattleSimulation'
+import { LocalPlayers } from './game/simulation/LocalPlayers'
 import { sfx, type AudioSettings } from './game/audio/Sfx'
+import { debugHudVisible as debugVisible } from './shared/debugHud'
+import SearchPanel from './ui/SearchPanel.vue'
+import QuestHud from './ui/QuestHud.vue'
+import { cancelInventoryMouse } from './ui/inventoryMouse'
+import TouchControls from './ui/TouchControls.vue'
+import { touchControls, landscapeRequired } from './browser/display'
+import { tutorial } from './game/dialogue/tutorial'
+import type { InputManager } from './core/InputManager'
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 let engine: GameEngine | null = null
 let manager: ModuleManager<GameEvents> | null = null
+const touchInput = shallowRef<InputManager | null>(null)
 let hudTimer = 0
 /** 显影模糊同步 rAF 句柄（每帧把导演 blurPx 直写 canvas CSS filter，不走 Vue 响应式） */
 let blurRaf = 0
@@ -48,15 +58,17 @@ const character = props.profile
 provide(PROFILE_KEY, character)
 
 // 矿洞模块实例（App 与 ModuleManager 共享同一对象：UI 直接调背包/装备动作）
-const cave = new CaveModule(character)
-const base = new BaseModule(character)
-const trial = new TrialModule(character)
+const localPlayers = new LocalPlayers(character)
+const cave = new CaveModule(character,localPlayers)
+const base = new BaseModule(character,localPlayers)
+const trial = new TrialModule(character,localPlayers)
 const scene = ref<'cave' | 'base' | 'trial'>('cave')
 const passage = ref<{ destination: string; failed: boolean } | null>(null)
 const currentActions = computed<ModuleActions>(() => scene.value === 'base' ? base : scene.value === 'trial' ? trial : cave)
+const searchView = computed(() => { void hudTick.value; return currentActions.value.getSearchView() })
 
 // HUD 数据（节流刷新，避免 Vue 每帧重渲染）
-const stats = reactive({ fps: 0, frameMs: 0 })
+const stats = reactive({ fps: 0, tps: 0 })
 const hudTick = ref(0)
 const audioMuted = ref(sfx.muted)
 const statusEffects = ref<StatusSnapshot[]>([])
@@ -99,6 +111,7 @@ const debug = reactive({
   unspentPoints: 0,
   round: 1
 })
+const displayedHp = computed(() => Number.isFinite(debug.hp) ? Math.max(0, Math.floor(debug.hp)) : 0)
 
 /** 结算面板 */
 type ResultKind = 'extract' | 'died' | null
@@ -126,34 +139,25 @@ const swingText = (phase: string): string => t(`ui.swing.${phase}`)
 const roomName = (kind: string): string => t(`ui.room.${kind}.name`)
 const dodgeText = (code: string): string => t(`ui.dodge.${code}`)
 
-/** 秒 → 毫秒（模板用） */
-const ms = (s: number): number => Math.round(s * 1000)
-/** 右下调试面板：当前手持招式（selected 变化时随装备槽实时取） */
-const HAND_SLOTS = ['weaponA', 'weaponB', 'pick'] as const
-const handMelee = computed(() => {
-  const slot = HAND_SLOTS[debug.selected] ?? 'pick'
-  const id = cave.equipment.get(slot)
-  return id ? (findItemDef(id)?.melee ?? null) : null
-})
-const handName = computed(() => {
-  const slot = HAND_SLOTS[debug.selected] ?? 'pick'
-  const id = cave.equipment.get(slot)
-  return id ? itemName(id) ?? t('ui.hand.unknown') : t('ui.hand.empty')
-})
 /** 装备中符卡的灵力消耗（无符卡时给满值，灵力条不做低量警示） */
 const spellCost = computed(() => {
   const id = cave.equipment.get('spellA')
   return id ? (findItemDef(id)?.spell?.manaCost ?? 100) : 100
 })
 
-/** 操作木牌上的默认装备名（随当前语言实时取） */
-const swordName = computed(() => itemName(SWORD_RUSTY_ID))
-const pickName = computed(() => itemName(PICK_RUSTY_ID))
-
 /** Tab/M 面板开关（模块为真值，Vue 经事件即时同步） */
 const panel = ref<UIPanelKind | null>(null)
+const touchBlocked = computed(() => { void hudTick.value; return !!passage.value || !!result.value || consoleOpen.value || currentActions.value.inputBlocked || dialogue.isActive || tutorial.isModal || !debug.alive || landscapeRequired.value })
+const touchPlayer = computed(() => { void hudTick.value; return scene.value === 'base' ? base.player : scene.value === 'trial' ? trial.player : cave.player })
+const touchSkillCd = computed(() => { void hudTick.value; const id = touchPlayer.value?.activeToolId; return id ? currentActions.value.getWeaponSkillCooldown(id) : 0 })
+const touchSkillAvailable = computed(() => { void hudTick.value; const id = touchPlayer.value?.activeToolId; return !!id && findItemDef(id)?.weapon?.chargeAttack?.trigger === 'special' })
+watch([touchControls, landscapeRequired], (current,previous) => {
+  if(current[1]!==previous[1])engine?.input.reset()
+  else engine?.input.cancelTouchActions()
+  manager?.setPaused('orientation', landscapeRequired.value)
+}, {flush:'sync'})
 function requestPanel(kind: UIPanelKind | null): void {
-  if (passage.value) return
+  if (passage.value || kind !== null && currentActions.value.inputBlocked) return
   manager?.bus.emit('ui:requestPanel', kind)
 }
 
@@ -183,20 +187,19 @@ function blockPassageKeys(e: KeyboardEvent): void {
   if(result.value&&resultReady.value&&e.code==='Enter'&&!e.repeat)restartRun()
 }
 
-/**
- * 调试悬浮窗总开关（P 键，默认全关）：
- * 右上调试状态 / 左下操作木牌 / 右下手持招式三窗一起显隐。
- */
-const debugVisible = ref(false)
-const onDebugKey = (e: KeyboardEvent): void => {
-  if (e.code === 'KeyP') debugVisible.value = !debugVisible.value
-}
-
 /** 调试控制台（作弊面板）：`~`（Backquote）或 F8 开关 */
 const consoleOpen = ref(false)
 /** 无敌全局开关：下矿重建 Player 后由 10Hz HUD 同步重新写入 */
 const godMode = ref(false)
 const onConsoleKey = (e: KeyboardEvent): void => {
+  const target = e.target
+  if (target instanceof HTMLElement && (target.isContentEditable || target.closest('input, textarea, select'))) return
+  if (e.repeat) return
+  if (e.code === 'KeyP' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    e.preventDefault()
+    debugVisible.value = !debugVisible.value
+    return
+  }
   if (e.code === 'Backquote' || e.code === 'F8') {
     // F8 默认无行为，反引号也无滚动，统一拦掉避免漏给画布
     e.preventDefault()
@@ -207,10 +210,14 @@ const onConsoleKey = (e: KeyboardEvent): void => {
 }
 /** 控制台开关同步输入抑制；关闭时清边沿，防止"打开前按着的键"漏进玩法 */
 watch(consoleOpen, (open) => {
+  if (open) cancelInventoryMouse()
+  manager?.setPaused('console', open)
   if (!engine) return
   engine.input.suppressed = open
   if (!open) engine.input.reset()
 })
+watch(result, value => manager?.setPaused('result', value !== null), { flush: 'sync' })
+function syncVisibilityPause(): void { if(document.hidden)engine?.input.reset();manager?.setPaused('hidden', document.hidden) }
 /** 无敌开关即时写入当前模块（10Hz 同步负责换场景/重开本局后的补写） */
 watch(godMode, (v) => {
   if (scene.value === 'base') base.debugSetGod(v)
@@ -246,7 +253,6 @@ const showRoomToast = computed(() => !(debug.prologue && debug.roomId === 0))
 /** 关闭页面不自动落盘：下次启动恢复最近的成功撤离存档点。 */
 onMounted(() => {
   if (!canvasRef.value) return
-  window.addEventListener('keydown', onDebugKey)
   window.addEventListener('keydown', onConsoleKey)
   window.addEventListener('keydown', blockPassageKeys, true)
 
@@ -269,6 +275,13 @@ onMounted(() => {
   }
 
   engine = new GameEngine(canvasRef.value)
+  touchInput.value = engine.input
+  engine.input.setGamepadContext(()=>{
+    const used=localPlayers.extras.filter(member=>member.controller.kind==='gamepad').map(member=>member.controller.kind==='gamepad'?member.controller.index:-1)
+    const pads=typeof navigator!=='undefined'?navigator.getGamepads?.()??[]:[]
+    const pad=Array.from(pads).find(candidate=>candidate?.connected&&!used.includes(candidate.index))
+    return {index:pad?.index??-1,hand:character.selected}
+  })
 
   // 对话系统的治疗钩子（事件/剧情回复玩家时用）
   setDialogueHooks({
@@ -278,6 +291,14 @@ onMounted(() => {
   // 模块架构：引擎只认识 GameScene，玩法全部挂到 ModuleManager
   // 顺序铁律：先 setScene（manager.enter 注入 engine），再 switchTo（模块 onEnter 才能拿到引擎）
   manager = new ModuleManager<GameEvents>()
+  manager.contentVersion = simulationContentVersion
+  manager.simulation.onEvents = events => manager?.bus.emit('simulation:events',events)
+  manager.bus.accept = type => !manager?.replaying || !['cave:died','cave:extract','cave:levelup','ui:panel'].includes(type)
+  manager.setPaused('console', consoleOpen.value)
+  manager.setPaused('result', result.value !== null)
+  manager.setPaused('orientation', landscapeRequired.value)
+  syncVisibilityPause()
+  document.addEventListener('visibilitychange', syncVisibilityPause)
   manager.onTransition = state => {
     passage.value = state
     if (!state) {
@@ -304,15 +325,19 @@ onMounted(() => {
     resultStats.value = null
     panel.value = null
   })
+  manager.bus.on('ui:inventoryReturn', () => cancelInventoryMouse())
   manager.bus.on('ui:panel', (kind) => {
+    manager?.setPaused('panel', kind !== null && kind !== 'inventory')
+    // 防止打开背包前按住的连射，以及关闭时的界面点击漏进玩法。
+    if (kind === 'inventory' || panel.value === 'inventory') engine?.input.reset()
     panel.value = kind
   })
   // 收音机切歌/回基地自动播放：左上角弹 3 秒曲目小牌
   manager.bus.on('base:now-playing', (nameKey) => showNowPlaying(nameKey))
 
   engine.onStats = (s) => {
-    stats.fps = s.fps
-    stats.frameMs = s.frameMs
+    stats.fps = Math.round(s.fps)
+    stats.tps = Math.round(manager?.tps ?? 0)
   }
   engine.start()
 
@@ -339,7 +364,8 @@ onMounted(() => {
     const cv = canvasRef.value
     if (cv) {
       const b = manager?.currentId === 'base' ? base.worldBlurPx : manager?.currentId === 'trial' ? 0 : cave.worldBlurPx
-      cv.style.filter = b > 0.05 ? `blur(${b.toFixed(2)}px)` : ''
+      const filter=b>0.05?`blur(${b.toFixed(2)}px)`:''
+      if(cv.style.filter!==filter)cv.style.filter=filter
     }
     blurRaf = requestAnimationFrame(syncBlur)
   }
@@ -362,14 +388,15 @@ function restartRun(): void {
 }
 
 onBeforeUnmount(() => {
+  document.removeEventListener('visibilitychange', syncVisibilityPause)
   clearTimeout(resultTimer)
   clearTimeout(nowPlayingTimer)
   clearInterval(hudTimer)
   cancelAnimationFrame(blurRaf)
-  window.removeEventListener('keydown', onDebugKey)
   window.removeEventListener('keydown', onConsoleKey)
   window.removeEventListener('keydown', blockPassageKeys, true)
   engine?.destroy()
+  touchInput.value = null
   manager?.leave()
   dialogue.cancel()
   sfx.dispose()
@@ -379,6 +406,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="game-root" :class="{ 'ui-pointer': panel !== null || result !== null || consoleOpen, 'base-art': scene === 'base' }">
     <canvas ref="canvasRef" class="game-canvas"></canvas>
+    <TouchControls v-if="touchControls" :input="touchInput" :blocked="touchBlocked" :panel="panel" :base="scene==='base'" :searching="!!searchView" :dodge-cd="debug.dodgeCd" :skill-cd="touchSkillCd" :skill-available="touchSkillAvailable" :facing="touchPlayer?.facing??Math.PI/2" @panel="requestPanel"/>
     <PrayerTransition v-if="passage" :destination="passage.destination" :failed="passage.failed" />
 
     <!-- 进房横幅：房间/层数变化时浮现淡出（首房只放层级大标题卡，不弹此横幅； :key 变化重放动画） -->
@@ -404,9 +432,9 @@ onBeforeUnmount(() => {
         <span class="hp-word">{{ t('ui.hud.hp') }}</span>
         <div class="hp-track">
           <div class="hp-fill" :class="{ low: debug.hpRatio <= 0.3 }" :style="{ width: `${debug.hpRatio * 100}%` }"></div>
-          <span class="hp-num">{{ debug.hp }}</span>
+          <span class="hp-num">{{ displayedHp }}</span>
         </div>
-        <span v-if="scene === 'base'" class="base-stat-num">{{ debug.hp }}</span>
+        <span v-if="scene === 'base'" class="base-stat-num">{{ displayedHp }}</span>
       </div>
 
       <!-- 灵力条（符卡资源：不自动回复的整洞有限资源，不足时符卡格压暗） -->
@@ -443,10 +471,10 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- 右上：调试状态（P 键唤出，高透明悬浮） -->
-    <div v-if="debugVisible" class="hud-panel panel-right">
-      <div class="panel-title">{{ t('ui.debug.title') }}</div>
-      <div class="row"><span>{{ t('ui.debug.hp') }}</span><span>{{ debug.hp }}</span></div>
+    <!-- P 键开关玩家状态与性能指标。 -->
+    <div v-if="debugVisible" class="player-status panel-right">
+      <div class="panel-title">{{ t('ui.hud.player_status') }}</div>
+      <div class="row"><span>{{ t('ui.debug.hp') }}</span><span>{{ displayedHp }}</span></div>
       <div class="row"><span>{{ t('ui.debug.speed') }}</span><span>{{ t('ui.debug.speed_val', { n: debug.speed }) }}</span></div>
       <div class="row"><span>{{ t('ui.debug.position') }}</span><span>{{ t('ui.debug.pos_val', { x: debug.x, y: debug.y }) }}</span></div>
       <div class="row">
@@ -460,62 +488,7 @@ onBeforeUnmount(() => {
       <div class="cd-track">
         <div class="cd-fill" :style="{ width: `${(1 - debug.dodgeCd) * 100}%` }"></div>
       </div>
-      <div class="row sub"><span>{{ t('ui.debug.enemies', { alive: debug.enemiesAlive, total: debug.enemiesTotal }) }}</span></div>
-      <div class="row sub"><span>{{ t('ui.debug.ores_left', { n: debug.oresLeft }) }}</span></div>
-      <div class="row sub" v-if="debug.dropsOnGround > 0"><span>{{ t('ui.debug.drops', { n: debug.dropsOnGround }) }}</span></div>
-      <div class="row sub growth">
-        <span>{{ t('ui.debug.growth', { level: debug.level, exp: debug.exp, need: debug.expNeed, round: debug.round }) }}</span>
-        <span v-if="debug.unspentPoints > 0" class="pts">{{ t('ui.debug.unspent', { n: debug.unspentPoints }) }}</span>
-      </div>
-      <div class="row sub fps"><span>{{ t('ui.debug.fps', { fps: stats.fps, ms: stats.frameMs.toFixed(2) }) }}</span></div>
-    </div>
-
-    <!-- 左下：操作木牌（P 键唤出；注意它在快捷栏上方） -->
-    <div v-if="debugVisible" class="hud-panel panel-bottom">
-      <div class="panel-title">{{ t('ui.debug.controls') }}</div>
-      <div class="row"><kbd>WASD</kbd> {{ t('ui.word.move') }}　<kbd>{{ t('ui.debug.kbd.mouse_l') }}</kbd> {{ t('ui.word.attack') }}</div>
-      <div class="row"><kbd>{{ t('ui.debug.kbd.shift') }}</kbd> {{ t('ui.debug.ctl.dodge') }}</div>
-      <div class="row"><kbd>1</kbd>{{ swordName }} <kbd>2</kbd>{{ t('ui.slot.weaponB') }} <kbd>3</kbd>{{ pickName }}　<kbd>4 5 6</kbd> {{ t('ui.word.item') }}</div>
-      <div class="row"><kbd>Tab</kbd> {{ t('ui.debug.ctl.inventory') }}　<kbd>M</kbd> {{ t('ui.debug.ctl.map') }}　<kbd>ESC</kbd> {{ t('ui.debug.ctl.pause') }}</div>
-      <div class="row"><kbd>F</kbd> {{ t('ui.debug.ctl.extract') }}　<kbd>E</kbd> {{ t('ui.debug.ctl.spell') }}　<kbd>N</kbd> {{ t('ui.debug.ctl.mute') }}</div>
-    </div>
-
-    <!-- 右下：当前手持招式参数（P 键唤出） -->
-    <div v-if="debugVisible" class="hud-panel panel-params">
-      <div class="panel-title">{{ t('ui.debug.params.title', { name: handName }) }}</div>
-      <template v-if="handMelee">
-        <div class="row sub">
-          {{ t('ui.debug.params.melee', {
-            shape: t(handMelee.shape === 'slash' ? 'ui.word.slash' : 'ui.word.stab'),
-            damage: handMelee.damage,
-            reach: handMelee.reach,
-            knockback: handMelee.knockback,
-            stun: (handMelee.stun ?? 0).toFixed(2)
-          }) }}
-          <template v-if="handMelee.arc"> · {{ t('ui.debug.params.arc', { deg: Number((handMelee.arc * 360 / Math.PI).toFixed(2)) }) }}</template>
-        </div>
-        <div class="row sub">
-          {{ t('ui.debug.params.timing', {
-            windup: ms(handMelee.windup),
-            active: ms(handMelee.active),
-            recover: ms(handMelee.recover)
-          }) }}
-        </div>
-      </template>
-      <div class="row sub">
-        {{ t('ui.debug.params.dodge_cd', {
-          short: ms(CONFIG.player.dodge.short.cooldown),
-          long: ms(CONFIG.player.dodge.long.cooldown)
-        }) }}
-      </div>
-      <div class="row sub">
-        {{ t('ui.debug.params.room', {
-          cols: CONFIG.roomCols,
-          rows: CONFIG.roomRows,
-          min: CONFIG.dungeon.roomsMin,
-          max: CONFIG.dungeon.roomsMax
-        }) }}
-      </div>
+      <div class="row performance"><span>{{ t('ui.hud.performance', { fps: stats.fps, tps: stats.tps }) }}</span></div>
     </div>
 
     <!-- 底部操作快捷栏（武器/镐/符卡/道具） -->
@@ -525,13 +498,15 @@ onBeforeUnmount(() => {
       :hand="debug.selected"
       :mana="debug.mana"
       :spell-cd="debug.spellCd"
-    />
+    ><template #right><QuestHud :profile="character" :tick="hudTick" :visible="!panel&&!result&&!passage&&!dialogue.isActive&&character.flagBool('prologue.done')" @open="requestPanel('quests')"/></template></Hotbar>
 
+    <SearchPanel v-if="searchView && !panel && !result && !passage && !dialogue.isActive" :view="searchView" @take="slot => currentActions.takeSearchSlot(slot)" @close="currentActions.cancelSearch()" />
     <!-- 背包 / 大地图 / ESC 暂停菜单 -->
     <InventoryPanel v-if="panel === 'inventory'" :cave="currentActions" :profile="character" :tick="hudTick" @growth="(scene === 'base' ? base.player : scene === 'trial' ? trial.player : cave.player).applyGrowth(deriveCombat(character.combat), false)" @close="requestPanel(null)" />
+    <WardrobePanel v-if="scene==='base'&&panel==='wardrobe'" :profile="character" :actions="currentActions" :tick="hudTick" @close="requestPanel(null)"/>
     <BigMap v-if="panel === 'map'" :cave="cave" :tick="hudTick" :depth="debug.depth" @close="requestPanel(null)" />
-    <PauseMenu v-if="panel === 'pause'" :can-save="scene === 'base'" @close="requestPanel(null)" @loaded="emit('loaded', $event)" @new-game="emit('newGame')" @title="emit('title')" />
-    <CampPanel v-if="scene==='base' && panel && ['npc','quests','storage','cooking','crafting','furnace'].includes(panel)" :kind="panel" :profile="character" :actions="currentActions" :tick="hudTick" :anchor="base.npcAnchor" @close="requestPanel(null)" @panel="requestPanel" @talk="talkToReimu" />
+    <PauseMenu v-if="panel === 'pause'" :can-save="scene === 'base'" @close="requestPanel(null)" @loaded="emit('loaded', $event)" @new-game="emit('newGame')" @title="emit('title')" @console="requestPanel(null); consoleOpen=true" />
+    <CampPanel v-if="panel==='quests'||scene==='base' && panel && ['npc','storage','cooking','crafting','furnace','grill'].includes(panel)" :kind="panel!" :profile="character" :actions="currentActions" :tick="hudTick" :anchor="scene==='base'?base.npcAnchor:{x:0,y:0}" :allow-quest-actions="scene==='base'" @close="requestPanel(null)" @panel="requestPanel" @talk="talkToReimu" />
     <FloorSelectPanel v-if="scene==='base'&&panel==='floors'" :profile="character" @close="requestPanel(null)" @enter="floor=>manager?.bus.emit('base:enterFloor',{floor})"/>
 
     <!-- 教程气泡（非模态小木牌，序章/事件提示共用） -->
@@ -550,12 +525,14 @@ onBeforeUnmount(() => {
     <!-- 开发调试控制台（作弊面板）：`~` / F8 开关，Esc 关闭；打开时玩法输入整体屏蔽 -->
     <DevConsole
       v-if="consoleOpen"
+      :manager="manager"
       :cave="cave"
       :base="base"
       :trial="trial"
       :scene="scene"
       :god="godMode"
       :hud="debug"
+      :players="localPlayers"
       @close="consoleOpen = false"
       @toggle-god="godMode = !godMode"
       @enter-trial="enterTrial"
@@ -761,16 +738,6 @@ onBeforeUnmount(() => {
   }
 }
 
-/* 调试窗：成长行（未分配点数用暖金高亮） */
-.panel-right .growth {
-  justify-content: space-between;
-  gap: 8px;
-}
-.panel-right .growth .pts {
-  color: var(--brass-hi);
-  text-shadow: 0 0 8px rgba(240, 205, 126, 0.5);
-}
-
 /* —— 楼层牌（组内首件：层数 + 房型横排） —— */
 .floor-frame {
   width: max-content;
@@ -963,20 +930,19 @@ onBeforeUnmount(() => {
   box-shadow: 0 0 6px #ffd96bcc;
 }
 
-/* —— 调试悬浮窗（P 键唤出：高透明 + 等宽细字，尽量不挡画面） —— */
-.hud-panel {
+/* —— 常驻玩家状态：高透明与等宽细字，尽量不挡画面。 —— */
+.player-status {
   position: absolute;
   min-width: 168px;
   padding: 8px 10px;
   border-radius: 4px;
-  background: rgba(10, 12, 18, 0.38);
+  background: rgba(10, 12, 18, 0.72);
   border: 1px solid rgba(120, 150, 220, 0.22);
   color: #c8d4ee;
   font-family: 'zpix', 'Cascadia Code', 'Consolas', monospace;
   font-size: 12px;
   line-height: 1.65;
   pointer-events: none;
-  backdrop-filter: blur(2px);
   z-index: 9;
 }
 .panel-right {
@@ -984,15 +950,6 @@ onBeforeUnmount(() => {
   right: 12px;
   text-align: right;
   min-width: 182px;
-}
-.panel-bottom {
-  bottom: 96px;
-  left: 12px;
-}
-.panel-params {
-  bottom: 96px;
-  right: 12px;
-  max-width: 330px;
 }
 .panel-title {
   font-size: 10px;
@@ -1007,10 +964,6 @@ onBeforeUnmount(() => {
   gap: 12px;
   white-space: nowrap;
 }
-.row.sub {
-  opacity: 0.6;
-  font-size: 11px;
-}
 .row .hot {
   color: #ffd166;
   font-weight: 700;
@@ -1018,18 +971,10 @@ onBeforeUnmount(() => {
 .row .ready {
   color: #6be07a;
 }
-.fps {
+.performance {
   margin-top: 3px;
-}
-kbd {
-  display: inline-block;
-  padding: 0 6px;
-  margin-right: 4px;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  font-family: inherit;
-  font-size: 11px;
+  color: #d9dfec;
+  font-variant-numeric: tabular-nums;
 }
 .cd-track {
   margin: 5px 0 2px;

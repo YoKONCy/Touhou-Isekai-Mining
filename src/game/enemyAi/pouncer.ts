@@ -1,3 +1,4 @@
+import { randomCombat } from '../../core/simulation/random'
 /**
  * pouncer 模板：来拒去留 + 绕圈圈拉扯，周期性"预判猛扑"。
  *
@@ -31,7 +32,7 @@ export const pouncerBrain: EnemyBrain = {
       if (host.ai !== 'kite') host.ai = 'kite'
     } else if (!player.alive && host.ai === 'kite') {
       host.ai = 'idle'
-      host.aiTimer = 0.5 + Math.random() * 0.6
+      host.aiTimer = 0.5 + randomCombat() * 0.6
       host.pounceState = 'none'
     }
 
@@ -79,7 +80,7 @@ export const pouncerBrain: EnemyBrain = {
         if (host.strafeTimer <= 0) {
           host.strafeDir *= -1
           host.avoidBias = host.strafeDir
-          host.strafeTimer = 1.2 + Math.random() * 1.1
+          host.strafeTimer = 1.2 + randomCombat() * 1.1
         }
 
         const ang = Math.atan2(player.y - host.y, player.x - host.x)
@@ -119,17 +120,17 @@ export const pouncerBrain: EnemyBrain = {
       // —— 未交战：idle/wander ——
       host.aiTimer -= dt
       if (host.ai === 'idle' && host.aiTimer <= 0) {
-        const a = Math.random() * Math.PI * 2
+        const a = randomCombat() * Math.PI * 2
         host.wanderX = Math.cos(a)
         host.wanderY = Math.sin(a)
         host.ai = 'wander'
-        host.aiTimer = 1 + Math.random() * 1.4
+        host.aiTimer = 1 + randomCombat() * 1.4
       } else if (host.ai === 'wander') {
         const a = Math.atan2(host.wanderY, host.wanderX)
         ;({ x: targetVx, y: targetVy } = host.wantVelocity(map, a, c.wanderSpeed))
         if (host.aiTimer <= 0) {
           host.ai = 'idle'
-          host.aiTimer = 0.5 + Math.random() * 0.8
+          host.aiTimer = 0.5 + randomCombat() * 0.8
         }
       }
     }

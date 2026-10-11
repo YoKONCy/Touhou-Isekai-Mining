@@ -18,12 +18,12 @@ function bodyAngle(v: WeaponMotionView): number {
   const p = dualProgress(v)
   return !v.burst && v.segment % 3 === 2 ? v.aim + Math.PI * 2 * (v.phase === 'active' ? dualSpin(p) : v.phase === 'recover' ? 1 : 0) : v.aim
 }
-/** 侧身两刃都朝下；双持武器轴与手臂轴独立，呼吸和步态保持细小错相。 */
+/** 待机一刃下垂、一刃向斜上方架起；武器轴与手臂轴独立，步态保持细小错相。 */
 export function dualAngles(v: WeaponMotionView): { main: number; support: number } {
   const direction = quantizeDir4(bodyAngle(v)), mirror = direction === 'right'
   const bob = Math.sin((v.time ?? 0) * 2.1) * .025 + Math.sin(v.gaitPhase ?? 0) * .025 * (v.gaitWeight ?? 0)
-  const idle = direction === 'down' ? { main: .65, support: Math.PI - .65 }
-    : direction === 'up' ? { main: Math.PI + .5, support: -.5 } : { main: Math.PI - .8, support: Math.PI - 1.15 }
+  const idle = direction === 'down' ? { main: .65, support: Math.PI + .45 }
+    : direction === 'up' ? { main: Math.PI - .5, support: -.5 } : { main: Math.PI - .8, support: Math.PI + .48 }
   const ready = { main: idle.main + bob, support: idle.support - bob }
   if (mirror) { ready.main = Math.PI - ready.main; ready.support = Math.PI - ready.support }
   if (v.charging) {
@@ -57,8 +57,8 @@ export function dualGrip(v: WeaponMotionView): WeaponGrip {
   const local = (angle: number) => dir === 'right' ? Math.PI - angle : angle
   const bob = Math.sin((v.time ?? 0) * 2.1) * .28 + Math.sin(v.gaitPhase ?? 0) * .35 * (v.gaitWeight ?? 0)
   const ready = dir === 'left' || dir === 'right'
-    ? { main: { x: -5, y: -.8 + bob }, support: { x: 4, y: .4 - bob } }
-    : { main: { x: shoulders.near.x + (dir === 'up' ? -1 : 1), y: -.5 + bob }, support: { x: shoulders.far.x + (dir === 'up' ? 1 : -1), y: -.5 - bob } }
+    ? { main: { x: -5, y: -.8 + bob }, support: { x: 2, y: -7.2 - bob } }
+    : { main: { x: shoulders.near.x + (dir === 'up' ? -1 : 1), y: -.5 + bob }, support: { x: shoulders.far.x + (dir === 'up' ? 1 : -1), y: -6.2 - bob } }
   const p = dualProgress(v), seg = v.segment % 3
   const effort = v.charging ? smooth(v.chargeProgress ?? 0) * .7 : v.phase === 'active' ? 1 : v.phase === 'windup' ? p : v.phase === 'recover' ? 1 - smooth(p) : 0
   const blend = (a: { x: number; y: number }, b: { x: number; y: number }) => ({ x: a.x + (b.x - a.x) * effort, y: a.y + (b.y - a.y) * effort })

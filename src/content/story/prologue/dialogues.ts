@@ -40,6 +40,8 @@ export const PNODE = {
   S4B: 's4b',
   S5: 's5',
   S5B: 's5b',
+  SEARCH_NOTICE: 'search_notice',
+  SEARCH_TRY: 'search_try',
   S7: 's7',
   S8: 's8',
   DOWN: 'down',
@@ -120,6 +122,8 @@ export const prologueTree: DialogueTree = {
   id: PROLOGUE_TREE,
   start: PNODE.S0A,
   nodes: {
+    [PNODE.SEARCH_NOTICE]: { ...nar(PNODE.SEARCH_NOTICE, 'story.prologue.search_notice', PNODE.SEARCH_TRY, true) },
+    [PNODE.SEARCH_TRY]: { id: PNODE.SEARCH_TRY, speaker: HERO, text: 'story.prologue.search_try' },
     // —— S0 黑屏醒来（7 句压屏独白；末句结束由导演做黑场淡出显影） ——
     [PNODE.S0A]: { ...nar(PNODE.S0A, 'story.prologue.s0a', PNODE.S0B) },
     [PNODE.S0B]: { ...nar(PNODE.S0B, 'story.prologue.s0b', PNODE.S0C) },

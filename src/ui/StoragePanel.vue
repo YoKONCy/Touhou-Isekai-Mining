@@ -5,6 +5,7 @@ import type { ModuleActions } from '../shared/moduleActions'
 import type { ItemSlotKey } from './inventorySlots'
 import { inventorySlots } from './inventorySlots'
 import { inventoryMouse } from './inventoryMouse'
+import ItemTouchActions from './ItemTouchActions.vue'
 import { useItemHover } from './useItemHover'
 import { t, itemName } from '../i18n'
 import { ENABLED_SLOTS } from '../shared/equipment'
@@ -44,12 +45,13 @@ onBeforeUnmount(()=>{motion.dispose();mouse.dispose();window.removeEventListener
         <header class="shelf-head"><h3><svg viewBox="0 0 30 28" aria-hidden="true"><path v-if="side==='storage'" d="M3 9L8 4H23L27 9V25H3Z M3 12H27 M9 5V24 M22 5V24"/><path v-else d="M8 8V5Q15 0 22 5V8 M5 8H25L27 25H3Z M5 13H25 M12 15H18V20H12Z"/></svg>{{t(side==='storage'?'ui.camp.camp_storage':'ui.camp.bag')}}</h3><div class="shelf-tools"><span>{{used(side)}}<small>/{{cells(side).length}}</small></span><button @click="organize(side)">{{t('ui.storage.organize')}}</button></div></header>
         <div class="capacity-track" aria-hidden="true"><i :style="{width:`${used(side)/cells(side).length*100}%`}"></i></div>
         <div class="shelf-viewport" @scroll="hover.hide"><div class="shelf-grid" :class="side">
-          <button v-for="(s,i) in cells(side)" :key="i" class="storage-slot" :class="{filled:!!s}" :data-drop="`${side}:${i}`" :aria-label="s?t('ui.camp.slot',{item:itemName(s.id),qty:s.qty}):t('ui.camp.empty')" @mouseenter="show($event,`${side}:${i}`)" @mouseleave="hover.leave"><ItemIcon v-if="s" :id="s.id" :size="36"/><span v-if="s&&s.qty>1" class="slot-count">{{s.qty}}</span></button>
+          <button v-for="(s,i) in cells(side)" :key="i" class="storage-slot" :class="{filled:!!s}" :data-drop="`${side}:${i}`" :aria-label="s?t('ui.camp.slot',{item:itemName(s.id),qty:s.qty}):t('ui.camp.empty')" @mouseenter="show($event,`${side}:${i}`)" @mouseleave="hover.leave"><ItemIcon v-if="s" :id="s.id" :size="36" :durability="s.durability" show-durability/><span v-if="s&&s.qty>1" class="slot-count">{{s.qty}}</span></button>
         </div></div>
       </section>
     </div>
-    <div class="storage-bar"><span class="bar-label">{{t('ui.storage.quick')}}</span><div class="bar-grid"><button v-for="c in bar" :key="c.key" class="storage-slot" :class="{disabled:!enabled(c.key),filled:!!slot(c.key)}" :data-drop="c.key" :aria-label="slot(c.key)?itemName(slot(c.key)!.id):t('ui.camp.empty')" @mouseenter="show($event,c.key)" @mouseleave="hover.leave"><kbd>{{c.hint}}</kbd><ItemIcon v-if="slot(c.key)" :id="slot(c.key)!.id" :size="32"/><span v-if="(slot(c.key)?.qty??0)>1" class="slot-count">{{slot(c.key)?.qty}}</span></button></div></div>
+    <div class="storage-bar"><span class="bar-label">{{t('ui.storage.quick')}}</span><div class="bar-grid"><button v-for="c in bar" :key="c.key" class="storage-slot" :class="{disabled:!enabled(c.key),filled:!!slot(c.key)}" :data-drop="c.key" :aria-label="slot(c.key)?itemName(slot(c.key)!.id):t('ui.camp.empty')" @mouseenter="show($event,c.key)" @mouseleave="hover.leave"><kbd>{{c.hint}}</kbd><ItemIcon v-if="slot(c.key)" :id="slot(c.key)!.id" :size="32" :durability="slot(c.key)?.durability" show-durability/><span v-if="(slot(c.key)?.qty??0)>1" class="slot-count">{{slot(c.key)?.qty}}</span></button></div></div>
     <footer class="storage-foot"><span>{{t('ui.storage.gestures')}}</span><small>{{t('ui.storage.keys')}}</small></footer>
+    <ItemTouchActions :controller="mouse" :slots="access" :profile="profile" :tick="tick+revision"/>
     <p v-if="message" class="storage-feedback" role="status">{{message}}</p>
     <ItemTooltip :hover="tip" :expanded="expanded" :interactive="interactive" :profile="profile" :tick="tick+revision" :action="tipAction" @enter="hover.enterCard" @leave="hover.leaveCard" @action="act"/>
   </section>

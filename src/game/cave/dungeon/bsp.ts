@@ -1,3 +1,4 @@
+import { randomGeneration } from '../../../core/simulation/random'
 /**
  * BSP 楼层生成器（真·二分空间分割）
  *
@@ -23,7 +24,7 @@ interface BspNode {
 }
 
 function randInt(lo: number, hi: number): number {
-  return lo + Math.floor(Math.random() * (hi - lo + 1))
+  return lo + Math.floor(randomGeneration() * (hi - lo + 1))
 }
 
 /** 矩形在 minLeaf 约束下经 guillotine 切分最多能产出的叶数（可达上界） */
@@ -50,10 +51,10 @@ function collectLeaves(root: BspNode): BspNode[] {
   return out
 }
 
-export function generateFloorPlan(): FloorPlan {
+export function generateFloorPlan(options?:{roomsMin?:number;roomsMax?:number;rewardRooms?:boolean}): FloorPlan {
   const d = CONFIG.dungeon
-  const target = randInt(d.roomsMin, d.roomsMax)
-  const preferBranching = Math.random() < d.sameWallDoorBias
+  const target = randInt(options?.roomsMin??d.roomsMin, options?.roomsMax??d.roomsMax)
+  const preferBranching = randomGeneration() < d.sameWallDoorBias
 
   const root: BspNode = { x: 0, y: 0, w: d.slotCols, h: d.slotRows, left: null, right: null, roomId: null }
   let leaves = [root]
@@ -91,8 +92,8 @@ export function generateFloorPlan(): FloorPlan {
           const balance = Math.min(cL, cR)
           const waste = cL + cR - capNode // 恒 ≤ 0，等于 0 为无损切分
           const score = preferBranching
-            ? balance * 3 + waste * 3 + Math.random() * 22
-            : balance * 10 + waste * 100 + Math.random() * 1.5
+            ? balance * 3 + waste * 3 + randomGeneration() * 22
+            : balance * 10 + waste * 100 + randomGeneration() * 1.5
           if (!best || score > best.score) best = { node, vertical, at, score }
         }
       }
@@ -210,7 +211,7 @@ export function generateFloorPlan(): FloorPlan {
     const a=leaves[i],b=leaves[j]
     const sharedX=(a.x+a.w===b.x||b.x+b.w===a.x)&&Math.min(a.y+a.h,b.y+b.h)>Math.max(a.y,b.y)
     const sharedY=(a.y+a.h===b.y||b.y+b.h===a.y)&&Math.min(a.x+a.w,b.x+b.w)>Math.max(a.x,b.x)
-    if(sharedX||sharedY)candidates.push({a:a.roomId!,b:b.roomId!,score:Math.random(),axis:sharedX?'x':'y'})
+    if(sharedX||sharedY)candidates.push({a:a.roomId!,b:b.roomId!,score:randomGeneration(),axis:sharedX?'x':'y'})
   }
   let loops=0
   const loopTarget=Math.max(d.extraLoopMax,Math.ceil(rooms.length/3))
@@ -289,7 +290,7 @@ export function generateFloorPlan(): FloorPlan {
   for (const r of rooms) {
     if (r.id === startId) r.kind = 'start'
     else if (r.id === exitId) r.kind = 'exit'
-    else if (r.doors.length === 1) r.kind = 'reward'
+    else if (options?.rewardRooms!==false && r.doors.length === 1) r.kind = 'reward'
   }
 
   // 距撤离点 BFS：越接近裂隙房的房间，刷怪权重范围越大（压力在撤离方向递增）

@@ -3,11 +3,10 @@ import type { ItemDef } from '../../../types'
 
 /** 时间单位为秒，攻击角度为完整角度（度）。 */
 export const stats = {
-  rarity: 1,
-  tier: 1,
+  grade: 1,
   maxStack: 1,
   equipSlot: 'weaponB',
-  combat: { penetration: 6 },
+  combat: { penetration: 1.5 },
   melee: meleeMove({
     shape: 'slash',
     damage: 16,

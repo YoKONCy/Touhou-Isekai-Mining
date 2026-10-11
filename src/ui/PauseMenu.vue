@@ -4,10 +4,11 @@ import { onBeforeUnmount, ref } from 'vue'
 import type { CharacterProfile } from '../shared/profile'
 import { t } from '../i18n'
 import AudioSettings from './AudioSettings.vue'
+import DisplaySettings from './DisplaySettings.vue'
 import SaveSlotsDialog from './SaveSlotsDialog.vue'
 import HudConfirm from './HudConfirm.vue'
 
-const emit = defineEmits<{ close: []; loaded: [profile: CharacterProfile]; newGame: []; title: [] }>()
+const emit = defineEmits<{ close: []; loaded: [profile: CharacterProfile]; newGame: []; title: []; console: [] }>()
 defineProps<{ canSave: boolean }>()
 const mode = ref<'save' | 'load' | null>(null)
 const pending = ref<'new' | 'title' | null>(null)
@@ -36,6 +37,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
       <h2 id="pause-title" class="gsign pause-title">{{ t('ui.pause.title') }}</h2>
       <div class="pause-sub">{{ t('ui.pause.sub') }}</div>
       <AudioSettings/>
+      <DisplaySettings/>
+      <button class="gbtn mobile-console-button" @click="emit('console')">{{ t('ui.mobile.console') }}</button>
       <button class="gbtn primary resume-btn" @click="close">{{ t('ui.pause.resume') }}</button>
       <div class="save-actions"><button class="gbtn" :disabled="!canSave" :title="canSave ? '' : t('ui.save.blocked_cave')" @click="mode = 'save'">{{ t('ui.save.save') }}</button><button class="gbtn" @click="mode = 'load'">{{ t('ui.save.load') }}</button></div>
       <small v-if="!canSave" class="save-note">{{ t('ui.save.blocked_cave') }}</small>

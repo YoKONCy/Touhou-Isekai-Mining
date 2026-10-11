@@ -12,20 +12,14 @@ const emotions:Record<string,Partial<Record<DialogueActor,string>>>={
   "story.prologue.base_h_chest": {
     "hero": "shock"
   },
-  "story.prologue.s2b": {
-    "hero": "panic"
-  },
-  "story.prologue.s5": {
-    "hero": "panic"
-  },
-  "story.prologue.s9_what": {
-    "hero": "question"
-  },
   "story.prologue.s10_h_huh": {
     "hero": "question"
   },
   "story.prologue.base_h_1": {
     "hero": "question"
+  },
+  "story.prologue.base_h_2": {
+    "hero": "dead"
   },
   "story.prologue.base_h_3a": {
     "hero": "question"
@@ -52,9 +46,6 @@ const emotions:Record<string,Partial<Record<DialogueActor,string>>>={
     "reimu": "tired"
   },
   "story.prologue.s10_r_sigh": {
-    "reimu": "tired"
-  },
-  "story.prologue.base_r_home": {
     "reimu": "tired"
   },
   "story.prologue.s9_r1": {
@@ -84,6 +75,9 @@ const emotions:Record<string,Partial<Record<DialogueActor,string>>>={
   "story.prologue.base_r_1": {
     "reimu": "annoyed"
   },
+  "story.prologue.base_r_2": {
+    "reimu": "think"
+  },
   "story.prologue.base_r_6": {
     "reimu": "annoyed"
   },
@@ -105,14 +99,20 @@ const emotions:Record<string,Partial<Record<DialogueActor,string>>>={
   "story.prologue.base_r_fac2": {
     "reimu": "serious"
   },
-  "story.prologue.base_r_store1": {
+  "story.prologue.base_r_store": {
     "reimu": "serious"
   },
   "story.prologue.base_r_chest": {
     "reimu": "grin"
   },
   "story.prologue.base_r_store2": {
-    "reimu": "smug"
+    "reimu": "tired"
+  },
+  "story.prologue.base_r_barrier": {
+    "reimu": "soft"
+  },
+  "story.prologue.base_r_go": {
+    "reimu": "soft"
   },
   "quest.reimu_cooking.hero.food": {
     "hero": "question"
@@ -319,9 +319,6 @@ const emotions:Record<string,Partial<Record<DialogueActor,string>>>={
   "quest.farewell.s2": {
     "hero": "question"
   },
-  "quest.farewell.s6": {
-    "hero": "worry"
-  },
   "quest.craft_intro.s2": {
     "hero": "question"
   },
@@ -491,10 +488,10 @@ const emotions:Record<string,Partial<Record<DialogueActor,string>>>={
     "kedamaBoss": "arms-crossed"
   },
   "story.fourth.phase.s4": {
-    "kedamaBoss": "arms-crossed"
+    "kedamaBoss": "base"
   },
   "story.fourth.phase.s3": {
-    "hero": "rant"
+    "hero": "question"
   },
   "story.fourth.defeat.s1": {
     "kedamaBoss": "defeat"
@@ -608,7 +605,7 @@ const emotions:Record<string,Partial<Record<DialogueActor,string>>>={
     "rumia": "scared"
   },
   "story.fourth.hungry.s4": {
-    "hero": "rant"
+    "hero": "dead"
   },
   "story.fourth.hungry.s7": {
     "hero": "rant"
@@ -671,7 +668,7 @@ const emotions:Record<string,Partial<Record<DialogueActor,string>>>={
     "hero": "rant"
   },
   "story.fourth.account.s7": {
-    "hero": "rant"
+    "hero": "dead"
   },
   "story.fourth.account.s13": {
     "hero": "rant"
@@ -712,6 +709,42 @@ const emotions:Record<string,Partial<Record<DialogueActor,string>>>={
   "story.fourth.idle.s2": {
     "hero": "dead"
   },
+  "story.mineRelay.metal.s2": {
+    "hero": "proud"
+  },
+  "story.mineRelay.metal.s3": {
+    "reimu": "think"
+  },
+  "story.mineRelay.metal.s4": {
+    "hero": "smile"
+  },
+  "story.mineRelay.metal.s5": {
+    "reimu": "surprised"
+  },
+  "story.mineRelay.metal.s7": {
+    "hero": "pain"
+  },
+  "story.mineRelay.metal.s8": {
+    "reimu": "annoyed"
+  },
+  "story.mineRelay.metal.s9": {
+    "reimu": "tired"
+  },
+  "story.mineRelay.report.s1": {
+    "reimu": "surprised"
+  },
+  "story.mineRelay.report.s2": {
+    "reimu": "soft"
+  },
+  "story.mineRelay.report.s3": {
+    "hero": "serious"
+  },
+  "story.mineRelay.report.s4": {
+    "reimu": "annoyed"
+  },
+  "story.mineRelay.report.s7": {
+    "reimu": "think"
+  },
   "story.mineRelay.report.s6": {
     "hero": "question"
   },
@@ -719,7 +752,7 @@ const emotions:Record<string,Partial<Record<DialogueActor,string>>>={
     "hero": "question"
   },
   "story.mineRelay.report.s11": {
-    "hero": "question"
+    "reimu": "serious"
   },
   "story.mineRelay.report.s8": {
     "hero": "serious"
@@ -735,6 +768,30 @@ const emotions:Record<string,Partial<Record<DialogueActor,string>>>={
   },
   "story.mineRelay.report.s12": {
     "reimu": "serious"
+  },
+  "story.first_death.pain": {
+    "hero": "pain"
+  },
+  "story.first_death.where": {
+    "hero": "question"
+  },
+  "story.first_death.back": {
+    "hero": "question"
+  },
+  "story.first_death.lucky": {
+    "reimu": "tired"
+  },
+  "story.first_death.noise": {
+    "reimu": "serious"
+  },
+  "story.first_death.found": {
+    "reimu": "soft"
+  },
+  "story.first_death.treated": {
+    "reimu": "soft"
+  },
+  "story.first_death.silent": {
+    "hero": "dead"
   }
 }
 
@@ -746,7 +803,14 @@ const dailyEmotions:Record<string,readonly [string,string,string]>={
   idle_smoke:['soft','dead','serious'],heating_wait:['serious','base','soft'],
   heating_safe:['serious','question','soft'],ready_collect:['soft','smile','serious'],
   ready_next:['serious','dead','serious'],parts_found:['think','question','serious'],
-  metal_hot:['serious','rant','annoyed']
+  metal_hot:['serious','rant','annoyed'],
+  table_cleared:['soft','question','serious'],table_fiber:['serious','dead','think'],
+  craft_grip:['think','question','grin'],masonry_cracks:['serious','dead','serious'],
+  masonry_wood:['serious','dead','serious'],bellows_air:['serious','question','think'],
+  bellows_seam:['think','smile','grin'],key_equipment:['serious','worry','serious'],
+  key_patience:['soft','think','soft'],found_fit:['think','smile','serious'],
+  found_coal:['serious','smile','think'],metal_tools:['serious','smile','serious'],
+  deep_rest:['soft','rant','soft'],deep_supplies:['serious','serious','soft']
 }
 
 export function emotionForDialogue(node:DialogueNode,actor:DialogueActor,active=true):string {

@@ -6,7 +6,7 @@
     {
       "id": "lucky_coin",
       "kind": "consumable",
-      "tier": 2,
+      "rarity": 1,
       "color": "#f2c94c",
       "hi": "#fff3b0",
       "text": "#ffd968",

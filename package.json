@@ -12,6 +12,7 @@
   "homepage": "https://yokoncy.github.io/Touhou-Isekai-Mining/",
   "scripts": {
     "dev": "vite",
+    "test": "node scripts/test-simulation.mjs",
     "build": "vite build",
     "preview": "vite preview"
   },

@@ -27,10 +27,14 @@ export interface EnemyPalette {
 
 /** 战斗参数（接触伤害结算 + 受击反馈） */
 export interface EnemyCombat {
-  /** 物抗/魔抗数值，缺省0；范围减伤为0~1。 */
+  /** 物理/魔法伤害固定抵消值，缺省0；范围减伤为0~1。 */
   physicalResist?: number
   magicResist?: number
+  /** 远程命中额外固定抵消，不被破甲抵消；混合伤害每次命中只扣一次。 */
+  rangedReduction?:number
   aoeReduction?: number
+  /** 所有近战命中共用的承伤倍率，不作用于远程弹体和符卡。 */
+  meleeDamageTakenMultiplier?:number
   /** 接触伤害值 */
   contactDamage: number
   /** 同一只怪两次接触伤害的间隔（秒） */
@@ -92,6 +96,8 @@ export interface KiteShooterParams {
   firstFireJitter: number
   /** 直线瞄准弹使用的弹种 id（查弹幕注册表） */
   straightProjectileId: ProjectileId
+  /** 一次瞄准吐出的数量与总展开角（弧度），缺省单发。 */
+  straightVolley?: { count:number; spread:number }
   /** 环弹使用的弹种 id */
   ringProjectileId: ProjectileId
 }
@@ -139,6 +145,10 @@ export interface ChargeCycleParams {
   dashSpeed:number
   dashDistance:number
   dashDamage:number
+  /** 起手与蓄力结束时检查完整体宽；被遮挡时先共享导航绕路。 */
+  requireClearPath?:boolean
+  /** 冲刺沿途短暂地火，与熔岩坑共用真实伤害计时，外观独立。 */
+  fireTrail?:{radius:number;duration:number;damage:number;interval:number;spacing:number}
   retreatDuration:readonly [number,number]
   volley?:{interval:number;gap:number;projectileId:ProjectileId}
 }
@@ -189,11 +199,18 @@ export interface EnemyAppearanceView {
   antennaLag: number
   alpha: number
   flash: number
+  stoneGuard?: boolean
   palette: EnemyPalette
   visual: EnemyVisual
 }
 
 export interface EnemyVisual {
+  /** 步行生物不套用史莱姆的蹦跳与果冻拉伸。 */
+  gait?:'walk'
+  /** 大体型或火冠的血条上移，碰撞体与数值不随之改变。 */
+  healthBarOffsetY?:number
+  /** 自发光照到附近环境；优先级高的光源先进入房间灯光预算。 */
+  light?: { radius:number; power:number; color:string; tint:number; priority?:number }
   /** 资源负责身体材质、表情及专属特征；不接触运行时实体。 */
   render?: (view: EnemyAppearanceView) => void
   warning?: (view: EnemyAppearanceView) => void
@@ -213,6 +230,8 @@ export interface EnemyDef {
   movement?: 'flying' | 'stationary'
   /** 专属掉落表；存在时替代通用史莱姆凝液摇号，各项独立判定。 */
   drops?: readonly {item:ContentId;chance:number;qty:number}[]
+  /** 必掉池按权重互斥抽取一项；独立额外掉落仍由 drops 声明，不附带通用凝液。 */
+  dropPool?: readonly {item:ContentId;weight:number;qty:number}[]
   /** 命名空间 id（展示名走语言键 enemy.<id>.name） */
   id: EnemyId
   /** 选用的 AI 模板 */
@@ -238,6 +257,10 @@ export interface EnemyDef {
   /** 毛玉的六发波浪射击与定距分裂毛球共用一套放风筝节拍。 */
   kedama?: { speed: number; sight: number; retreatRange: number; interval: number; waveGap: number; waveProjectileId: ProjectileId; seedProjectileId: ProjectileId }
   chargeCycle?: ChargeCycleParams
+  /** 直接受伤后缩石；冷却从退出缩石时开始。 */
+  stoneGuard?: { chance:number; duration:number; cooldown:number }
+  /** 死亡后保留预警，再以固定角度均布爆发弹幕。 */
+  deathBurst?: { delay:number; count:number; projectileId:ProjectileId }
   /** 自然刷怪配置（不填=只能由事件生成） */
   spawn?: EnemySpawn
   visual: EnemyVisual

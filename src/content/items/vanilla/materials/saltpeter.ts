@@ -4,7 +4,7 @@ export const SALTPETER_ID = 'touhou:saltpeter'
 
 /** 灰白结晶附着在浅色石基上，不使用贵重矿物的发光表现。 */
 const saltpeter: ItemDef = {
-  id: SALTPETER_ID, kind: 'material', tier: 1,
+  id: SALTPETER_ID, kind: 'material', 
   color: '#b5b8ac', hi: '#e4e1cb', text: '#d4d5c2', maxStack: 9999,
   tags: ['material', 'mineral'],
   icon: svgIcon(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><g stroke="#41434b" stroke-width="1.4" stroke-linejoin="round">

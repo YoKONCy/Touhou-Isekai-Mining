@@ -1,6 +1,7 @@
 import { svgIcon, type ItemDef } from '../../types'
 
-export const FRAGRANT_MUSHROOM_ID = 'touhou:fragrant_mushroom'
+import { FRAGRANT_MUSHROOM_ID } from '../ids'
+export { FRAGRANT_MUSHROOM_ID } from '../ids'
 
 /** 厚褐伞、短乳白柄与偏心裂纹；同一造型用于采集点和地面掉落。 */
 export function drawFragrantMushroom(g: CanvasRenderingContext2D): void {
@@ -27,7 +28,7 @@ export function drawFragrantMushroom(g: CanvasRenderingContext2D): void {
 }
 
 const fragrantMushroom: ItemDef = {
-  id: FRAGRANT_MUSHROOM_ID, kind: 'consumable', tier: 1,
+  id: FRAGRANT_MUSHROOM_ID, kind: 'consumable', 
   color: '#795a49', hi: '#c4af8d', text: '#d2bfa1', maxStack: 9999,
   consume: { heal: 5 }, material: true, tags: ['food', 'mushroom'],
   icon: svgIcon(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><g stroke="#29232d" stroke-width="1.5" stroke-linejoin="round">

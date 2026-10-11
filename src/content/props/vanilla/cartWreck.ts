@@ -2,6 +2,7 @@
 import type { PropDef } from '../types'
 import { PROP_CART_WRECK_ID } from './ids'
 import { drawCartWreck } from '../../../game/art/props'
+import { SEARCH_SUPPLIES_TABLE } from '../../loot/vanilla/searchSupplies'
 
 export const propCartWreck: PropDef = {
   id: PROP_CART_WRECK_ID,
@@ -20,5 +21,6 @@ export const propCartWreck: PropDef = {
     large: true
   },
   render: drawCartWreck,
+  search: { cols:3,rows:4,table:SEARCH_SUPPLIES_TABLE },
   tags: ['metal', 'wreck', 'cover', 'large']
 }

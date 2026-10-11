@@ -23,6 +23,6 @@
   "floor.title.cave_fourth": "异界矿洞 · 地下四层",
   "game.notify.chest": "宝箱",
   "game.notify.chest_empty": "箱子里空空如也……",
-  "game.interact.chest_hint": "按 F 开启宝箱",
-  "game.interact.torch_hint": "按 F 点燃火把"
+  "game.interact.chest_hint": "按 {key:interact} 开启宝箱",
+  "game.interact.torch_hint": "按 {key:interact} 点燃火把"
 }

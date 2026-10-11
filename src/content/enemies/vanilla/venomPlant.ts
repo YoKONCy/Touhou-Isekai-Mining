@@ -17,7 +17,7 @@ function drawPlant(v:EnemyAppearanceView){
   g.restore()
 }
 const def:EnemyDef={id:'touhou:venom_plant',ai:'stationary_shooter',movement:'stationary',hp:80,radius:16,exp:10,
-  combat:{contactDamage:0,attackCd:1,contactPad:0,knockback:0,recoil:0,stunResist:1},palette:{body:'#73894c',edge:'#2f452e',death:'#8ca25a',hpBar:'#a8b972'},hitMaterial:'venom',
+  combat:{physicalResist:1,magicResist:1,contactDamage:0,attackCd:1,contactPad:0,knockback:0,recoil:0,stunResist:1},palette:{body:'#73894c',edge:'#2f452e',death:'#8ca25a',hpBar:'#a8b972'},hitMaterial:'venom',
   turret:{sight:600,interval:.8,windup:.14,burstChance:.2,burstCount:4,burstGap:.07,projectileId:VENOM_PLANT_BULLET_ID},
   spawn: { maxFloor: 3,weight:.4,minFloor:3,rooms:['normal','exit']},drops:[{item:POISON_GRASS_ID,chance:.5,qty:1}],
   visual:{render:drawPlant,fastHop:false,antennae:false},tags:['plant','ranged','venom']}

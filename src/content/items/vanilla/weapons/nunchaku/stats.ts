@@ -3,19 +3,18 @@ import type { ItemDef } from '../../../types'
 
 /** 时间为秒，角度为完整角度（度）。 */
 export const stats = {
-  rarity: 1,
-  tier: 2,
+  grade: 1,
   maxStack: 1,
   equipSlot: 'weaponA',
   combat: {
-    critChance: .1,
-    penetration: 10
+    critChance: .08,
+    penetration: 2
   },
   melee: meleeMove({
     shape: 'slash',
-    damage: 17,
+    damage: 15.5,
     reach: 60,
-    angleDegrees: 90,
+    angleDegrees: 120,
     windup: .07,
     active: .18,
     recover: .08,
@@ -25,5 +24,5 @@ export const stats = {
   })
 } satisfies Partial<ItemDef>
 
-/** 原始链棍按 49 距离设计；近棍、链条、自由棍和判定厚度统一放大。 */
+/** 棍身沿用原来的长度比例；两根棍改由双手各自控制，攻击使用统一扇形判定。 */
 export const NUNCHAKU_VISUAL_SCALE = stats.melee.reach / 49

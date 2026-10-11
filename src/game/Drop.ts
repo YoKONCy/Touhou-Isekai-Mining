@@ -1,6 +1,12 @@
+import { SnapshotCodec, type StateFields } from '../core/simulation/snapshot'
+import { MotionHistory } from '../core/simulation/interpolation'
+import { nextEntityId, emitSimulationEvent } from '../core/simulation/events'
+import { randomLoot, randomVisual } from '../core/simulation/random'
 import { CONFIG } from './config'
 import { findItemDef, type ItemId } from '../shared/itemDefs'
+import { itemQualityLevel } from '../shared/itemQuality'
 import type { Collider, TileMap } from './tilemap'
+import { renderCollectible } from './art/collectibleHighlight'
 
 /**
  * 地面掉落物
@@ -21,7 +27,11 @@ interface CollectorLike {
 }
 
 export class Drop implements Collider {
+  readonly entityId = nextEntityId('drop')
+  protected readonly motionHistory = new MotionHistory()
+
   readonly itemId: ItemId
+  durability:number|undefined
   x: number
   y: number
   vx: number
@@ -35,17 +45,23 @@ export class Drop implements Collider {
   /** 浮动动画相位（每个掉落物错峰） */
   private bob: number
   private collected = false
+  /** 磁吸期间锁定收集者，玩家交错经过时不会每帧来回换向。 */
+  collectorId: string | null = null
 
-  constructor(x: number, y: number, itemId: ItemId) {
+  captureSimulation(codec: SnapshotCodec): StateFields { return codec.capture(this, ['motionHistory', 'bob']) }
+  restoreSimulation(state: StateFields, codec: SnapshotCodec): void { codec.restore(this, state); this.motionHistory.reset() }
+
+  constructor(x: number, y: number, itemId: ItemId,durability?:number) {
     this.x = x
     this.y = y
     this.itemId = itemId
+    this.durability=durability
     // 崩落瞬间随机方向散开
-    const a = Math.random() * Math.PI * 2
-    const sp = CONFIG.drop.burstSpeed * (0.4 + Math.random() * 0.6)
+    const a = randomLoot() * Math.PI * 2
+    const sp = CONFIG.drop.burstSpeed * (0.4 + randomLoot() * 0.6)
     this.vx = Math.cos(a) * sp
     this.vy = Math.sin(a) * sp
-    this.bob = Math.random() * Math.PI * 2
+    this.bob = randomVisual() * Math.PI * 2
   }
 
   get isCollected(): boolean {
@@ -59,6 +75,7 @@ export class Drop implements Collider {
 
   /** 背包已满：从玩家身边弹开，短暂拒绝磁吸 */
   reject(fromX: number, fromY: number): void {
+    this.collectorId = null
     const a = Math.atan2(this.y - fromY, this.x - fromX)
     this.vx = Math.cos(a) * 220
     this.vy = Math.sin(a) * 220
@@ -71,6 +88,7 @@ export class Drop implements Collider {
    * @returns true 表示本帧贴身请求拾取（场景查背包后 confirm/reject）
    */
   update(dt: number, map: TileMap, player: CollectorLike): boolean {
+    this.motionHistory.capture(this.x, this.y)
     const d = CONFIG.drop
     this.age += dt
     this.bob += dt * 4
@@ -114,11 +132,17 @@ export class Drop implements Collider {
   }
 
   render(ctx: CanvasRenderingContext2D): void {
+    const offset = this.motionHistory.offset(this.x, this.y)
+    ctx.save(); ctx.translate(offset.x, offset.y)
+    try { this.renderCurrent(ctx) } finally { ctx.restore() }
+  }
+
+  private renderCurrent(ctx: CanvasRenderingContext2D): void {
     // 物品可能来自已卸载 MOD：查表失败时用灰石占位外观，绝不炸
     const def = findItemDef(this.itemId)
     const color = def?.color ?? '#7d838c'
     const hi = def?.hi ?? '#aeb4bc'
-    const tier = def?.tier ?? 1
+    const quality = def ? itemQualityLevel(def) : 1
 
     // 落定后的上下浮动；抛射/磁吸段不浮动
     const floating = this.phase === 'rest' ? Math.sin(this.bob) * 2.2 : 0
@@ -130,9 +154,9 @@ export class Drop implements Collider {
     ctx.ellipse(this.x, this.y + 6, this.r * 0.9, this.r * 0.36, 0, 0, Math.PI * 2)
     ctx.fill()
 
-    // —— 光柱（落定后可见；tier 越高越亮越长） ——
+    // 光柱长度统一跟随装备品阶或非装备稀有度，不另设掉落表现档位。
     if (this.phase !== 'burst') {
-      const beamH = 18 + tier * 6
+      const beamH = 18 + quality * 6
       const grad = ctx.createLinearGradient(0, y - beamH, 0, y)
       grad.addColorStop(0, 'rgba(255,255,255,0)')
       grad.addColorStop(1, hi + '55')
@@ -149,11 +173,10 @@ export class Drop implements Collider {
     }
 
     // 外观分派：物品自带地面绘制器（饭团等）优先，缺省走通用原石碎晶
-    if (def?.ground) {
-      def.ground({ ctx, x: this.x, y, r: this.r, phase: this.phase, bob: this.bob })
-    } else {
-      this.drawOreShard(ctx, y, color, hi, tier)
-    }
+    renderCollectible(ctx,this,{x:this.x-32,y:y-40,width:64,height:72},g=>{
+      if(def?.ground)def.ground({ctx:g,x:this.x,y,r:this.r,phase:this.phase,bob:this.bob})
+      else this.drawOreShard(g,y,color,hi,quality)
+    })
   }
 
   /** 原石碎晶（材料类通用外观）：ink 描边 + 左暗右亮硬边切面 + 高档星芒 */
@@ -162,7 +185,7 @@ export class Drop implements Collider {
     y: number,
     color: string,
     hi: string,
-    tier: number
+    quality: number
   ): void {
     const s = this.r
     ctx.save()
@@ -216,7 +239,7 @@ export class Drop implements Collider {
     ctx.stroke()
 
     // 高档矿的闪烁星芒（带柔光）
-    if (tier >= 3) {
+    if (quality >= 3) {
       const tw = 0.5 + 0.5 * Math.sin(this.bob * 1.7)
       ctx.save()
       ctx.globalCompositeOperation = 'lighter'

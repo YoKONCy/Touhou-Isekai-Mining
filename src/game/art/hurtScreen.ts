@@ -5,7 +5,7 @@ interface EdgeCache { width: number; height: number; pixelsW: number; pixelsH: n
 const edges = new WeakMap<CanvasRenderingContext2D, EdgeCache>()
 
 /** 实际受伤后轻染一瞬暖红，低血量稍加强；不持续泛红，也不反复闪烁。 */
-export function renderHurtScreen(ctx: CanvasRenderingContext2D, width: number, height: number, player: Player, now = performance.now()): void {
+export function renderHurtScreen(ctx: CanvasRenderingContext2D, width: number, height: number, player: Player, now = player.effectTime * 1000): void {
   const settings = CONFIG.hurt, age = (now - player.hurtFlashAt) / 1000
   if (age < 0 || age >= settings.flashDuration || width <= 0 || height <= 0) return
   const envelope = Math.pow(1 - age / settings.flashDuration, 2)

@@ -1,0 +1,9 @@
+{
+  "ui.console.costume_toggle": "切换衣服 · P{n}",
+  "ui.console.costume_library": "选衣面板",
+  "ui.console.costume_hint": "点选立即穿上，未解锁的时装会一并解锁。",
+  "ui.console.costume_target": "选择换装玩家",
+  "ui.console.costume_for": "为P{n}选择衣服",
+  "ui.console.costume_changed": "P{n}已换上{name}。",
+  "ui.console.costume_unlock": "解锁并穿上"
+}

@@ -26,7 +26,7 @@ export interface OrePalette {
 /** 晶簇视觉特征开关（岩包三材质是全局机制，不在这里） */
 export interface MineralVisual {
   /** 独立矿体形态：煤层、盐霜与各金属矿的专属轮廓。 */
-  form?: 'coal' | 'salt' | 'metal' | 'copper' | 'iron' | 'gold'
+  form?: 'coal' | 'salt' | 'metal' | 'copper' | 'iron' | 'gold' | 'silver' | 'blackstone' | 'obsidian' | 'soul_rock' | 'solidified_magma'
   /** 常亮微光强度（暗房指引采矿：金 0.22 / 铜 0.12 / 铁 0.09） */
   glowPower: number
   /** 呼吸光晕基档：true=0.13（金矿更亮），false=0.08 */
@@ -41,6 +41,8 @@ export interface MineralSpawn {
   weight: number
   /** 岩包独立替换概率，不参与显矿簇的加权抽取。 */
   rockReplacementChance?: number
+  /** 岩浆岸矿只参与岸边专用投放，不混入普通地面抽矿池。 */
+  placement?: 'lava_bank'
   /** 可出现的房型（缺省=所有房型都可能埋该矿） */
   rooms?: string[]
   /** 深度门控（min/max 均含端点；缺省不限制） */
@@ -73,4 +75,6 @@ export interface MineralDef {
   visual: MineralVisual
   /** 自由标签（门控/事件条件用，如 ['metal','rare']） */
   tags?: string[]
+  /** 声明后替换通用采矿掉落；各条独立判定，必掉与额外掉落可以同时出现。 */
+  drops?: readonly { item: ContentId; chance: number; quantity: number }[]
 }

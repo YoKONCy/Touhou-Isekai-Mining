@@ -14,6 +14,7 @@ import ItemTooltip from './ItemTooltip.vue'
 import { useItemHover } from './useItemHover'
 import { inventorySlots } from './inventorySlots'
 import { inventoryMouse } from './inventoryMouse'
+import ItemTouchActions from './ItemTouchActions.vue'
 import { cancelPointerDrag } from './pointerDnd'
 import type { CharacterProfile } from '../shared/profile'
 import { ACTIVE_COMBAT_STATS, deriveCombat, expNeeded, spendPoint, type CombatStatKey } from '../shared/combat'
@@ -37,7 +38,7 @@ const summaryKeys = ['maxHp', 'maxMana', 'manaRegen', 'knockbackBonus', 'attackP
 function summaryValue(key: typeof summaryKeys[number], value: number): string {
   if (key === 'moveSpeedMul' || key === 'attackSpeedMul') return `${Number(((value - 1) * 100).toFixed(2))}%`
   if (key === 'manaRegen') return t('ui.ability.regen_value', { n: Number(value.toFixed(2)) })
-  if (key === 'physicalResist' || key === 'magicResist') return `${value} · ${(value / (100 + value) * 100).toFixed(1)}%`
+  if (key === 'physicalResist' || key === 'magicResist') return t('ui.ability.resist_value',{n:Number(value.toFixed(2))})
   if (key === 'shootingDeviation') return `${Math.max(0, value)}°`
   if (key === 'rangedCritChance') return `${Number((value * 100).toFixed(1))}%`
   return String(value)
@@ -100,6 +101,7 @@ const quickSlots = computed(() => {
   void bump.value
   return props.cave.quickSlots.slots
 })
+const trashStack = computed(() => { void props.tick; void bump.value; return props.profile.trash.slots[0] })
 /** 物品格保持固定尺寸，窄屏只调整可见列数，不改变数据顺序。 */
 const bagViewport = ref<HTMLElement | null>(null)
 const bagWidth = ref(0)
@@ -128,7 +130,7 @@ const SPELL_SLOTS: EquipSlot[] = ['spellA', 'spellB']
 // —— 共享物品卡与 MC 鼠标交互 ————————————————————————
 const hover = useItemHover()
 const { tip, expanded, interactive } = hover
-const access = inventorySlots(props.profile, props.cave)
+const access = inventorySlots(props.profile, props.cave, false, true)
 const mouse = inventoryMouse({
   slots: access, containers: '.inv-panel, .hotbar', enabled: () => !abilityOpen.value,
   begin: hover.hide,
@@ -139,6 +141,9 @@ function performTipAction(): void { if (tip.value?.target) mouse.act(tip.value.t
 function showTip(e: MouseEvent, id: ItemId | null | undefined): void { if (!mouse.holding()) hover.show(e, id) }
 function showEmptyTip(e: MouseEvent, text: string): void { if (!mouse.holding()) hover.show(e, null, text) }
 function organizeBag(): void { mouse.cancel(); props.cave.inventory.organize(); hover.hide(); refresh() }
+function destroyTrash(): void { if (mouse.destroy('trash:0')) hover.hide() }
+function changeCostume(costume:'default'|'old_miner'):void { if(props.cave.selectCostume(costume)){refresh();hover.hide()} }
+const carriedUnlocks=computed(()=>{void props.tick;void bump.value;return [...props.profile.pendingSearchUnlocks]})
 function organizeKey(e: KeyboardEvent): void {
   if (e.code !== 'KeyR' || e.repeat || e.ctrlKey || e.altKey || e.metaKey || abilityOpen.value) return
   e.preventDefault(); organizeBag()
@@ -177,6 +182,15 @@ onBeforeUnmount(() => {
         </button>
       </div>
 
+      <div v-if="!abilityOpen&&profile.flagBool('unlock.costume.old_miner')" class="costume-options">
+        <span>{{t('ui.costume.title')}}</span>
+        <button class="gbtn" :class="{primary:profile.costume==='default'}" @click="changeCostume('default')">{{t('ui.costume.default')}}</button>
+        <button class="gbtn" :class="{primary:profile.costume==='old_miner'}" @click="changeCostume('old_miner')">{{t('ui.costume.old_miner')}}</button>
+      </div>
+      <div v-if="!abilityOpen&&carriedUnlocks.length" class="pending-collectibles">
+        <span>{{t('ui.search.pending_unlocks')}}</span>
+        <span v-for="id in carriedUnlocks" :key="id" class="carried-unlock"><ItemIcon :id="id" :size="24"/>{{t(`item.${id}.name`)}}</span>
+      </div>
       <section v-if="abilityOpen" class="ability-sheet">
         <div class="ability-columns">
           <aside class="growth-record">
@@ -306,7 +320,7 @@ onBeforeUnmount(() => {
                   }"
                   @mouseleave="hover.leave"
                 >
-                  <ItemIcon v-if="cave.equipment.get(slot)" :id="cave.equipment.get(slot)" :size="32" />
+                  <ItemIcon v-if="cave.equipment.get(slot)" :id="cave.equipment.get(slot)" :size="32" :durability="cave.equipment.getStack(slot)?.durability" show-durability />
                   <span v-else class="eqlabel">{{ eqLabelOf(slot) }}</span>
                 </div>
               </template>
@@ -327,7 +341,7 @@ onBeforeUnmount(() => {
               }"
               @mouseleave="hover.leave"
             >
-              <ItemIcon v-if="cave.equipment.get(slot)" :id="cave.equipment.get(slot)" :size="34" />
+              <ItemIcon v-if="cave.equipment.get(slot)" :id="cave.equipment.get(slot)" :size="34" :durability="cave.equipment.getStack(slot)?.durability" show-durability />
               <span v-else class="eqlabel">{{ t('ui.inv.ghost_spell') }}</span>
             </div>
           </div>
@@ -346,7 +360,7 @@ onBeforeUnmount(() => {
               }"
               @mouseleave="hover.leave"
             >
-              <ItemIcon v-if="cave.equipment.get(slot)" :id="cave.equipment.get(slot)" :size="30" />
+              <ItemIcon v-if="cave.equipment.get(slot)" :id="cave.equipment.get(slot)" :size="30" :durability="cave.equipment.getStack(slot)?.durability" show-durability />
               <span v-else class="eqlabel">{{ eqLabelOf(slot) }}</span>
             </div>
           </div>
@@ -362,7 +376,7 @@ onBeforeUnmount(() => {
               @mouseleave="hover.leave"
             >
               <span class="keyhint">{{ i + 4 }}</span>
-              <ItemIcon v-if="s" :id="s.id" :size="34" />
+              <ItemIcon v-if="s" :id="s.id" :size="34" :durability="s.durability" show-durability />
               <span v-if="s && s.qty > 1" class="qty brass-qty">{{ s.qty }}</span>
             </div>
           </div>
@@ -384,7 +398,7 @@ onBeforeUnmount(() => {
               @mouseenter="(e) => showTip(e, s?.id)"
               @mouseleave="hover.leave"
             >
-              <ItemIcon v-if="s" :id="s.id" :size="36" />
+              <ItemIcon v-if="s" :id="s.id" :size="36" :durability="s.durability" show-durability />
               <span v-if="s && s.qty > 1" class="qty brass-qty">{{ s.qty }}</span>
             </div>
           </div>
@@ -393,8 +407,22 @@ onBeforeUnmount(() => {
       </div>
 
       <div v-show="!abilityOpen" class="inv-foot">
-        {{ t('ui.inv.foot') }}
+        <span class="inventory-controls">{{ t('ui.inv.foot') }}</span>
+        <div class="trash-dock">
+          <div class="trash-caption"><strong>{{ t('ui.inv.trash') }}</strong><small>{{ t('ui.inv.trash_hint') }}</small></div>
+          <div class="gslot velvet trash-slot" data-drop="trash:0" :aria-label="t('ui.inv.trash')"
+            @mouseenter="(e) => trashStack ? showTip(e, trashStack.id) : showEmptyTip(e, t('ui.inv.trash_tip'))"
+            @mouseleave="hover.leave">
+            <ItemIcon v-if="trashStack" :id="trashStack.id" :size="34" :durability="trashStack.durability" show-durability />
+            <span v-if="trashStack && trashStack.qty > 1" class="qty brass-qty">{{ trashStack.qty }}</span>
+            <svg v-if="!trashStack" class="trash-mark" viewBox="0 0 32 32" aria-hidden="true">
+              <path d="M7 10h18M12 10V6h8v4M9 12l2 15h10l2-15M14 14v9m4-9v9" />
+            </svg>
+          </div>
+          <button type="button" class="trash-destroy" data-inventory-action="destroy" :disabled="!trashStack" @click="destroyTrash">{{ t('ui.inv.destroy') }}</button>
+        </div>
       </div>
+      <ItemTouchActions v-if="!abilityOpen" :controller="mouse" :slots="access" :profile="profile" :tick="tick+bump"/>
     </div>
 
     <ItemTooltip :hover="tip" :expanded="expanded" :interactive="interactive" :profile="profile" :tick="tick + bump" :action="tipAction" @enter="hover.enterCard" @leave="hover.leaveCard" @action="performTipAction"/>
@@ -1220,4 +1248,26 @@ onBeforeUnmount(() => {
   .inv-head { margin-bottom: 10px; }
   .inv-foot { margin-top: 6px; padding-top: 5px; }
 }
+/* 回收口为金属内衬，销毁拉片沿用挎箱铜扣与朱漆刻字。 */
+.inv-foot { display: flex; align-items: center; gap: 18px; padding-right: 0; text-align: left; }
+.inventory-controls { flex: 1; min-width: 0; }
+.trash-dock { display: flex; align-items: center; gap: 9px; flex: none; padding-left: 14px; border-left: 1px solid #c0a16d30; }
+.trash-caption { display: flex; flex-direction: column; gap: 2px; }
+.trash-caption strong { color: #cfbaa0; font-size: 11px; font-weight: normal; }
+.trash-caption small { color: #a99276; font-size: 9px; letter-spacing: 0; }
+.trash-slot { width: 46px; height: 46px; border-radius: 0; border: 1px solid #978a7777; background: linear-gradient(145deg, #2e2b29, #171615); box-shadow: inset 0 3px 8px #0009, inset 0 -1px 0 #d3c6a622, 0 1px 0 #e8cda318; }
+.trash-mark { width: 28px; height: 28px; fill: none; stroke: #b5a48a; stroke-width: 1.3; opacity: .45; }
+.trash-destroy { flex: none; padding: 8px 12px; border: 1px solid #ba8a6766; border-radius: 0; color: #ebcbb0; background: linear-gradient(155deg, #754831, #442b20); box-shadow: inset 0 1px 0 #e4b49733, inset 0 -2px 0 #23120b99, 0 2px 3px #0005; font: inherit; font-size: 12px; letter-spacing: 2px; cursor: pointer; }
+.trash-destroy:hover:not(:disabled) { border-color: #d4ac82; color: #ffe2be; background: linear-gradient(155deg, #91583b, #583523); }
+.trash-destroy:active:not(:disabled) { transform: translateY(1px); box-shadow: inset 0 2px 4px #0008; }
+.trash-destroy:disabled { opacity: .38; cursor: default; }
+@media (max-width: 700px) {
+  .inv-foot { flex-wrap: wrap; gap: 8px; }
+  .inventory-controls { flex-basis: 100%; }
+  .trash-dock { margin-left: auto; border-left: 0; padding-left: 0; }
+}
+</style>
+
+<style scoped>
+.costume-options,.pending-collectibles{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:8px 18px;border-bottom:1px solid #b5985d44;color:#e2d2ad;font-size:13px}.costume-options .gbtn{padding:5px 12px;font-size:13px}.carried-unlock{display:inline-flex;align-items:center;gap:4px;background:#16121a55;padding:3px 7px;border:1px solid #ab8c5544}
 </style>

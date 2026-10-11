@@ -71,6 +71,8 @@ export interface HandAnchor {
 }
 
 export interface RigOptions {
+  /** 活动角色复用姿态图层；拖影和临时剧情姿态仍直接绘制。 */
+  cacheBody?: boolean
   /** 受伤态采用参考的生气差分；无敌帧闪烁仍由调用方控制透明度。 */
   hurt?: boolean
   /** 显式表情优先于受伤和自动眨眼，可供剧情与预览使用。 */
@@ -82,6 +84,10 @@ export interface RigOptions {
   drawWeapon?: (ctx: CanvasRenderingContext2D) => void
   /** 副手武器与主手共用层级和手心定位，朝向独立。 */
   drawSupportWeapon?: (ctx: CanvasRenderingContext2D) => void
+  /** 托枪副手盖在枪械上方，让既有手部贴图实际包住前握把。 */
+  supportInFront?: boolean
+  /** 原图的手指压在握把上方，避免主武器把后握把手整片遮住。 */
+  gripHandsOverWeapon?: boolean
   /** 腰前附件在衣身之上、双手之下绘制，回调仍使用世界坐标。 */
   drawAccessory?: (ctx: CanvasRenderingContext2D) => void
 }
@@ -91,10 +97,10 @@ export interface RigOptions {
  * @returns 持械手的世界锚点（武器绘制器由此挂载）
  */
 export function getPlayerHandAnchor(x: number, y: number, pose: PlayerPose): HandAnchor {
-  return playerHandAnchor(x, y, pose, false)
+  return playerHandAnchor(x, y, pose, pose.weaponHand === 'far')
 }
 export function getPlayerSupportHandAnchor(x: number, y: number, pose: PlayerPose): HandAnchor {
-  return playerHandAnchor(x, y, pose, true)
+  return playerHandAnchor(x, y, pose, pose.weaponHand !== 'far')
 }
 function playerHandAnchor(x: number, y: number, pose: PlayerPose, far: boolean): HandAnchor {
   const mirror = pose.dir === 'right'
@@ -102,8 +108,9 @@ function playerHandAnchor(x: number, y: number, pose: PlayerPose, far: boolean):
   const { x: sx, y: sy } = far ? armShoulders(dir).far : armShoulders(dir).near
   const b = pose.bone
   const upper = far ? b.armFarUpper : b.armNearUpper, lower = far ? b.armFarLower : b.armNearLower
-  const hx = sx + Math.cos(upper) * L_UPPER + Math.cos(lower) * L_LOWER
-  const hy = sy + Math.sin(upper) * L_UPPER + Math.sin(lower) * L_LOWER
+  const palmLength = L_LOWER + (pose.palmOffset ?? 0)
+  const hx = sx + Math.cos(upper) * L_UPPER + Math.cos(lower) * palmLength
+  const hy = sy + Math.sin(upper) * L_UPPER + Math.sin(lower) * palmLength
   // 锚点必须完整复现根部缩放、旋转和镜像，翻滚时也与实际手心一致。
   const cos = Math.cos(pose.rootRot), sin = Math.sin(pose.rootRot)
   const rx = hx * pose.scaleX * cos - hy * pose.scaleY * sin
@@ -138,12 +145,14 @@ function drawLegacyPlayerRig(
   const drawDir: Dir4 = mirror ? 'left' : pose.dir
   const ma = (a: number): number => (mirror ? Math.PI - a : a)
   const b = pose.bone
-  const drawWeapon = opts.drawWeapon && pose.weaponAngle !== undefined ? (g: CanvasRenderingContext2D) => {
-    g.save(); g.rotate(pose.weaponAngle! - b.armNearLower); opts.drawWeapon!(g); g.restore()
-  } : opts.drawWeapon
-  const drawSupportWeapon = opts.drawSupportWeapon && pose.supportWeaponAngle !== undefined ? (g: CanvasRenderingContext2D) => {
-    g.save(); g.rotate(pose.supportWeaponAngle! - b.armFarLower); opts.drawSupportWeapon!(g); g.restore()
-  } : opts.drawSupportWeapon
+  const nearWeapon = pose.weaponHand === 'far' ? opts.drawSupportWeapon : opts.drawWeapon
+  const farWeapon = pose.weaponHand === 'far' ? opts.drawWeapon : opts.drawSupportWeapon
+  const drawWeapon = nearWeapon && pose.weaponAngle !== undefined ? (g: CanvasRenderingContext2D) => {
+    g.save(); g.translate(pose.palmOffset ?? 0, 0); g.rotate(pose.weaponAngle! - b.armNearLower); nearWeapon(g); g.restore()
+  } : nearWeapon
+  const drawSupportWeapon = farWeapon && pose.supportWeaponAngle !== undefined ? (g: CanvasRenderingContext2D) => {
+    g.save(); g.translate(pose.palmOffset ?? 0, 0); g.rotate(pose.supportWeaponAngle! - b.armFarLower); farWeapon(g); g.restore()
+  } : farWeapon
 
   const side = drawDir === 'left'
   const da = dirAngle(drawDir)
@@ -157,6 +166,10 @@ function drawLegacyPlayerRig(
   const shoulders = armShoulders(drawDir)
   const sxF = shoulders.far.x, syF = shoulders.far.y, sxN = shoulders.near.x, syN = shoulders.near.y
   const twoHanded = (pose.supportGripWeight ?? 0) > 0 && pose.gripInFront !== false
+  const frontFar = opts.supportInFront && pose.weaponHand !== 'far'
+  const behindGrip = opts.gripHandsOverWeapon && pose.gripInFront === false
+  const splitGrip = pose.supportInFront !== undefined
+  const accessoryFront = pose.accessoryInFront ?? pose.gripInFront
   const drawAccessory = () => {
     if (!opts.drawAccessory) return
     // 撤销人物根变换、保留相机变换，前后层共用同一个世界握点。
@@ -181,13 +194,16 @@ function drawLegacyPlayerRig(
   // —— 1. 远侧腿（永远在最底：身后腿可被衣摆遮挡＝正确透视） ——
   // 注意：腿/臂骨角是"朝左基底局部角"，right 朝向只靠根层 scale(-1,1) 单重镜像，
   // 绝不能再经 ma()——否则与 scale 双重翻转互相抵消，前迈会永远落在屏幕固定一侧。
-  drawLeg(ctx, perpX * legGap + (side ? 1.2 : 0), PELVIS_Y + perpY * legGap - (side ? 0.3 : 0), b.thighFar, b.shinFar, true)
+  drawLeg(ctx, perpX * legGap + (side ? 1.2 : 0), PELVIS_Y + perpY * legGap - (side ? 0.3 : 0), b.thighFar, b.shinFar, true, pose.farLegScale)
   // 近腿同样压在衣摆下方；侧面轻微前后错开，保留双鞋辨识。
-  drawLeg(ctx, -perpX * legGap - (side ? 0.65 : 0), PELVIS_Y - perpY * legGap, b.thighNear, b.shinNear, false)
-  if (pose.gripInFront === false) drawAccessory()
+  drawLeg(ctx, -perpX * legGap - (side ? 0.65 : 0), PELVIS_Y - perpY * legGap, b.thighNear, b.shinNear, false, pose.nearLegScale)
+  if (accessoryFront === false) drawAccessory()
 
   // 背面袖子先于背片：肩缝由衣身覆盖，不再像从脊背伸出。
-  if (drawDir === 'up' && !twoHanded) {
+  if (splitGrip) {
+    if (pose.supportInFront === false) drawSleeve(ctx, sxF, syF, b.armFarUpper, b.armFarLower, true, drawDir, drawSupportWeapon)
+    if (pose.gripInFront === false) drawSleeve(ctx, sxN, syN, b.armNearUpper, b.armNearLower, false, drawDir, drawWeapon)
+  } else if (behindGrip || drawDir === 'up' && !twoHanded) {
     drawSleeve(ctx, sxF, syF, b.armFarUpper, b.armFarLower, true, drawDir, drawSupportWeapon)
     drawSleeve(ctx, sxN, syN, b.armNearUpper, b.armNearLower, false, drawDir, drawWeapon)
   } else if (side && !twoHanded) {
@@ -205,18 +221,23 @@ function drawLegacyPlayerRig(
   // —— 4. 头（aim 是世界角，仍需 ma 翻成基底局部角；head 骨角在 drawHead 内直接使用） ——
   drawHead(ctx, pose, drawDir, ma(pose.aim))
 
-  if (pose.gripInFront !== false) drawAccessory()
+  if (accessoryFront !== false) drawAccessory()
 
   // —— 5. 双臂前层（羽织广袖是最外层部件；臂骨角同为局部角，不再 ma）——
-  if (side) {
-    if (twoHanded) drawSleeve(ctx, sxF, syF, b.armFarUpper, b.armFarLower, true, drawDir, drawSupportWeapon)
+  if (splitGrip) {
+    if (pose.supportInFront && !frontFar) drawSleeve(ctx, sxF, syF, b.armFarUpper, b.armFarLower, true, drawDir, drawSupportWeapon)
+    if (pose.gripInFront !== false) drawSleeve(ctx, sxN, syN, b.armNearUpper, b.armNearLower, false, drawDir, drawWeapon)
+    if (pose.supportInFront && frontFar) drawSleeve(ctx, sxF, syF, b.armFarUpper, b.armFarLower, true, drawDir, drawSupportWeapon)
+  } else if (side && !behindGrip) {
+    if (twoHanded && !frontFar) drawSleeve(ctx, sxF, syF, b.armFarUpper, b.armFarLower, true, drawDir, drawSupportWeapon)
     // 侧身：远袖已在底层，这里只画胸前近袖
     drawSleeve(ctx, sxN, syN, b.armNearUpper, b.armNearLower, false, drawDir, drawWeapon)
-  } else if (drawDir === 'down' || twoHanded) {
+  } else if (!behindGrip && (drawDir === 'down' || twoHanded)) {
     // 正面：远袖先（另一侧），近袖后（持械，武器回调在其手心局部系）
-    drawSleeve(ctx, sxF, syF, b.armFarUpper, b.armFarLower, true, drawDir, drawSupportWeapon)
+    if (!frontFar) drawSleeve(ctx, sxF, syF, b.armFarUpper, b.armFarLower, true, drawDir, drawSupportWeapon)
     drawSleeve(ctx, sxN, syN, b.armNearUpper, b.armNearLower, false, drawDir, drawWeapon)
   }
+  if (!splitGrip && twoHanded && frontFar) drawSleeve(ctx, sxF, syF, b.armFarUpper, b.armFarLower, true, drawDir, drawSupportWeapon)
 
   ctx.restore()
   return hand
@@ -319,7 +340,8 @@ function drawLeg(
   hy: number,
   thighA: number,
   shinA: number,
-  far: boolean
+  far: boolean,
+  lengthScale = 1
 ): void {
   ctx.save()
   ctx.translate(hx, hy)
@@ -328,17 +350,17 @@ function drawLeg(
     ctx,
     thighA,
     shinA,
-    L_THIGH,
-    L_SHIN,
+    L_THIGH * lengthScale,
+    L_SHIN * lengthScale,
     W_LEG,
     far ? MAT.pantsDark : MAT.pants,
     far ? '#1d1a24' : MAT.pantsDark
   )
   // 脚踝位置
-  const kx = Math.cos(thighA) * L_THIGH
-  const ky = Math.sin(thighA) * L_THIGH
-  const ax = kx + Math.cos(shinA) * L_SHIN
-  const ay = ky + Math.sin(shinA) * L_SHIN
+  const kx = Math.cos(thighA) * L_THIGH * lengthScale
+  const ky = Math.sin(thighA) * L_THIGH * lengthScale
+  const ax = kx + Math.cos(shinA) * L_SHIN * lengthScale
+  const ay = ky + Math.sin(shinA) * L_SHIN * lengthScale
   // 鞋独立一层：鞋角取大腿/小腿的中分角＝勾脚修正——
   // 屈膝时鞋不沿小腿指向天/后，鞋底始终大致朝下（后蹬点地、前踩落地都自然）
   ctx.save()

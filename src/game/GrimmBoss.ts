@@ -1,3 +1,4 @@
+import { randomCombat } from '../core/simulation/random'
 import { Enemy, type PlayerLike } from './Enemy'
 import GRIMM_DEF from '../content/enemies/vanilla/grimm'
 import { CONFIG } from './config'
@@ -13,6 +14,7 @@ type State='retreat'|'run'|'roll'|'hidden'|'slash'|'chain'|'cast'|'second'|'thir
 export class GrimmBoss extends Enemy {
   /** 实体坐标为躯干中心，素材仍以脚底为锚；初始出生位置保持原脚底位置。 */
   private readonly footOffset=90*CONFIG.tile/48
+  override get simulationKind():string{return 'grimm'}
   constructor(x:number,y:number){super(x,y-90*CONFIG.tile/48,GRIMM_DEF.id,GRIMM_DEF)}
   readonly attacks=new BossAttacks()
   state:State='retreat'
@@ -43,11 +45,11 @@ export class GrimmBoss extends Enemy {
   override get canBeHit():boolean{return this.alive&&this.state!=='hidden'&&this.state!=='break'&&this.battleStage!==2}
   override get emerging():boolean{return !this.canBeHit}
   override tryHitPlayer():boolean{return false}
-  override takeDamage(amount:number,angle:number,kb?:number,stun?:number):void {
+  override takeDamage(amount:number,angle:number,kb?:number,stun?:number,kind='unknown'):void {
     if(!this.canBeHit)return
     // 先截断伤害，避免父类死亡分支在破功时被触发。
     const applied=this.battleStage===1?Math.min(amount,Math.max(0,this.hp-this.maxHp*.55)):amount
-    super.takeDamage(applied,angle,kb,stun);this.hitFlash=.09
+    super.takeDamage(applied,angle,kb,stun,kind);this.hitFlash=.09
     if(this.battleStage===1&&this.hp<=this.maxHp*.55){
       this.hp=this.maxHp*.55;this.alive=true;this.dying=0;this.breakTarget=2
       this.attacks.clear();this.warning=null;this.vx=this.vy=0
@@ -81,11 +83,11 @@ export class GrimmBoss extends Enemy {
     this.attacks.add('smoke',this.x,this.y,{rx:70,duration:.55})
     const b=map.bounds,pad=this.r+25
     // 预警出现时锁定出生点和瞄准点，之后绝不偷偷追踪。
-    const a=Math.random()*Math.PI*2,d=CONFIG.tile*(2.6+Math.random()*1.1)
+    const a=randomCombat()*Math.PI*2,d=CONFIG.tile*(2.6+randomCombat()*1.1)
     const x=Math.max(b.left+pad,Math.min(b.right-pad,p.x+Math.cos(a)*d)),y=Math.max(b.top+pad,Math.min(b.bottom-pad,p.y+Math.sin(a)*d))
-    this.warning={x,y,targetX:p.x,targetY:p.y};this.enter('hidden',.3+Math.random()*.3);grimmSound(sfx, 'vanish')
+    this.warning={x,y,targetX:p.x,targetY:p.y};this.enter('hidden',.3+randomCombat()*.3);grimmSound(sfx, 'vanish')
   }
-  private finish():void{this.enter('recovery',.35+Math.random()*.3)}
+  private finish():void{this.enter('recovery',.35+randomCombat()*.3)}
   private ring(p:PlayerLike,second:boolean):void {
     const n=second?24:16,base=second&&this.battleStage===3?this.volleyAngle:Math.atan2(p.y-this.y,p.x-this.x),speed=second?750:460
     if(!second)this.volleyAngle=base
@@ -96,7 +98,7 @@ export class GrimmBoss extends Enemy {
       const dx=Math.abs(c)<1e-6?Infinity:(c>0?CONFIG.roomCols*CONFIG.tile-wall-this.x:this.x-wall)/Math.abs(c)
       const dy=Math.abs(s)<1e-6?Infinity:(s>0?CONFIG.roomRows*CONFIG.tile-wall-this.y:this.y-wall)/Math.abs(s)
       // 每发独立抽取墙距的65%～120%，最远允许短暂出界；全程不重新随机。
-      const reach=Math.max(30,Math.min(dx,dy))*(.65+Math.random()*.55)
+      const reach=Math.max(30,Math.min(dx,dy))*(.65+randomCombat()*.55)
       this.attacks.add(second?'bolt':'mist',this.x,this.y,{angle,speed,rx:second?6:11,duration:!second&&this.battleStage===3?5.6:travelTime,reach,phase:i,returning:!second&&this.battleStage===3,fixed:second&&this.battleStage===3})
     }
     grimmSound(sfx, second?'laser':'burst')
@@ -105,9 +107,9 @@ export class GrimmBoss extends Enemy {
     const b=map.bounds,rx=CONFIG.tile*1.5,ry=CONFIG.tile
     // 分区随机采样，16 点覆盖全屋而不是堆在同一个角落。
     for(let i=0;i<16;i++){
-      const x=b.left+rx+(i%4+.2+Math.random()*.6)/4*(b.right-b.left-2*rx)
-      const y=b.top+ry+(Math.floor(i/4)+.2+Math.random()*.6)/4*(b.bottom-b.top-2*ry)
-      this.attacks.add('seal',x,y,{rx,ry,delay:.5+Math.random()*.3,duration:.28})
+      const x=b.left+rx+(i%4+.2+randomCombat()*.6)/4*(b.right-b.left-2*rx)
+      const y=b.top+ry+(Math.floor(i/4)+.2+randomCombat()*.6)/4*(b.bottom-b.top-2*ry)
+      this.attacks.add('seal',x,y,{rx,ry,delay:.5+randomCombat()*.3,duration:.28})
     }
     grimmSound(sfx, 'burst')
   }
@@ -115,8 +117,8 @@ export class GrimmBoss extends Enemy {
     const b=map.bounds
     {
       // 一阶段四个正交方向；最终阶段开放斜向和双组，始终共享十四束预算。
-      const index=this.battleStage===3?Math.floor(Math.random()*8):Math.floor(Math.random()*4)*2
-      const dual=this.battleStage===3&&Math.random()<.5
+      const index=this.battleStage===3?Math.floor(randomCombat()*8):Math.floor(randomCombat()*4)*2
+      const dual=this.battleStage===3&&randomCombat()<.5
       for(let group=0;group<(dual?2:1);group++){
         const direction=(index+(group?2:0))*Math.PI/4
         const normal=direction,angle=normal+Math.PI/2
@@ -135,11 +137,11 @@ export class GrimmBoss extends Enemy {
     for(let i=0;i<5;i++){
       // 两束压玩家附近，三束切周边空间；整组旋向随玩家方位变化，避免固定中央扇形。
       const aim=Math.atan2(p.y-cy,p.x-cx)
-      const angle=aim+i*Math.PI/5+(Math.random()-.5)*.24
+      const angle=aim+i*Math.PI/5+(randomCombat()-.5)*.24
       const nx=-Math.sin(angle),ny=Math.cos(angle)
       const extent=Math.abs(nx)*(b.right-b.left)/2+Math.abs(ny)*(b.bottom-b.top)/2
       const playerOffset=(p.x-cx)*nx+(p.y-cy)*ny
-      let offset=i<2?playerOffset+(i===0?-1:1)*(48+Math.random()*22):(Math.random()-.5)*extent*1.6
+      let offset=i<2?playerOffset+(i===0?-1:1)*(48+randomCombat()*22):(randomCombat()-.5)*extent*1.6
       offset=Math.max(-extent+30,Math.min(extent-30,offset))
       // 保留可读反应间距，预警锁定后不再追踪，也不把线放到房间之外。
       if(Math.abs(offset-playerOffset)<43){
@@ -176,6 +178,7 @@ export class GrimmBoss extends Enemy {
     }
   }
   override update(dt:number,map:TileMap,p:PlayerLike):void {
+    this.motionHistory.capture(this.x, this.y)
     // 不可选中时沿最后已知位置继续既有演出，不实时锁定当前角色，也不暂停整个战斗。
     if (!p.untargetable) {
       if (!this.lastTarget) this.lastTarget={x:p.x,y:p.y,half:p.half,alive:p.alive}
@@ -222,8 +225,8 @@ export class GrimmBoss extends Enemy {
     }
     if(this.state==='retreat'){
       this.move(map,Math.atan2(this.y-p.y,this.x-p.x),52,dt)
-      if(this.timer<=0){const candidates=(this.battleStage===3?[1,2,3,4,5]:[1,2,3,4]).filter(s=>s!==this.lastSkill);this.skill=candidates[Math.floor(Math.random()*candidates.length)];this.lastSkill=this.skill
-        if(this.skill===1){this.repeats=2+Math.floor(Math.random()*3);this.enter('run',.5)}else{this.enter('cast',this.skill===5?.6:this.skill===2?.3:.5);if(this.skill===5)this.rifts(map,p);grimmSound(sfx, 'charge')}
+      if(this.timer<=0){const candidates=(this.battleStage===3?[1,2,3,4,5]:[1,2,3,4]).filter(s=>s!==this.lastSkill);this.skill=candidates[Math.floor(randomCombat()*candidates.length)];this.lastSkill=this.skill
+        if(this.skill===1){this.repeats=2+Math.floor(randomCombat()*3);this.enter('run',.5)}else{this.enter('cast',this.skill===5?.6:this.skill===2?.3:.5);if(this.skill===5)this.rifts(map,p);grimmSound(sfx, 'charge')}
       }
     }else if(this.state==='run'){
       this.move(map,Math.atan2(p.y-this.y,p.x-this.x),320,dt)
@@ -247,9 +250,14 @@ export class GrimmBoss extends Enemy {
       this.ring(p,true)
       if(this.battleStage===3){this.volleyAngle+=Math.PI/24;this.enter('thirdVolley',.22)}else this.finish()
     }else if(this.state==='thirdVolley'&&this.timer<=0){this.ring(p,true);this.finish()}
-    else if(this.state==='recovery'&&this.timer<=0)this.enter('retreat',(.35+Math.random()*.5)/(1+(this.stage-1)*.15))
+    else if(this.state==='recovery'&&this.timer<=0)this.enter('retreat',(.35+randomCombat()*.5)/(1+(this.stage-1)*.15))
   }
   override render(g:CanvasRenderingContext2D):void {
+    const offset=this.motionHistory.offset(this.x,this.y)
+    g.save();g.translate(offset.x,offset.y)
+    try{this.renderBoss(g)}finally{g.restore()}
+  }
+  private renderBoss(g:CanvasRenderingContext2D):void {
     if(this.state==='hidden'&&this.alive){
       if(this.warning){
         const w=this.warning

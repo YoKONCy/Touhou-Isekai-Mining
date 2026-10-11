@@ -1,3 +1,4 @@
+import { randomCombat } from '../core/simulation/random'
 import { Enemy, type PlayerLike } from './Enemy'
 import type { TileMap } from './tilemap'
 import def from '../content/enemies/vanilla/overloadedKedama'
@@ -48,6 +49,7 @@ export class KedamaBoss extends Enemy {
   private lean = 0
   private readonly orbitVolleys:OrbitVolley[]=[]
   private readonly animator = new PlayerAnimator()
+  override get simulationKind():string{return 'kedama'}
   constructor(x: number, y: number) { super(x,y,def.id,def) }
   override get canBeHit(): boolean { return this.alive && this.mode !== 'intro' && this.mode !== 'phase' }
   override get emerging(): boolean { return !this.canBeHit }
@@ -55,16 +57,16 @@ export class KedamaBoss extends Enemy {
   override clearPendingAttacks():void {super.clearPendingAttacks();this.orbitVolleys.length=0}
   beginBattle(): void { this.shown=true;this.entranceProgress=1;this.enter('recovery',.8) }
   beginSecondStage(): void { this.stage=2;this.phasePending=false;this.phaseBreakProgress=-1;this.enter('recovery',1.4);this.stunT=0 }
-  override takeDamage(amount:number,angle:number,kb?:number,stun?:number):void {
+  override takeDamage(amount:number,angle:number,kb?:number,stun?:number,kind='unknown'):void {
     if(!this.canBeHit)return
-    super.takeDamage(this.stage===1?Math.min(amount,Math.max(0,this.hp-this.maxHp*.5)):amount,angle,kb,stun)
+    super.takeDamage(this.stage===1?Math.min(amount,Math.max(0,this.hp-this.maxHp*.5)):amount,angle,kb,stun,kind)
     if(this.alive&&this.stage===1&&this.hp<=this.maxHp*.5) {this.phasePending=true;this.mode='phase';this.clearPendingAttacks();this.vx=this.vy=0;this.dashTrail=[]}
     else if(!this.alive) {this.mode='defeated';this.clearPendingAttacks();this.vx=this.vy=0;this.dashTrail=[]}
   }
   private enter(mode:Mode,duration:number):void {this.mode=mode;this.timer=duration;this.elapsed=0}
   private prepareSkill(map:TileMap,p:PlayerLike,aim:number):void {
     const choices:Skill[]=this.stage===2?['wave','seed','orbit','dash','spiral','linger']:['wave','seed','dash','spiral','linger']
-    const pool=choices.filter(skill=>skill!==this.previous);this.skill=pool[Math.floor(Math.random()*pool.length)];this.previous=this.skill
+    const pool=choices.filter(skill=>skill!==this.previous);this.skill=pool[Math.floor(randomCombat()*pool.length)];this.previous=this.skill
     this.lockedAngle=aim;if(this.skill==='dash')this.planMovement(map,p,aim)
     this.ready=this.skill==='seed'?.7:this.skill==='orbit'?.85:this.skill==='linger'?.8:this.skill==='spiral'?.35:.4
     this.fired=0;this.enter('windup',this.ready)
@@ -126,6 +128,7 @@ export class KedamaBoss extends Enemy {
     this.animator.update(dt,{speed:0,moveAngle:Math.PI/2,aim:Math.PI/2,armed:false})
   }
   override update(dt:number,map:TileMap,p:PlayerLike):void {
+    this.motionHistory.capture(this.x, this.y)
     this.updatePresentation(dt);this.effects.update(dt);this.stunT=Math.max(0,this.stunT-dt);this.contactCd=Math.max(0,this.contactCd-dt)
     this.vx=this.vy=0
     if(!this.alive||this.mode==='intro'||this.mode==='phase'||!p.alive||p.untargetable)return
@@ -204,8 +207,8 @@ export class KedamaBoss extends Enemy {
     }else if(this.skill==='linger') {
       const points:Array<{x:number;y:number}>=[],candidates:Array<{x:number;y:number}>=[],b=map.bounds
       // 打乱带小幅随机偏移的候选网格，保证八点分散，随机数退化时也不叠在一处。
-      for(let row=0;row<6;row++)for(let col=0;col<8;col++)candidates.push({x:b.left+80+(b.right-b.left-160)*(col+.5)/8+(Math.random()-.5)*24,y:b.top+80+(b.bottom-b.top-160)*(row+.5)/6+(Math.random()-.5)*24})
-      for(let i=candidates.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[candidates[i],candidates[j]]=[candidates[j],candidates[i]]}
+      for(let row=0;row<6;row++)for(let col=0;col<8;col++)candidates.push({x:b.left+80+(b.right-b.left-160)*(col+.5)/8+(randomCombat()-.5)*24,y:b.top+80+(b.bottom-b.top-160)*(row+.5)/6+(randomCombat()-.5)*24})
+      for(let i=candidates.length-1;i>0;i--){const j=Math.floor(randomCombat()*(i+1));[candidates[i],candidates[j]]=[candidates[j],candidates[i]]}
       for(const point of candidates) {
         if(!this.canMoveTo(map,point.x,point.y)||Math.hypot(point.x-p.x,point.y-p.y)<=90||points.some(other=>Math.hypot(point.x-other.x,point.y-other.y)<=65))continue
         points.push(point);this.pendingShots.push({kind:'straight',projectileId:this.stage===2?BOSS_LINGER_STAGE2_ID:BOSS_LINGER_ID,angle:0,origin:point});if(points.length===8)break
@@ -214,6 +217,11 @@ export class KedamaBoss extends Enemy {
     }
   }
   override render(g:CanvasRenderingContext2D):void {
+    const offset=this.motionHistory.offset(this.x,this.y)
+    g.save();g.translate(offset.x,offset.y)
+    try{this.renderBoss(g)}finally{g.restore()}
+  }
+  private renderBoss(g:CanvasRenderingContext2D):void {
     if(!this.shown)return
     const k=Math.max(0,Math.min(1,this.restoreProgress)),entrance=1-Math.pow(1-this.entranceProgress,3)
     g.save();g.translate((1-entrance)*140,(1-entrance)*-65)

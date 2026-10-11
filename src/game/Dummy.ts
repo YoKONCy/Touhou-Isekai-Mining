@@ -1,3 +1,4 @@
+import { randomVisual } from '../core/simulation/random'
 import { CONFIG } from './config'
 
 /**
@@ -25,7 +26,7 @@ export class Dummy {
     this.x = x
     this.y = y
     this.hp = this.maxHp
-    this.phase = Math.random() * Math.PI * 2
+    this.phase = randomVisual() * Math.PI * 2
   }
 
   get alive(): boolean {

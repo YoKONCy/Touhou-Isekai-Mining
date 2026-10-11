@@ -3,17 +3,16 @@ import type { ItemDef } from '../../../types'
 
 /** 时间为秒，完整角度保留磁盘上的150度。 */
 export const stats = {
-  rarity: 4,
-  tier: 4,
+  grade: 4,
   maxStack: 1,
   equipSlot: 'weaponB',
   combat: {
-    critChance: .25,
-    penetration: 30
+    critChance: .18,
+    penetration: 10
   },
   melee: meleeMove({
     shape: 'slash',
-    damage: 299,
+    damage: 77,
     powerCoefficient: 1,
     reach: 120,
     angleDegrees: 150,

@@ -1,3 +1,4 @@
+import { randomCombat } from '../../core/simulation/random'
 /**
  * chaser 模板：追脸近战怪
  * idle/wander 随机游荡 → 视野内 chase 扑脸 → 拉开到丢失距离才放弃（迟滞防抖）。
@@ -25,7 +26,7 @@ export const chaserBrain: EnemyBrain = {
       if (host.ai !== 'chase') host.ai = 'chase'
     } else if (!player.alive && host.ai === 'chase') {
       host.ai = 'idle'
-      host.aiTimer = 0.5 + Math.random() * 0.6
+      host.aiTimer = 0.5 + randomCombat() * 0.6
     }
 
     // —— 周期升速节拍（Def.chaser.surge 可选；缺省恒速） ——
@@ -37,7 +38,7 @@ export const chaserBrain: EnemyBrain = {
         host.surgeT -= dt
         speedMult = su.speedMult
         if (host.surgeT <= 0) {
-          host.surgeCd = su.minInterval + Math.random() * (su.maxInterval - su.minInterval)
+          host.surgeCd = su.minInterval + randomCombat() * (su.maxInterval - su.minInterval)
         }
       } else {
         host.surgeCd -= dt
@@ -48,22 +49,21 @@ export const chaserBrain: EnemyBrain = {
     let targetVx = 0
     let targetVy = 0
     if (host.ai === 'chase' && player.alive) {
-      const a = Math.atan2(player.y - host.y, player.x - host.x)
-      ;({ x: targetVx, y: targetVy } = host.wantVelocity(map, a, c.chaseSpeed * speedMult))
+      ;({ x: targetVx, y: targetVy } = host.navigateTo(map, player.x, player.y, c.chaseSpeed * speedMult))
     } else {
       host.aiTimer -= dt
       if (host.ai === 'idle' && host.aiTimer <= 0) {
-        const a = Math.random() * Math.PI * 2
+        const a = randomCombat() * Math.PI * 2
         host.wanderX = Math.cos(a)
         host.wanderY = Math.sin(a)
         host.ai = 'wander'
-        host.aiTimer = 1 + Math.random() * 1.4
+        host.aiTimer = 1 + randomCombat() * 1.4
       } else if (host.ai === 'wander') {
         const a = Math.atan2(host.wanderY, host.wanderX)
         ;({ x: targetVx, y: targetVy } = host.wantVelocity(map, a, c.wanderSpeed * speedMult))
         if (host.aiTimer <= 0) {
           host.ai = 'idle'
-          host.aiTimer = 0.5 + Math.random() * 0.8
+          host.aiTimer = 0.5 + randomCombat() * 0.8
         }
       }
     }

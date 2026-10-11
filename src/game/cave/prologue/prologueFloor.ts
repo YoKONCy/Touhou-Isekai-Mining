@@ -7,6 +7,8 @@
  */
 import { CONFIG } from '../../config'
 import { SLIME_BLUE_ID, SLIME_RED_ID, VENOM_GREEN_ID } from '../../../content/enemies/vanilla/ids'
+import { PROP_CART_ID } from '../../../content/props/vanilla/ids'
+import { SEARCH_PROLOGUE_TABLE } from '../../../content/loot/vanilla/searchSupplies'
 import type { Dir, DoorDef, FloorPlan, RoomDef, RoomDoorRef } from '../dungeon/types'
 import type { ScriptedRoomSpec, ScriptedSpawn } from '../dungeon/script'
 
@@ -87,6 +89,7 @@ export function buildProloguePlan(): FloorPlan {
       depth: i,
       // 序章视为第 0 层：金矿/红玉等 minFloor≥2 的稀有矿种一律不刷，只剩铜铁
       floor: 0,
+      searchProfile: { table: SEARCH_PROLOGUE_TABLE },
       exitDist: PROLOGUE_ROOMS - 1 - i,
       doors: []
     })
@@ -144,6 +147,7 @@ export function prologueRoomSpecs(): Map<number, ScriptedRoomSpec> {
 
   // R2 矿房：序章唯一正经矿点——6~9 格极少量铜/铁矿脉（金/红玉被楼层门控过滤；岩石 1% 宝箱仍生效）
   map.set(PROOT.MINE, {
+    searchProps: [{ id: PROP_CART_ID, x: 240, y: CY + 64, ref: 'tutorial-search' }],
     aggressive: true,
     noMonsterBurst: true,
     ambient: PROLOGUE_DARK,

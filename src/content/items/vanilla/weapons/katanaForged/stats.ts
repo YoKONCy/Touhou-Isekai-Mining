@@ -8,8 +8,8 @@ const slash = meleeMove({
 })
 /** 数值共用，第三段窄矩形宽 30，末段完整一周。 */
 export const stats = {
-  rarity: 2, tier: 2, maxStack: 1, equipSlot: 'weaponA',
-  combat: { penetration: 5, critChance: .18 },
+  grade: 2, maxStack: 1, equipSlot: 'weaponA',
+  combat: { penetration: .5, critChance: .18 },
   melee: slash,
   meleePattern: { mode: 'mixed', moves: [
     { ...slash, sweepDirection: 1 },

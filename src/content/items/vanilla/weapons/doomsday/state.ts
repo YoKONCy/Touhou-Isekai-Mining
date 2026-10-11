@@ -2,6 +2,7 @@ import type { DoomTrail } from './effects'
 
 /** 每名持有者独立保存模式、冷却与攻击表现，不进入存档。 */
 export class DoomsdayState {
+  private time = 0
   mode = false
   strikes = 0
   cooldown = 0
@@ -16,10 +17,10 @@ export class DoomsdayState {
   cdPulseAt = -10
   crescents: DoomTrail[] = []
 
-  reduceCooldown(seconds: number): boolean {
+  reduceCooldown(seconds: number, time=this.time): boolean {
     if (this.cooldown <= 0) return false
     this.cooldown = Math.max(0, this.cooldown - seconds)
-    this.cdPulseAt = performance.now()
+    this.cdPulseAt = time * 1000
     return true
   }
   start(strikes: number): void {
@@ -31,6 +32,7 @@ export class DoomsdayState {
     this.strikes = 0; this.cooldown = 15
   }
   update(dt: number): boolean {
+    this.time += dt
     this.cooldown = Math.max(0, this.cooldown - dt)
     if (this.mode) this.duration = Math.max(0, this.duration - dt)
     return this.mode && this.duration === 0

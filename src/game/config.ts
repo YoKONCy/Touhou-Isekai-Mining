@@ -36,6 +36,8 @@ export const CONFIG = {
     },
     /** 正式矿洞更暗，序章脚本和手动火把仍使用原有参数。 */
     normalAmbient: { dimCenter: 0.66, dimEdge: 0.88, litCenter: 0.27, litEdge: 0.56 },
+    /** 深窟未清场时加深冷暗罩；首领房保留较亮的中心以辨识弹幕。 */
+    deepHollowAmbient: { dimCenter: 0.70, dimEdge: 0.91, litCenter: 0.34, litEdge: 0.63, arenaDimCenter: 0.53, arenaDimEdge: 0.80 },
     /** 墙上火把（清场后逐根错峰点燃） */
     torch: {
       /** 火光照亮半径 px */
@@ -223,8 +225,8 @@ export const CONFIG = {
     rockOreBonusChance: 0.11,
     /** 非岩石形态矿物必掉 1 个，33% 概率额外掉 1 个。 */
     veinYield: [[1, 0.67], [2, 0.33]] as ReadonlyArray<readonly [number, number]>,
-    /** 岩包态中实际藏矿的概率（敲碎才揭晓，裂纹后期会隐约露矿色）；K 批次中幅调低 0.55→0.40 */
-    oreInRockChance: 0.40,
+    /** 普通岩包实际藏矿的概率；敲碎才揭晓，盐化岩包独立判定。 */
+    oreInRockChance: 0.20,
     /**
      * 敲碎矿脉时从土里爆出一只怪的概率（主人定档 50%；
      * 已清场房间/初始房/奖励房不爆，清完场仍可安心回头挖矿）。
@@ -301,10 +303,10 @@ export const CONFIG = {
     radius: 24
   },
 
-  /** 批次 C：背包（星露谷式 10×3=30 格纯网格；快捷栏独立于背包） */
+  /** 初始行囊十格，后续扩容保持单格规则；快捷栏独立于背包。 */
   inventory: {
-    cols: 10,
-    rows: 3
+    cols: 5,
+    rows: 2
   },
 
   /** 批次 C：消耗品 */
@@ -347,7 +349,7 @@ export const CONFIG = {
     /** 急速每点 +攻击速度（0.015＝+1.5%） */
     perHasteSpeed: 0.015,
     /** 抗性每点同时增加物理与魔法抗性。 */
-    perResist: 1.5
+    perResist: .4
   },
 
   /** 单项战斗能力投入上限。 */

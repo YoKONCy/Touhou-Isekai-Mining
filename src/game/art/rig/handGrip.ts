@@ -1,13 +1,15 @@
 import type { WeaponGrip } from '../../../content/items/types'
 import { clamp01, dirAngle, type Dir4, type PlayerPose } from './skeleton'
-import { playerAppearance } from '../../../shared/playerAppearance'
+import { simulationAppearance } from '../../../shared/playerAppearance'
 
 /** 绘制与双手反解共用手臂长度、双肩位置，避免握柄与手心错位。 */
 export const ARM_RIG = { upper: 5.2, lower: 4.8, shoulder: 7.5, shoulderY: -6, backShoulder: 7.6 } as const
+/** 图集的手心位于小臂骨末端之后；兄妹各自沿用原图中的手部尺寸。 */
+export const rigPalmOffset = () => simulationAppearance() === 'sister' ? .55 : .9
 export function armShoulders(direction: Dir4) {
   const dir = direction === 'right' ? 'left' : direction
   // 妹妹肩线贴合水手领衣身；绘制、双手反解与武器握点共用这组定位。
-  if (playerAppearance.value === 'sister') {
+  if (simulationAppearance() === 'sister') {
     if (dir === 'left') return { near: { x: -.55, y: -6.8 }, far: { x: 1.4, y: -6.8 } }
     const width = dir === 'up' ? 5.2 : 5.1
     return { near: { x: dir === 'up' ? -width : width, y: -6.8 }, far: { x: dir === 'up' ? width : -width, y: -6.8 } }
@@ -17,8 +19,8 @@ export function armShoulders(direction: Dir4) {
   const width = dir === 'up' ? ARM_RIG.backShoulder : ARM_RIG.shoulder
   return { near: { x: -px * width, y: ARM_RIG.shoulderY - py * ARM_RIG.shoulder }, far: { x: px * width, y: ARM_RIG.shoulderY + py * ARM_RIG.shoulder } }
 }
-function solveArm(shoulder: { x: number; y: number }, target: { x: number; y: number }, bend: number) {
-  const dx = target.x - shoulder.x, dy = target.y - shoulder.y, a = ARM_RIG.upper, b = ARM_RIG.lower
+function solveArm(shoulder: { x: number; y: number }, target: { x: number; y: number }, bend: number, palmOffset = 0) {
+  const dx = target.x - shoulder.x, dy = target.y - shoulder.y, a = ARM_RIG.upper, b = ARM_RIG.lower + palmOffset
   const distance = Math.max(Math.abs(a - b) + .001, Math.min(a + b - .001, Math.hypot(dx, dy)))
   const alpha = Math.acos(Math.max(-1, Math.min(1, (distance * distance + a * a - b * b) / (2 * a * distance))))
   const upper = Math.atan2(dy, dx) + alpha * bend
@@ -31,7 +33,13 @@ function solveArm(shoulder: { x: number; y: number }, target: { x: number; y: nu
 export function applySupportGrip(pose: PlayerPose, worldAngle: number, grip: WeaponGrip): void {
   const weight = clamp01(grip.weight)
   pose.weaponAngle = undefined; pose.supportWeaponAngle = undefined; pose.supportGripWeight = undefined; pose.gripInFront = undefined
+  pose.weaponHand = undefined
+  pose.supportInFront = undefined; pose.accessoryInFront = undefined
+  pose.palmOffset = undefined
   if (weight <= 0) return
+  pose.weaponHand = grip.weaponHand
+  const palmOffset = Math.max(0, grip.palmOffset ?? 0)
+  pose.palmOffset = palmOffset
   const angle = pose.dir === 'right' ? Math.PI - worldAngle : worldAngle
   const shoulders = armShoulders(pose.dir), bone = pose.bone
   const end = (shoulder: { x: number; y: number }, upper: number, lower: number) => ({
@@ -44,17 +52,18 @@ export function applySupportGrip(pose: PlayerPose, worldAngle: number, grip: Wea
   const far = grip.support ?? { x: near.x + Math.cos(angle) * grip.offset, y: near.y + Math.sin(angle) * grip.offset }
   const blend = (from: { x: number; y: number }, to: { x: number; y: number }, amount: number) => ({ x: from.x + (to.x - from.x) * amount, y: from.y + (to.y - from.y) * amount })
   if (!grip.onlySupport) {
-    const n = solveArm(shoulders.near, blend(originalNear, near, clamp01(grip.mainWeight ?? weight)), grip.nearBend ?? -1)
+    const n = solveArm(shoulders.near, blend(originalNear, near, clamp01(grip.mainWeight ?? weight)), grip.nearBend ?? -1, palmOffset)
     bone.armNearUpper = n.upper; bone.armNearLower = n.lower
   }
   const supportWeight=clamp01(grip.supportWeight??weight)
   if(supportWeight>0){
-    const f = solveArm(shoulders.far, blend(originalFar, far, supportWeight), grip.farBend ?? 1)
+    const f = solveArm(shoulders.far, blend(originalFar, far, supportWeight), grip.farBend ?? 1, palmOffset)
     bone.armFarUpper = f.upper; bone.armFarLower = f.lower
   }
   if (!grip.onlySupport) pose.weaponAngle = grip.weaponAngle===undefined?angle:pose.dir==='right'?Math.PI-grip.weaponAngle:grip.weaponAngle
   pose.supportWeaponAngle = grip.supportWeaponAngle === undefined ? undefined : pose.dir === 'right' ? Math.PI - grip.supportWeaponAngle : grip.supportWeaponAngle
   pose.supportGripWeight = supportWeight
   pose.gripInFront = grip.inFront
+  pose.supportInFront = grip.supportInFront; pose.accessoryInFront = grip.accessoryInFront
   if (grip.inFront !== undefined) pose.weaponInFront = grip.inFront
 }

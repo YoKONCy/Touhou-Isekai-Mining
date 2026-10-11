@@ -10,8 +10,8 @@ const slash=meleeMove({
 })
 /** 三段都是挥砍；前送段只改变动作表现，不切换为矩形戳刺。 */
 export const stats={
-  rarity:2,tier:2,maxStack:1,equipSlot:'weaponA',
-  combat:{penetration:5,critChance:.15},melee:slash,
+  grade:2,maxStack:1,equipSlot:'weaponA',
+  combat:{penetration:.5,critChance:.15},melee:slash,
   meleePattern:{mode:'sequence',moves:[
     {...slash,sweepDirection:-1,aoe:{...slash.aoe!}},
     {...slash,sweepDirection:1,aoe:{...slash.aoe!}},

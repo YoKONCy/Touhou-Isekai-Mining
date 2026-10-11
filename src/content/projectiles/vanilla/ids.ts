@@ -5,3 +5,4 @@
 export { VENOM_STRAIGHT_ID } from './venomStraight'
 export { VENOM_RING_ID } from './venomRing'
 export { FURRY_WAVE_ID, FURRY_SEED_ID } from './furryBullets'
+export { MAGMA_BALL_ID,WISP_FLAME_ID } from './oldHell'

@@ -1,3 +1,4 @@
+import { simulationReadOnly } from '../simulation/persistence'
 /**
  * 存档服务（应用服务层）
  *
@@ -85,6 +86,7 @@ export class SaveService {
    * 页面隐藏、矿洞升级和死亡均不允许隐式覆盖存档。
    */
   async autosave(): Promise<void> {
+    if(simulationReadOnly())return
     if (!this.profile) return
     const snapshot = structuredClone(this.profile.toJSON())
     this.pendingSave = this.pendingSave.then(() => this.persistSnapshot(snapshot))
@@ -93,6 +95,7 @@ export class SaveService {
 
   /** 剧情已看标志独立落盘，不覆盖死亡后仍需保留的下矿前检查点。 */
   async persistStoryFlag(key: string): Promise<void> {
+    if(simulationReadOnly())return
     const value = this.profile?.flag(key)
     if (value === undefined) return
     this.pendingSave = this.pendingSave.then(async () => {
@@ -127,6 +130,7 @@ export class SaveService {
 
   /** 仅补写身份，保留主档的背包、血量与下矿前检查点。 */
   async persistAppearance(appearance: 'brother' | 'sister'): Promise<void> {
+    if(simulationReadOnly())throw new Error('回放期间不能修改真实存档中的角色选择')
     const profile = this.current()
     const task = this.pendingSave.then(async () => {
       const snapshot = await this.store.loadProfile()
@@ -141,6 +145,7 @@ export class SaveService {
   }
 
   async saveSlot(slot: number): Promise<void> {
+    if(simulationReadOnly())throw new Error('回放期间不能覆盖真实存档')
     if (![1, 2, 3].includes(slot)) throw new Error('无效存档槽')
     await this.pendingSave
     const snapshot = structuredClone(this.current().toJSON())

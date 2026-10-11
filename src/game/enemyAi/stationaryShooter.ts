@@ -1,3 +1,4 @@
+import { randomCombat } from '../../core/simulation/random'
 import type { EnemyBrain } from './types'
 
 /** 固定根系的连续吐射，每一发请求都由房间重新瞄准玩家当前位置。 */
@@ -23,5 +24,5 @@ export const stationaryShooterBrain:EnemyBrain={id:'stationary_shooter',think(ho
     while(host.burstT<=0&&host.volleyLeft>0){host.pendingShots.push({kind:'straight',projectileId:c.projectileId});host.volleyLeft--;host.burstT+=c.burstGap}
     return
   }
-  if(host.straightCd<=0){host.straightCd=c.interval;host.volleyLeft=Math.random()<c.burstChance?c.burstCount:1;host.windup='straight';host.windupT=c.windup}
+  if(host.straightCd<=0){host.straightCd=c.interval;host.volleyLeft=randomCombat()<c.burstChance?c.burstCount:1;host.windup='straight';host.windupT=c.windup}
 }}

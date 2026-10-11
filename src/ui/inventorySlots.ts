@@ -6,9 +6,11 @@ import { getItemDef } from '../shared/itemDefs'
 import { ENABLED_SLOTS, EQUIP_SLOT_META, slotAccepts } from '../shared/equipment'
 import { QUICK_ACCEPT_KINDS } from '../shared/quickSlots'
 
-export type ItemSlotKey = `inv:${number}` | `storage:${number}` | `quick:${number}` | `eq:${EquipSlot}`
+export type ItemSlotKey = `inv:${number}` | `storage:${number}` | `quick:${number}` | `eq:${EquipSlot}` | 'trash:0'
 export type ItemAction = 'use' | 'equip' | 'unequip'
 export interface InventorySlotAccess {
+  capacity(key:ItemSlotKey,id:ItemId):number
+  interaction?(holding:boolean):void
   keys(includeEquipment?:boolean):ItemSlotKey[]
   get(key:ItemSlotKey):Slot
   set(key:ItemSlotKey,stack:Slot):boolean
@@ -21,19 +23,20 @@ export interface InventorySlotAccess {
 }
 
 /** 背包、快捷槽、装备和仓库共用数据适配器，所有数量直接写回档案唯一真值。 */
-export function inventorySlots(profile:CharacterProfile,actions:ModuleActions,withStorage=false):InventorySlotAccess {
+export function inventorySlots(profile:CharacterProfile,actions:ModuleActions,withStorage=false,withTrash=false):InventorySlotAccess {
   const ordinary:ItemSlotKey[]=[
     ...profile.inventory.slots.map((_,i)=>`inv:${i}` as ItemSlotKey),
     ...profile.quickSlots.slots.map((_,i)=>`quick:${i}` as ItemSlotKey),
     ...(withStorage?profile.storage.slots.map((_,i)=>`storage:${i}` as ItemSlotKey):[])
   ]
-  const all=[...ordinary,...EQUIP_SLOT_META.filter(m=>ENABLED_SLOTS.has(m.slot)).map(m=>`eq:${m.slot}` as ItemSlotKey)],valid=new Set(all)
+  // 垃圾桶仅参与手动拿放与事务快照，不成为快移、归并或空格归还的自动目标。
+  const all:ItemSlotKey[]=[...ordinary,...EQUIP_SLOT_META.filter(m=>ENABLED_SLOTS.has(m.slot)).map(m=>`eq:${m.slot}` as ItemSlotKey),...(withTrash?['trash:0' as const]:[])],valid=new Set(all)
   const keys=(includeEquipment=false)=>includeEquipment?all:ordinary
   const parts=(key:ItemSlotKey)=>key.split(':') as [string,string]
-  const array=(kind:string)=>kind==='inv'?profile.inventory.slots:kind==='storage'&&withStorage?profile.storage.slots:kind==='quick'?profile.quickSlots.slots:null
+  const array=(kind:string)=>kind==='inv'?profile.inventory.slots:kind==='storage'&&withStorage?profile.storage.slots:kind==='quick'?profile.quickSlots.slots:kind==='trash'&&withTrash?profile.trash.slots:null
   const get=(key:ItemSlotKey):Slot=>{
     const [kind,index]=parts(key)
-    if(kind==='eq'){const id=profile.equipment.get(index as EquipSlot);return id?{id,qty:1}:null}
+    if(kind==='eq')return profile.equipment.getStack(index as EquipSlot)
     return array(kind)?.[Number(index)]??null
   }
   const accepts=(key:ItemSlotKey,id:ItemId)=>{
@@ -41,10 +44,16 @@ export function inventorySlots(profile:CharacterProfile,actions:ModuleActions,wi
     const [kind,index]=parts(key)
     return kind==='eq'?ENABLED_SLOTS.has(index as EquipSlot)&&slotAccepts(index as EquipSlot,id):kind!=='quick'||QUICK_ACCEPT_KINDS.has(getItemDef(id).kind)
   }
+  const capacity=(key:ItemSlotKey,id:ItemId)=>key.startsWith('eq:')?1:key.startsWith('inv:')?profile.inventory.stackLimit(id):key.startsWith('storage:')?profile.storage.stackLimit(id):getItemDef(id).maxStack
   const set=(key:ItemSlotKey,stack:Slot)=>{
-    if(!valid.has(key)||stack&&(!accepts(key,stack.id)||!Number.isInteger(stack.qty)||stack.qty<1||stack.qty>getItemDef(stack.id).maxStack))return false
+    if(actions.actionsLocked)return false
+    if(!valid.has(key)||stack&&(!accepts(key,stack.id)||!Number.isInteger(stack.qty)||stack.qty<1||stack.qty>capacity(key,stack.id)))return false
     const [kind,index]=parts(key)
-    if(kind==='eq')return (!stack||stack.qty===1)&&actions.setEquipment(index as EquipSlot,stack?.id??null)
+    if(kind==='eq'){
+      if(stack&&stack.qty!==1||!actions.setEquipment(index as EquipSlot,stack?.id??null))return false
+      if(stack)profile.equipment.setDurability(index as EquipSlot,stack.durability)
+      return true
+    }
     const slots=array(kind);if(!slots)return false
     slots[Number(index)]=stack?{...stack}:null
     return true
@@ -57,6 +66,7 @@ export function inventorySlots(profile:CharacterProfile,actions:ModuleActions,wi
     return [...equipment,...all.filter(k=>k.startsWith('quick:')&&accepts(k,id))]
   }
   const action=(key:ItemSlotKey):ItemAction|null=>{
+    if(key==='trash:0')return null
     const stack=get(key);if(!stack)return null
     if(key.startsWith('eq:'))return key!=='eq:pick'?'unequip':null
     const d=getItemDef(stack.id)
@@ -79,5 +89,5 @@ export function inventorySlots(profile:CharacterProfile,actions:ModuleActions,wi
     set(key,old);profile.inventory.slots[index]=null
     return true
   }
-  return {keys,get,set,accepts,canTake:key=>valid.has(key)&&key!=='eq:pick',targets,action,perform,drop:stack=>!withStorage&&actions.dropHeld(stack)}
+  return {interaction:holding=>{profile.inventory.acceptingItems=!holding},capacity,keys,get,set,accepts,canTake:key=>valid.has(key)&&key!=='eq:pick',targets,action,perform,drop:stack=>!withStorage&&actions.dropHeld(stack)}
 }

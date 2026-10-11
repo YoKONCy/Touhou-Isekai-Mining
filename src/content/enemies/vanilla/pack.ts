@@ -12,8 +12,9 @@ import tricolorSlime from './tricolorSlime'
 import kedama from './kedama'
 import guardianSlime from './guardianSlime'
 import overloadedKedama from './overloadedKedama'
+import { oldHellEnemies } from './oldHell'
 
 /** 注册全部官方敌人（由 content/vanillaPack 在启动期调用一次） */
 export function registerVanillaEnemies(): void {
-  for (const def of [slimeBlue, venomGreen, slimeRed, grimm, caveBat, tricolorSlime, venomPlant, kedama, guardianSlime, overloadedKedama]) enemies.register(def)
+  for (const def of [slimeBlue, venomGreen, slimeRed, grimm, caveBat, tricolorSlime, venomPlant, kedama, guardianSlime, overloadedKedama, ...oldHellEnemies]) enemies.register(def)
 }

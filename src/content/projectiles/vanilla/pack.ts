@@ -7,10 +7,11 @@ import venomPlantBullet from './venomPlantBullet'
 import venomRing from './venomRing'
 import { furryWave, furrySeed } from './furryBullets'
 import { bossFurryBullets } from './kedamaBossBullets'
+import { magmaBall,wispFlame } from './oldHell'
 
 /** 注册全部官方弹种（由 content/vanillaPack 在启动期调用一次） */
 export function registerVanillaProjectiles(): void {
-  for (const def of [venomStraight, venomRing, venomPlantBullet, furryWave, furrySeed, ...bossFurryBullets]) {
+  for (const def of [venomStraight, venomRing, venomPlantBullet, furryWave, furrySeed, ...bossFurryBullets,magmaBall,wispFlame]) {
     projectiles.register(def)
   }
 }

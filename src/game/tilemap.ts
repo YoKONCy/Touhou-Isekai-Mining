@@ -1,8 +1,12 @@
+import { nextEntityId } from '../core/simulation/events'
+import { randomGeneration } from '../core/simulation/random'
 import { CONFIG } from './config'
 import { drawOreBase } from './art/oreVein'
-import { minerals, rollMineralId, mineralAvailableOnFloor } from '../content/minerals/registry'
-import { MINERAL_COPPER_ID, MINERAL_SALT_ROCK_ID } from '../content/minerals/vanilla/ids'
+import { canvasViewport,visible } from '../core/rendering/Viewport'
+import { minerals, rollMineralId, mineralAvailableOnFloor, rewardRareMineralIds } from '../content/minerals/registry'
+import { MINERAL_COPPER_ID } from '../content/minerals/vanilla/ids'
 import type { MineralId } from '../content/minerals/types'
+import { weightedPick } from '../content/core/Registry'
 
 /**
  * 矿洞瓦片地图
@@ -19,6 +23,9 @@ export const TILE_ORE = 2
 export const TILE_DOOR_CLOSED = 3
 /** 已解封的门（可通行，走上去切换房间） */
 export const TILE_DOOR_OPEN = 4
+/** 岩浆与深坑阻挡行走，但不会像岩壁一样挡住飞行弹体。 */
+export const TILE_LAVA = 5
+export const TILE_PIT = 6
 
 /** 门在瓦片网格上的格位（由房间的门朝向推导） */
 export interface DoorSlot {
@@ -28,6 +35,9 @@ export interface DoorSlot {
 
 /** 房间瓦片地图生成参数 */
 export interface TileMapOptions {
+  mineralIds?: readonly MineralId[]
+  lavaBankMinerals?: {roomChance:number;count:readonly [number,number]}
+  terrain?: import('./cave/dungeon/types').RoomTerrain
   /** 进入房间时的出生格（周围留空不刷怪/矿） */
   spawnCol: number
   spawnRow: number
@@ -47,6 +57,7 @@ export interface TileMapOptions {
 export type RockMat = 0 | 1 | 2
 
 export interface OreTile {
+  entityId?: string
   col: number
   row: number
   offsetX: number
@@ -89,6 +100,9 @@ function hash2(a: number, b: number): number {
 export class TileMap {
   readonly cols: number
   readonly rows: number
+  /** 寻路缓存只在通行拓扑变化时失效，敲击闪白和环境动画不触发重建。 */
+  navigationRevision = 0
+  private readonly doorCells = new Set<number>()
   readonly tile: number
   /** 活动区边界（墙内缘） */
   readonly bounds: { left: number; top: number; right: number; bottom: number }
@@ -101,31 +115,40 @@ export class TileMap {
    * 物理画布按 SS 倍建，上下文恒挂 SS 缩放，绘制坐标全部沿用世界单位。
    */
   private static readonly SS = 2
-  private oreLayer: HTMLCanvasElement
-  private octx: CanvasRenderingContext2D
+  private oreChunks=new Map<number,{image:HTMLCanvasElement;ctx:CanvasRenderingContext2D;x:number;y:number;width:number;height:number}>()
+  private dirtyChunks=new Set<number>()
+  private visualRevision=0
+  get oreRevision():number{return this.visualRevision}
+  private oreDirty = true
+  private oreAllDirty=true
 
   constructor(opts: TileMapOptions) {
     const { tile, roomCols, roomRows, wallThickness } = CONFIG
-    this.cols = roomCols
-    this.rows = roomRows
+    this.cols = opts.terrain?.cols ?? roomCols
+    this.rows = opts.terrain?.rows ?? roomRows
     this.tile = tile
     this.bounds = {
       left: wallThickness * tile,
       top: wallThickness * tile,
-      right: (roomCols - wallThickness) * tile,
-      bottom: (roomRows - wallThickness) * tile
+      right: (this.cols - wallThickness) * tile,
+      bottom: (this.rows - wallThickness) * tile
     }
 
     this.tiles = new Uint8Array(this.cols * this.rows)
-    const ss = TileMap.SS
-    this.oreLayer = document.createElement('canvas')
-    this.oreLayer.width = this.cols * tile * ss
-    this.oreLayer.height = this.rows * tile * ss
-    this.octx = this.oreLayer.getContext('2d')!
-    // 恒挂超采样缩放：后续全部按世界坐标绘制，敲碎清格也自动覆盖物理 2x 区域
-    this.octx.setTransform(ss, 0, 0, ss, 0, 0)
 
     this.generate(opts)
+  }
+
+  captureSimulation(): { tiles: number[]; ores: OreTile[] } {
+    return { tiles: Array.from(this.tiles), ores: [...this.ores.values()].map(ore => ({ ...ore })) }
+  }
+  restoreSimulation(state: { tiles: number[]; ores: OreTile[] }): void {
+    if (state.tiles.length !== this.cols * this.rows) throw new Error('地图快照尺寸不兼容')
+    this.tiles = Uint8Array.from(state.tiles)
+    this.navigationRevision++
+    this.ores = new Map(state.ores.map(ore => [this.key(ore.col, ore.row), { ...ore }]))
+    this.releaseRenderResources();this.visualRevision++
+    this.oreDirty = true
   }
 
   // —— 基础查询 ——
@@ -148,6 +171,12 @@ export class TileMap {
     return v !== TILE_FLOOR && v !== TILE_DOOR_OPEN
   }
 
+  /** 地形通行与弹幕遮挡分离，岩浆上方仍可以射击。 */
+  blocksProjectiles(col:number,row:number,ignoreOre=false):boolean {
+    const tile=this.tileAt(col,row)
+    return tile!==TILE_FLOOR&&tile!==TILE_DOOR_OPEN&&tile!==TILE_LAVA&&tile!==TILE_PIT&&!(ignoreOre&&tile===TILE_ORE)
+  }
+
   /** 读取瓦片类型（门触发判定用） */
   tileAt(col: number, row: number): number {
     if (col < 0 || row < 0 || col >= this.cols || row >= this.rows) return TILE_WALL
@@ -157,16 +186,18 @@ export class TileMap {
   /** 解封一扇门：封印门 → 可通行 */
   openDoor(col: number, row: number): boolean {
     const k = this.key(col, row)
-    if (this.tiles[k] !== TILE_DOOR_CLOSED) return false
+    if (!this.doorCells.has(k) || this.tiles[k] === TILE_DOOR_OPEN) return false
     this.tiles[k] = TILE_DOOR_OPEN
+    this.navigationRevision++
     return true
   }
 
   /** 关门（剧情锁门用；仅开启中的闸门可关，返回是否发生变化） */
   closeDoor(col: number, row: number): boolean {
     const k = this.key(col, row)
-    if (this.tiles[k] !== TILE_DOOR_OPEN) return false
+    if (!this.doorCells.has(k) || this.tiles[k] === TILE_DOOR_CLOSED) return false
     this.tiles[k] = TILE_DOOR_CLOSED
+    this.navigationRevision++
     return true
   }
 
@@ -180,6 +211,7 @@ export class TileMap {
   }
   /** 剧情预留区域或落石封路：仅改内墙范围，不触碰门，不产生采矿奖励。 */
   setStoryArea(left: number, top: number, right: number, bottom: number, solid = false): void {
+    this.navigationRevision++
     const wall = CONFIG.wallThickness
     let changedOre = false
     for (let row = Math.max(wall, top); row <= Math.min(this.rows-wall-1, bottom); row++) {
@@ -191,8 +223,8 @@ export class TileMap {
       }
     }
     if (changedOre) {
-      this.octx.clearRect(0, 0, this.cols*this.tile, this.rows*this.tile)
-      for (const ore of this.ores.values()) this.drawOreTile(ore)
+      this.visualRevision++;this.dirtyChunks.clear();this.oreAllDirty=true
+      this.oreDirty = true
     }
   }
 
@@ -219,8 +251,9 @@ export class TileMap {
   private generate(opts: TileMapOptions): void {
     const { wallThickness, mine } = CONFIG
 
+    if(opts.terrain)this.tiles=Uint8Array.from(opts.terrain.tiles)
     // 四周墙
-    for (let c = 0; c < this.cols; c++) {
+    else for (let c = 0; c < this.cols; c++) {
       for (let r = 0; r < this.rows; r++) {
         if (c < wallThickness || r < wallThickness || c >= this.cols - wallThickness || r >= this.rows - wallThickness) {
           this.tiles[this.key(c, r)] = TILE_WALL
@@ -230,7 +263,13 @@ export class TileMap {
 
     // 门格落在内缘一圈墙中，初始全部封印；门格及四邻禁止刷矿，保证门洞畅通
     const blockedForOre = new Set<number>()
+    if(opts.terrain){
+      for(const k of opts.terrain.reserved)blockedForOre.add(k)
+      // 残屋内与门前留空，避免矿格占住容器、入口和屋内走道。
+      for(const b of opts.terrain.buildings)for(let r=b.row;r<=b.row+b.height;r++)for(let c=b.col;c<b.col+b.width;c++)blockedForOre.add(this.key(c,r))
+    }
     for (const d of opts.doors) {
+      this.doorCells.add(this.key(d.col,d.row))
       this.tiles[this.key(d.col, d.row)] = TILE_DOOR_CLOSED
       for (let dc = -1; dc <= 1; dc++) {
         for (let dr = -1; dr <= 1; dr++) {
@@ -239,13 +278,17 @@ export class TileMap {
       }
     }
 
-    const oreTarget = opts.oreRange[0] + Math.floor(Math.random() * (opts.oreRange[1] - opts.oreRange[0] + 1))
+    const oreTarget = opts.oreRange[0] + Math.floor(randomGeneration() * (opts.oreRange[1] - opts.oreRange[0] + 1))
+    if(oreTarget<=0)return
+    const rare=opts.roomKind==='reward'?rewardRareMineralIds(opts.floor,opts.mineralIds):undefined
+    const replacements=minerals.select(d=>mineralAvailableOnFloor(d,opts.floor)&&(d.spawn.rockReplacementChance??0)>0
+      &&(!opts.mineralIds||opts.mineralIds.includes(d.id))&&(!d.spawn.rooms||d.spawn.rooms.includes(opts.roomKind)))
     let placed = 0
     let guard = 0
     while (placed < oreTarget && guard < 800) {
       guard++
-      const col = wallThickness + Math.floor(Math.random() * (this.cols - wallThickness * 2))
-      const row = wallThickness + Math.floor(Math.random() * (this.rows - wallThickness * 2))
+      const col = wallThickness + Math.floor(randomGeneration() * (this.cols - wallThickness * 2))
+      const row = wallThickness + Math.floor(randomGeneration() * (this.rows - wallThickness * 2))
       // 出生点周围留空，避免开局贴脸
       if (Math.hypot(col - opts.spawnCol, row - opts.spawnRow) < mine.spawnClearTiles) continue
       const k = this.key(col, row)
@@ -253,27 +296,50 @@ export class TileMap {
 
       // 矿种按注册表权重混编（房型/深度门控由 MineralDef.spawn 声明）；
       // 总池为空（所有矿包都没加载）时兜底铜矿，保证生成循环不中断
-      let kind: MineralId = rollMineralId(opts.roomKind, opts.depth, opts.floor) ?? MINERAL_COPPER_ID
+      let kind: MineralId = rollMineralId(opts.roomKind, opts.depth, opts.floor,opts.mineralIds) ?? MINERAL_COPPER_ID
       // 形态：少数直接露矿簇，多数只是普通岩石（敲碎才知道藏没藏矿）
-      const vein: OreTile['vein'] = Math.random() < mine.exposedChance ? 'ore' : 'rock'
-      // 二层起每块岩包独立判定 10% 盐化，先于藏矿判定，避免概率被再次稀释。
-      // 盐石只掉岩盐和一块石料；显矿簇不参与替换，也不设整层保底。
-      const saltRock=minerals.require(MINERAL_SALT_ROCK_ID)
-      const isSaltRock = mineralAvailableOnFloor(saltRock,opts.floor) && vein === 'rock' && Math.random() < (saltRock.spawn.rockReplacementChance??0)
-      if (isSaltRock) kind = MINERAL_SALT_ROCK_ID
-      const hasOre = !isSaltRock && (vein === 'ore' || Math.random() < mine.oreInRockChance)
-      const mineral = minerals.require(kind)
-      // 硬度逐格随机（区间由矿种 Def 声明）
-      const [hpLo, hpHi] = hasOre ? mineral.hp : [80, 100]
-      const maxHp = hpLo + Math.floor(Math.random() * (hpHi - hpLo + 1))
-      // 岩包材质三选一（同房间天然混生；显矿簇不使用该字段）
-      const rockMat = Math.floor(Math.random() * 3) as OreTile['rockMat']
-      this.tiles[k] = TILE_ORE
-      const ore: OreTile = { col, row, offsetX: (Math.random() - .5) * 8, offsetY: (Math.random() - .5) * 8, kind, hp: maxHp, maxHp, flash: 0, vein, hasOre, rockMat }
-      this.ores.set(k, ore)
-      this.drawOreTile(ore)
+      const vein: OreTile['vein'] = randomGeneration() < mine.exposedChance ? 'ore' : 'rock'
+      let replacement=false
+      if(vein==='rock'&&replacements.length){
+        const roll=randomGeneration();let probability=0
+        for(const d of replacements){
+          probability+=(d.spawn.rockReplacementChance??0)*(rare?.has(d.id)?3:1)
+          if(roll<Math.min(1,probability)){kind=d.id;replacement=true;break}
+        }
+      }
+      const hasOre = !replacement && (vein === 'ore' || randomGeneration() < mine.oreInRockChance)
+      this.addNaturalOre(col,row,kind,vein,hasOre,replacement)
       placed++
     }
+    const shore=opts.lavaBankMinerals
+    // 整房低概率摇一次；岸线再长也不会逐格放大中奖率，失败不转移到普通陆地。
+    if(!shore||randomGeneration()>=shore.roomChance)return
+    const shorePool=minerals.select(d=>d.spawn.placement==='lava_bank'&&d.spawn.weight>0&&mineralAvailableOnFloor(d,opts.floor)
+      &&(!opts.mineralIds||opts.mineralIds.includes(d.id))&&(!d.spawn.rooms||d.spawn.rooms.includes(opts.roomKind)))
+    const candidates:Array<{col:number;row:number}>=[]
+    const neighbors=[[1,0],[-1,0],[0,1],[0,-1]] as const
+    for(let row=1;row<this.rows-1;row++)for(let col=1;col<this.cols-1;col++){
+      if(this.tileAt(col,row)!==TILE_FLOOR||blockedForOre.has(this.key(col,row))||Math.hypot(col-opts.spawnCol,row-opts.spawnRow)<mine.spawnClearTiles)continue
+      if(!neighbors.some(([dc,dr])=>this.tileAt(col+dc,row+dr)===TILE_LAVA)||!neighbors.some(([dc,dr])=>this.tileAt(col+dc,row+dr)===TILE_FLOOR))continue
+      candidates.push({col,row})
+    }
+    const count=shore.count[0]+Math.floor(randomGeneration()*(shore.count[1]-shore.count[0]+1)),chosen:Array<{col:number;row:number}>=[]
+    while(chosen.length<count&&candidates.length){
+      const candidate=candidates.splice(Math.floor(randomGeneration()*candidates.length),1)[0]!
+      if(chosen.some(p=>Math.hypot(p.col-candidate.col,p.row-candidate.row)<3))continue
+      const kind=weightedPick(shorePool,d=>d.spawn.weight,randomGeneration)?.id
+      if(!kind)break
+      this.addNaturalOre(candidate.col,candidate.row,kind,'ore',true);chosen.push(candidate)
+    }
+  }
+
+  /** 普通矿与岸矿共用实体、硬度、碰撞和续战保存，不另建一套可挖对象。 */
+  private addNaturalOre(col:number,row:number,kind:MineralId,vein:OreTile['vein'],hasOre:boolean,specialRock=false):void {
+    const [lo,hi]=hasOre||specialRock?minerals.require(kind).hp:[80,100]
+    const maxHp=lo+Math.floor(randomGeneration()*(hi-lo+1))
+    const ore:OreTile={entityId:nextEntityId('ore'),col,row,kind,vein,hasOre,hp:maxHp,maxHp,flash:0,
+      offsetX:(randomGeneration()-.5)*8,offsetY:(randomGeneration()-.5)*8,rockMat:Math.floor(randomGeneration()*3) as RockMat}
+    const k=this.key(col,row);this.tiles[k]=TILE_ORE;this.ores.set(k,ore);this.drawOreTile(ore)
   }
 
   /**
@@ -281,7 +347,7 @@ export class TileMap {
    * 晶簇不在这里画——运行时由 art/oreVein.drawOreCrystals 绘制并参与 y-sort。
    */
   private drawOreTile(ore: OreTile): void {
-    drawOreBase(this.octx, ore)
+    this.oreDirty = true
   }
 
   // —— 玩法交互 ——
@@ -309,9 +375,11 @@ export class TileMap {
     // 崩落：数据层变地面，离屏层只清除这一格
     this.tiles[k] = TILE_FLOOR
     this.ores.delete(k)
+    this.navigationRevision++
+    this.visualRevision++
+    this.markOreChunks(ore)
     // 偏移可能跨格，重烘焙稀疏矿层避免擦掉相邻矿体或留下边缘残影。
-    this.octx.clearRect(0, 0, this.cols * this.tile, this.rows * this.tile)
-    for (const remaining of this.ores.values()) this.drawOreTile(remaining)
+    this.oreDirty = true
     return { broken: true, kind: ore.kind, ratio: 0, vein: ore.vein, hasOre: ore.hasOre }
   }
 
@@ -324,15 +392,50 @@ export class TileMap {
 
   // —— 渲染 ——
 
-  /** 静态岩基层（2x 物理画布缩回世界尺寸绘制，zoom 放大后仍锐利） */
+  get rasterBytes():number {let bytes=0;for(const chunk of this.oreChunks.values())bytes+=chunk.image.width*chunk.image.height*4;return bytes}
+  releaseRenderResources():void {for(const chunk of this.oreChunks.values())chunk.image.width=chunk.image.height=1;this.oreChunks.clear();this.dirtyChunks.clear();this.oreDirty=this.oreAllDirty=true}
+  private markOreChunks(ore:OreTile):void {
+    const size=this.tile*4,cols=Math.ceil(this.cols/4)
+    const left=ore.col*this.tile+ore.offsetX-this.tile,right=(ore.col+1)*this.tile+ore.offsetX+this.tile
+    const top=ore.row*this.tile+ore.offsetY-this.tile,bottom=(ore.row+1)*this.tile+ore.offsetY+this.tile
+    for(let row=Math.max(0,Math.floor(top/size));row<=Math.min(Math.ceil(this.rows/4)-1,Math.floor(bottom/size));row++)for(let col=Math.max(0,Math.floor(left/size));col<=Math.min(cols-1,Math.floor(right/size));col++)this.dirtyChunks.add(row*cols+col)
+  }
+  private bakeOreChunks():void {
+    const size=this.tile*4,cols=Math.ceil(this.cols/4),groups=new Map<number,OreTile[]>()
+    for(const ore of this.ores.values()){
+      const left=ore.col*this.tile+ore.offsetX-this.tile,right=(ore.col+1)*this.tile+ore.offsetX+this.tile,top=ore.row*this.tile+ore.offsetY-this.tile,bottom=(ore.row+1)*this.tile+ore.offsetY+this.tile
+      for(let row=Math.max(0,Math.floor(top/size));row<=Math.min(Math.ceil(this.rows/4)-1,Math.floor(bottom/size));row++)for(let col=Math.max(0,Math.floor(left/size));col<=Math.min(cols-1,Math.floor(right/size));col++){
+        const key=row*cols+col;let group=groups.get(key);if(!group){group=[];groups.set(key,group)}group.push(ore)
+      }
+    }
+    for(const [key,chunk] of this.oreChunks)if(!groups.has(key)){chunk.image.width=chunk.image.height=1;this.oreChunks.delete(key)}
+    for(const [key,ores] of groups){
+      let chunk=this.oreChunks.get(key)
+      if(chunk&&!this.oreAllDirty&&!this.dirtyChunks.has(key))continue
+      if(!chunk){
+        const x=key%cols*size,y=Math.floor(key/cols)*size,width=Math.min(size,this.cols*this.tile-x),height=Math.min(size,this.rows*this.tile-y),image=document.createElement('canvas')
+        image.width=width*TileMap.SS;image.height=height*TileMap.SS
+        chunk={image,ctx:image.getContext('2d')!,x,y,width,height};this.oreChunks.set(key,chunk)
+      }
+      chunk.ctx.setTransform(TileMap.SS,0,0,TileMap.SS,-chunk.x*TileMap.SS,-chunk.y*TileMap.SS)
+      chunk.ctx.clearRect(chunk.x,chunk.y,chunk.width,chunk.height)
+      for(const ore of ores)drawOreBase(chunk.ctx,ore)
+    }
+    this.dirtyChunks.clear();this.oreDirty=this.oreAllDirty=false
+  }
+  /** 稀疏矿层分块烘焙，敲碎只更新受影响块，屏外块不提交绘制。 */
   renderOreLayer(ctx: CanvasRenderingContext2D): void {
-    ctx.drawImage(this.oreLayer, 0, 0, this.cols * this.tile, this.rows * this.tile)
+    if(this.oreDirty)this.bakeOreChunks()
+    const view=canvasViewport(ctx)
+    for(const chunk of this.oreChunks.values())if(chunk.x+chunk.width>=view.left&&chunk.x<=view.right&&chunk.y+chunk.height>=view.top&&chunk.y<=view.bottom)ctx.drawImage(chunk.image,chunk.x,chunk.y,chunk.width,chunk.height)
   }
 
   /** 实时裂纹 + 敲击闪白（画在实体之下） */
   renderOreFx(ctx: CanvasRenderingContext2D): void {
     const t = this.tile
+    const view=canvasViewport(ctx)
     for (const ore of this.ores.values()) {
+      if(!visible(view,(ore.col+.5)*t+ore.offsetX,(ore.row+.5)*t+ore.offsetY,t*1.5))continue
       // 金属矿主体与反馈在排序层一起绘制，避免矩形白块露出轮廓。
       const form=minerals.require(ore.kind).visual.form
       if(ore.vein==='ore'&&(form==='copper'||form==='iron'||form==='gold'||form==='metal'))continue

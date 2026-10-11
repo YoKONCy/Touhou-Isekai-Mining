@@ -3,8 +3,7 @@ import type { ItemDef } from '../../../types'
 
 /** 独立配置，不继承其他镐的可变数值；时间为秒，完整角度为度。 */
 export const stats = {
-  rarity: 1,
-  tier: 2,
+  grade: 1,
   maxStack: 1,
   equipSlot: 'pick',
   miningPower: 2,

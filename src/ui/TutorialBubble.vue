@@ -9,6 +9,7 @@ import { computed } from 'vue'
 import { tutorial } from '../game/dialogue/tutorial'
 import { t } from '../i18n'
 import KeyCap from './KeyCap.vue'
+import { touchControls } from '../browser/display'
 import type { ActionId } from '../core/keymap'
 
 type Seg = { kind: 'text'; value: string } | { kind: 'key'; value: ActionId }
@@ -29,6 +30,8 @@ function parseTokens(s: string): Seg[] {
 
 const segments = computed<Seg[]>(() => {
   const c = tutorial.current.value
+  if(touchControls.value&&c?.key==='story.tut.move')return [{kind:'text',value:t('ui.mobile.tutorial_move')}]
+  if(touchControls.value&&c?.key==='story.tut.dodge')return [{kind:'text',value:t('ui.mobile.tutorial_dodge')}]
   return c ? parseTokens(t(c.key, c.params as Record<string, string> | undefined)) : []
 })
 </script>
@@ -43,7 +46,7 @@ const segments = computed<Seg[]>(() => {
           <template v-else>{{ seg.value }}</template>
         </template>
       </span>
-      <span v-if="tutorial.current.value.modal" class="tut-confirm">{{ t('ui.tutorial.confirm') }}</span>
+      <span v-if="tutorial.current.value.modal" class="tut-confirm">{{ t(touchControls?'ui.mobile.continue':'ui.tutorial.confirm') }}</span>
     </div>
   </Transition>
 </template>

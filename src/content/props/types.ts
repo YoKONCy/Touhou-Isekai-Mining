@@ -36,7 +36,7 @@ export interface PropLayoutEntry {
   radius: number
   /**
    * 大型设施标记（3~4 格）：进入"大件组"统一摇号——
-   * 每房至多一件，墙边为主、少量中置；chance/midChance 在 CONFIG.art.largeProps。
+   * 默认每房至多一件，搜索密度可增加搜索设施；chance/midChance 在 CONFIG.art.largeProps。
    */
   large?: boolean
 }
@@ -55,7 +55,9 @@ export interface PropDef {
   /** 自然摆放规则（缺省=不进房间布局表，只能由事件生成） */
   layout?: PropLayoutEntry
   /** 外观绘制（原点=脚底锚点；官方复用引擎程序化绘制，MOD 可自画） */
-  render: (ctx: CanvasRenderingContext2D, p: Prop) => void
+  render: (ctx: CanvasRenderingContext2D, p: Prop,time?:number) => void
   /** 自由标签（筛选/事件条件用，如 ['rock','cover']） */
   tags?: string[]
+  /** 可翻找摆件：列×行，小型2×3，大型3×4，封存铁柜4×4。 */
+  search?: { cols:2|3|4;rows:3|4;table:string;profile?:import('../search/types').SearchProfile;fields?:import('../search/types').SearchFields }
 }

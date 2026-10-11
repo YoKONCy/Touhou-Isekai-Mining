@@ -1,5 +1,4 @@
 import atlasLayout from '../../../public/scenes/mine/atlas.json'
-import { drawCollectibleHighlight } from './collectibleHighlight'
 
 export type MineSprite = keyof typeof atlasLayout.parts
 let atlas: HTMLImageElement | undefined
@@ -47,8 +46,7 @@ export function drawMineSprite(g: CanvasRenderingContext2D, name: MineSprite, x:
     }
     g.drawImage(stamp, x, y, width, height)
   } else g.drawImage(atlas, sx, sy, sw, sh, x, y, width, height)
-  if (collectible) drawCollectibleHighlight(g, name, x, y, width, height,
-    ctx => ctx.drawImage(atlas!, sx, sy, sw, sh, 0, 0, width, height))
+  // 采集提示由公共实体绘制入口提供，图集切片不再决定是否发光。
   g.restore(); return true
 }
 

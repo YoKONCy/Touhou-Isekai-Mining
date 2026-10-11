@@ -7,6 +7,7 @@ import { grimmSound, grimmSpellSplit } from '../content/enemies/vanilla/grimmAud
 import { bladeErasesProjectile } from './weaponProjectileSweep'
 import { damageLabel } from '../shared/combat'
 import { sweepProjectileObstacles, type BulletBlocker } from './projectileObstacles'
+import { segmentCircleEntry } from './CombatSpatial'
 
 export type BossHazard = {
   kind: 'mist'|'bolt'|'seal'|'laser'|'slash'|'smoke'|'oath'|'rift'|'shardSeed'
@@ -16,12 +17,21 @@ export type BossHazard = {
   returning?:boolean; bend?:number; dark?:boolean; fixed?:boolean
   reach?:number; activeDuration?:number
   split?:boolean; targetX?:number; targetY?:number
+  targetId?:string
   removed?:boolean
+  hitPlayers?:string[]
+  flightAge?:number
 }
 const flyingHazard = (h: BossHazard) => h.kind === 'mist' || h.kind === 'bolt' || h.kind === 'oath' || h.kind === 'shardSeed'
 /** 飞行弹以碰撞结束生命周期，返流 duration 只控制轨迹周期；定时法阵、激光仍按时结束。 */
 export class BossAttacks {
   hazards: BossHazard[]=[]
+  private slowRemaining=0
+  private slowMultiplier=1
+  slowBullets(duration:number,multiplier:number):void {
+    this.slowMultiplier=this.slowRemaining>0?Math.min(this.slowMultiplier,multiplier):multiplier
+    this.slowRemaining=Math.max(this.slowRemaining,duration)
+  }
   /** 每根 hazard 私有的渐变缓存：渐变在创建时凝固于当前变换，固定不动的法阵柱可在存活期跨帧复用，
    *  动态透明度改由 globalAlpha 控制，避免 16 柱齐射时每帧新建上百个渐变对象。 */
   private gradCache=new WeakMap<BossHazard,{ctx:unknown,map:Map<string,CanvasGradient>}>()
@@ -35,15 +45,25 @@ export class BossAttacks {
   add(kind:BossHazard['kind'],x:number,y:number,options:Partial<BossHazard>={}):void {
     this.hazards.push({kind,x,y,ox:x,oy:y,age:0,delay:0,duration:1,rx:12,ry:12,angle:0,speed:0,hit:false,fired:false,phase:0,...options})
   }
-  clear():void {this.hazards=[]}
+  clear():void {this.hazards=[];this.slowRemaining=0;this.slowMultiplier=1}
   clearBullets(x:number,y:number,r:number):void {
     this.hazards=this.hazards.filter(h=>!(h.kind==='mist'||h.kind==='bolt'||h.kind==='oath'||h.kind==='shardSeed')||Math.hypot(h.x-x,h.y-y)>r)
   }
   update(dt:number,p:Player,map:TileMap,engine:EngineContext,fx:FxLayer,blockers:readonly BulletBlocker[]=[]):void {
+    this.updatePlayers(dt,[p],map,engine,fx,blockers)
+  }
+  updatePlayers(dt:number,players:readonly Player[],map:TileMap,engine:EngineContext,fx:FxLayer,blockers:readonly BulletBlocker[]=[]):void {
+    const anchor=players.find(p=>p.alive)??players[0]
+    if(!anchor)return
+    const slowedTime=Math.min(dt,this.slowRemaining)
+    const speedMultiplier=dt>0?1-(1-this.slowMultiplier)*slowedTime/dt:1
+    this.slowRemaining=Math.max(0,this.slowRemaining-dt)
     for(const h of this.hazards){
       const before=h.age;h.age+=dt
       if(h.age<h.delay)continue
-      const t=h.age-h.delay
+      const movementDt=Math.max(0,h.age-h.delay-Math.max(0,before-h.delay))*speedMultiplier
+      if(flyingHazard(h))h.flightAge=(h.flightAge??Math.max(0,before-h.delay))+movementDt
+      const t=flyingHazard(h)?h.flightAge!:h.age-h.delay
       // 跨过激活时刻也结算一次，避免低帧率漏掉短激光。
       if(h.removed||!flyingHazard(h)&&before>h.delay+h.duration)continue
       const px=h.x,py=h.y
@@ -78,24 +98,39 @@ export class BossAttacks {
         const a=h.angle+(h.bend??0)*Math.sin(Math.PI*u)
         h.x=h.ox+Math.cos(a)*distance;h.y=h.oy+Math.sin(a)*distance
       }else if(h.kind==='bolt'){
-        if(!h.fixed&&!p.untargetable&&t<.16){const aim=Math.atan2(p.y-h.y,p.x-h.x);const diff=Math.atan2(Math.sin(aim-h.angle),Math.cos(aim-h.angle));h.angle+=Math.max(-.6*dt,Math.min(.6*dt,diff))}
-        h.x+=Math.cos(h.angle)*h.speed*dt;h.y+=Math.sin(h.angle)*h.speed*dt
+        let target:Player|undefined,nearest:Player|undefined,best=Infinity
+        for(const player of players)if(player.alive&&!player.untargetable){
+          if(player.entityId===h.targetId)target=player
+          const d=(player.x-h.x)**2+(player.y-h.y)**2;if(d<best){best=d;nearest=player}
+        }
+        target??=nearest
+        if(target)h.targetId=target.entityId
+        if(!h.fixed&&target&&t<.16){const aim=Math.atan2(target.y-h.y,target.x-h.x);const diff=Math.atan2(Math.sin(aim-h.angle),Math.cos(aim-h.angle));h.angle+=Math.max(-.6*movementDt,Math.min(.6*movementDt,diff))}
+        h.x+=Math.cos(h.angle)*h.speed*movementDt;h.y+=Math.sin(h.angle)*h.speed*movementDt
       }
       if (h.removed) continue
+      let wallHit=false
       if (flyingHazard(h)) {
         const wall = sweepProjectileObstacles(map, blockers, px, py, h.x, h.y, h.rx)
-        if (wall) { h.x = wall.x; h.y = wall.y; h.removed = true; continue }
+        if (wall) { h.x = wall.x; h.y = wall.y; wallHit=true }
       }
-      if ((h.kind==='mist'||h.kind==='bolt'||h.kind==='oath'||h.kind==='shardSeed') && p.getProjectileErasure().length
-        && bladeErasesProjectile(p.getProjectileErasure(),h.x,h.y,h.rx,px,py)) {
+      if (flyingHazard(h) && players.some(p=>p.alive&&p.getProjectileErasure().length
+        && bladeErasesProjectile(p.getProjectileErasure(),h.x,h.y,h.rx,px,py))) {
         h.removed=true;fx.chips(h.x,h.y,'#dec9c0',4,70);continue
       }
+      if(flyingHazard(h)){
+        let target:Player|null=null,best=Infinity
+        for(const player of players){
+          if(!player.alive||player.isInvincible||player.debugGod||h.hitPlayers?.includes(player.entityId))continue
+          const t=segmentCircleEntry(px,py,h.x,h.y,player.x,player.y,h.rx+player.hitR)
+          if(t!==null&&t<best){target=player;best=t}
+        }
+        if(target)this.hitPlayer(h,target,engine,fx)
+        if(wallHit)h.removed=true
+      }else for(const p of players){
+      if(!p.alive||p.isInvincible||p.debugGod||h.hitPlayers?.includes(p.entityId))continue
       let hit=false
-      if(h.kind==='mist'||h.kind==='bolt'||h.kind==='oath'||h.kind==='shardSeed'){
-        const dx=h.x-px,dy=h.y-py,len=dx*dx+dy*dy
-        const k=len?Math.max(0,Math.min(1,((p.x-px)*dx+(p.y-py)*dy)/len)):0
-        hit=Math.hypot(p.x-px-k*dx,p.y-py-k*dy)<=h.rx+p.hitR
-      }else if(h.kind==='seal'){
+      if(h.kind==='seal'){
         hit=((p.x-h.x)/(h.rx+p.hitR))**2+((p.y-h.y)/(h.ry+p.hitR))**2<=1
       }else if(h.kind==='laser'||h.kind==='rift'){
         const dx=p.x-h.x,dy=p.y-h.y,c=Math.cos(h.angle),s=Math.sin(h.angle)
@@ -108,27 +143,30 @@ export class BossAttacks {
         const a=Math.atan2(p.y-h.y,p.x-h.x)-h.angle
         hit=Math.hypot(p.x-h.x,p.y-h.y)<=h.rx+p.hitR&&Math.abs(Math.atan2(Math.sin(a),Math.cos(a)))<=1.35
       }
-      if(hit&&!h.hit&&p.alive&&!p.isInvincible&&!p.debugGod){
-        const hp=p.hp;p.takeHit(10,h.angle,h.kind==='slash'?'physical':'magic',flyingHazard(h));h.hit=true
-        fx.damageText(p.x,p.y-20,'-'+damageLabel(hp-p.hp),'#bc9cd9');fx.chips(p.x,p.y,'#a394bc',8,160);engine.shake(.16)
-        if(flyingHazard(h))h.removed=true
+      if(hit)this.hitPlayer(h,p,engine,fx)
       }
       // 分裂放在撞墙、消弹和玩家命中之后，已被消灭的种子不能再生成弹幕。
       if(h.kind==='shardSeed'&&!h.removed&&t>=1.2&&!h.split){
         h.split=true
-        grimmSpellSplit(sfx, Math.max(-.65,Math.min(.65,(h.x-p.x)/400)))
-        const aim=Math.atan2((h.targetY??p.y)-h.y,(h.targetX??p.x)-h.x)
+        grimmSpellSplit(sfx, Math.max(-.65,Math.min(.65,(h.x-anchor.x)/400)))
+        const aim=Math.atan2((h.targetY??anchor.y)-h.y,(h.targetX??anchor.x)-h.x)
         for(let i=-2;i<=2;i++)this.add('oath',h.x,h.y,{angle:aim+i*.19,speed:235,rx:5.5,duration:7,phase:i,dark:i%2===0,bend:i*.035})
         h.removed=true
       }
     }
     this.hazards=this.hazards.filter(h=>!h.removed&&(flyingHazard(h)||h.age<h.delay+h.duration))
   }
+  private hitPlayer(h:BossHazard,p:Player,engine:EngineContext,fx:FxLayer):void {
+    const hp=p.hp;p.takeHit(10,h.angle,h.kind==='slash'?'physical':'magic',flyingHazard(h));h.hit=true
+    ;(h.hitPlayers??=[]).push(p.entityId)
+    fx.damageText(p.x,p.y-20,'-'+damageLabel(hp-p.hp),'#bc9cd9');fx.chips(p.x,p.y,'#a394bc',8,160);engine.shake(.16)
+    if(flyingHazard(h))h.removed=true
+  }
   render(g:CanvasRenderingContext2D,map:TileMap):void {
     g.save()
     try{
       for(const h of this.hazards){
-        const t=h.age-h.delay
+        const t=flyingHazard(h)?h.flightAge??h.age-h.delay:h.age-h.delay
         // 只有激光把提示线压缩到预警最初 0.1 秒；法阵等其他攻击的预警仍覆盖整个 delay。
         const hint=h.kind==='laser'?.1:Infinity,warnEnd=Math.min(h.delay,hint)
         const warning=t<0&&h.age<warnEnd

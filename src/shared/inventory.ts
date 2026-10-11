@@ -9,14 +9,23 @@
 import { getItemDef, type ItemId, type ItemKind } from './itemDefs'
 
 /** 单个格子：空为 null */
-export type Slot = { id: ItemId; qty: number } | null
+export interface ItemStack { id:ItemId;qty:number;durability?:number }
+export type Slot = ItemStack | null
+/** 有耐久的物品逐件保存；缺省为新物品满耐久，读档与容器转移共用归一化。 */
+export function itemStack(id:ItemId,qty:number,durability?:number):ItemStack {
+  const max=getItemDef(id).durability
+  const value=Number.isFinite(durability)?durability!:max
+  return {id,qty,...(max!==undefined?{durability:Math.max(0,Math.min(max,Math.floor(value!)))}:{})}
+}
 
 export class Inventory {
   readonly cols: number
-  readonly rows: number
+  rows: number
   readonly slots: Slot[]
+  /** 光标正在整理物品时，地面掉落先留在世界，避免占用归还所需的空间。 */
+  acceptingItems = true
 
-  constructor(cols = 10, rows = 3) {
+  constructor(cols = 10, rows = 3, public materialStack: number | null = null) {
     this.cols = cols
     this.rows = rows
     this.slots = new Array<Slot>(cols * rows).fill(null)
@@ -26,12 +35,29 @@ export class Inventory {
     return this.slots.length
   }
 
+  /** 背包独立限制堆叠；仓库等容器继续使用物品原始规则。 */
+  stackLimit(id: ItemId): number {
+    const def = getItemDef(id)
+    if (this.materialStack === null) return def.maxStack
+    if (def.kind === 'ammunition') return 200
+    if (def.kind === 'consumable' && (!def.material || def.tags?.includes('dish'))) return Math.min(8, def.maxStack)
+    return Math.min(20, this.materialStack, def.maxStack)
+  }
+
+  /** 扩容不替换格子数组，界面与模拟始终引用同一份物品。 */
+  expand(capacity: number): void {
+    if (!Number.isSafeInteger(capacity) || capacity <= this.size) return
+    while (this.slots.length < capacity) this.slots.push(null)
+    this.rows = Math.ceil(this.size / this.cols)
+  }
+
   /**
    * 加入物品：先堆同种现有格，再找空格。
    * @returns 实际入包数量；0 表示背包已满（调用方应让掉落物弹回）
    */
-  add(id: ItemId, count = 1): number {
-    const cap = getItemDef(id).maxStack
+  add(id: ItemId, count = 1, durability?:number): number {
+    if (!this.acceptingItems) return 0
+    const cap = this.stackLimit(id)
     let remain = count
 
     // 先填充已有堆叠
@@ -49,7 +75,7 @@ export class Inventory {
     for (let i = 0; i < this.slots.length && remain > 0; i++) {
       if (!this.slots[i]) {
         const put = Math.min(cap, remain)
-        this.slots[i] = { id, qty: put }
+        this.slots[i] = itemStack(id,put,durability)
         remain -= put
       }
     }
@@ -58,7 +84,8 @@ export class Inventory {
 
   /** 是否还能至少收入 1 个（掉落磁吸前预判用） */
   canAdd(id: ItemId): boolean {
-    const cap = getItemDef(id).maxStack
+    if (!this.acceptingItems) return false
+    const cap = this.stackLimit(id)
     for (const s of this.slots) {
       if (!s) return true
       if (s.id === id && s.qty < cap) return true
@@ -87,14 +114,14 @@ export class Inventory {
    * 从指定格拆出 n 个成为光标持有堆（立即扣减，拿起即结算模型）。
    * @returns 拆出的堆；槽空或 n<=0 返回 null（不动数据）
    */
-  splitAt(index: number, n: number): { id: ItemId; qty: number } | null {
+  splitAt(index: number, n: number): ItemStack | null {
     const s = this.slots[index]
     if (!s || n <= 0) return null
     const take = Math.min(n, s.qty)
     const id = s.id
     s.qty -= take
     if (s.qty <= 0) this.slots[index] = null
-    return { id, qty: take }
+    return { ...s, id, qty: take }
   }
 
   /**
@@ -102,9 +129,9 @@ export class Inventory {
    * 异类或堆满一律拒绝（交换由 UI 层另行组合 splitAt）。
    * @returns 实际存入数量（0 = 未存入，持有堆原样保留）
    */
-  depositAt(index: number, stack: { id: ItemId; qty: number }, n: number): number {
+  depositAt(index: number, stack: ItemStack, n: number): number {
     if (n <= 0 || stack.qty <= 0) return 0
-    const cap = getItemDef(stack.id).maxStack
+    const cap = this.stackLimit(stack.id)
     const b = this.slots[index]
     if (b) {
       if (b.id !== stack.id || b.qty >= cap) return 0
@@ -113,7 +140,7 @@ export class Inventory {
       return put
     }
     const put = Math.min(n, cap, stack.qty)
-    this.slots[index] = { id: stack.id, qty: put }
+    this.slots[index] = itemStack(stack.id,put,stack.durability)
     return put
   }
 
@@ -127,7 +154,7 @@ export class Inventory {
     const b = this.slots[to]
     if (!a) return
     if (b && b.id === a.id) {
-      const cap = getItemDef(a.id).maxStack
+      const cap = this.stackLimit(a.id)
       const space = cap - b.qty
       if (space <= 0) {
         // 目标堆满：交换
@@ -154,17 +181,28 @@ export class Inventory {
 
   /** 整理：装备工具、符卡、消耗品、素材、杂项；同类按内容ID稳定排序、合堆、空格后置。 */
   organize(): void {
-    const totals = new Map<ItemId, number>()
-    for (const s of this.slots) if (s) totals.set(s.id, (totals.get(s.id) ?? 0) + s.qty)
-    const order: Record<ItemKind, number> = { weapon: 0, armor: 0, pick: 1, spellcard: 2,ammunition:2.5, consumable: 3, material: 4, misc: 5 }
+    const totals = new Map<ItemId, number>(),individual=new Map<ItemId,ItemStack[]>()
+    for (const s of this.slots) if (s) {
+      totals.set(s.id,(totals.get(s.id)??0)+s.qty)
+      if(getItemDef(s.id).durability!==undefined){const list=individual.get(s.id)??[];for(let i=0;i<s.qty;i++)list.push({...s,qty:1});individual.set(s.id,list)}
+    }
+    const order: Record<ItemKind, number> = { weapon: 0, armor: 0, pick: 1, spellcard: 2,ammunition:2.5, consumable: 3, material: 4,collectible:4.5,misc:5 }
     const ids = [...totals.keys()].sort((a, b) => {
       const da = getItemDef(a), db = getItemDef(b)
       const rankA = da.equipSlot && da.kind !== 'spellcard' ? 0 : order[da.kind]
       const rankB = db.equipSlot && db.kind !== 'spellcard' ? 0 : order[db.kind]
       return rankA - rankB || a.localeCompare(b)
     })
-    this.clear()
-    for (const id of ids) this.add(id, totals.get(id)!)
+    const packed:Slot[]=[]
+    for(const id of ids){
+      const singles=individual.get(id)
+      if(singles){packed.push(...singles);continue}
+      let left=totals.get(id)!,cap=this.stackLimit(id)
+      while(left>0){const qty=Math.min(left,cap);packed.push(itemStack(id,qty));left-=qty}
+    }
+    // 不因整理或旧档超限堆叠吞物，空间不足时保留原布局。
+    if(packed.length>this.size)return
+    this.slots.splice(0,this.size,...packed,...new Array<Slot>(this.size-packed.length).fill(null))
   }
 
   /** 找第一个空格（没有返回 -1） */
@@ -173,15 +211,29 @@ export class Inventory {
   }
 
   /** 序列化为紧凑数组（存档用；空槽为 null） */
-  toJSON(): Array<{ id: ItemId; qty: number } | null> {
+  toJSON(): Slot[] {
     return this.slots.map((s) => (s ? { ...s } : null))
   }
 
-  /** 从存档恢复（长度不符时以当前容量为准截断/补空） */
-  fromJSON(data: Array<{ id: ItemId; qty: number } | null>): void {
+  /** 旧档保留容量；超限部分交给迁移接收器，无接收器时扩容保留。 */
+  fromJSON(data: Slot[], overflowTo?: (stack: NonNullable<Slot>) => void): void {
+    this.acceptingItems = true
+    this.expand(data.length)
+    const overflow: NonNullable<Slot>[] = []
     for (let i = 0; i < this.slots.length; i++) {
       const s = data?.[i]
-      this.slots[i] = s ? { ...s } : null
+      if (!s || !Number.isSafeInteger(s.qty) || s.qty < 1) { this.slots[i] = null; continue }
+      const cap = this.stackLimit(s.id), qty = Math.min(cap, s.qty)
+      this.slots[i] = itemStack(s.id,qty,s.durability)
+      if (s.qty > qty) overflow.push(itemStack(s.id,s.qty-qty,s.durability))
+    }
+    for (const stack of overflow) {
+      if (overflowTo) { overflowTo(stack); continue }
+      let left = stack.qty - this.add(stack.id, stack.qty,stack.durability)
+      while (left > 0) {
+        this.expand(this.size + 1)
+        left -= this.add(stack.id, left,stack.durability)
+      }
     }
   }
 

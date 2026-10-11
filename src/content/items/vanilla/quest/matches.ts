@@ -81,7 +81,6 @@ function drawGroundMatches({ ctx, x, y, r }: GroundDropView): void {
 const def: ItemDef = {
   id: MATCHES_ID,
   kind: 'misc',
-  tier: 1,
   color: '#e6d6a2',
   hi: '#d8543a',
   text: '#e8c98a',

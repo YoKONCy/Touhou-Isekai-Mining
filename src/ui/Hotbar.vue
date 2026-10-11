@@ -4,7 +4,7 @@
  * [武器A=1] [武器B=2] [镐=3] ｜ [符卡A=E] [符卡B=R] ｜ [道具1=4] [道具2=5] [道具3=6]
  *
  * 武器/镐格是装备槽的镜像（点击/1/2/3 切换手持）；
- * 符卡槽批次 D 开放（当前灰显锁定）；
+ * 符卡 A/B 分别按 E/R 释放；
  * 道具 3 格从背包自由拖配，单击或按键直接使用。
  * 格子数据直读 CaveModule（唯一真值），tick 驱动重渲。
  */
@@ -16,6 +16,7 @@ import { t, itemName, itemDesc } from '../i18n'
 import { beginPointerDrag, isClickSuppressed, type DragPayload, type DropTarget } from './pointerDnd'
 import ItemIcon from './ItemIcon.vue'
 import { isInventoryMouseOpen } from './inventoryMouse'
+import { touchControls, viewport } from '../browser/display'
 
 const props = defineProps<{ cave: ModuleActions; tick: number; hand: number; mana: number; spellCd: number }>()
 
@@ -38,6 +39,7 @@ const CELLS: BarCell[] = [
   { kind: 'quick', q: 1, key: '5', labelKey: '' },
   { kind: 'quick', q: 2, key: '6', labelKey: '' }
 ]
+const keyHint=(cell:BarCell)=>viewport.lastInput==='gamepad'?(cell.kind==='hand'?'LB/RB':cell.kind==='spell'?cell.eq==='spellA'?'Y':'LT':['↑','→','↓'][cell.q??0]):cell.key
 
 /** 每格当前物品 id（tick 驱动重算） */
 const cellId = (c: BarCell): ItemId | null => {
@@ -47,6 +49,21 @@ const cellId = (c: BarCell): ItemId | null => {
   return null
 }
 const isActive = (c: BarCell, i: number): boolean => c.kind === 'hand' && i === props.hand
+const foodShade = (c: BarCell): number => c.kind === 'quick' && findItemDef(cellId(c) ?? '')?.consume ? Math.min(1, props.cave.foodCooldown / Math.max(.001,props.cave.foodCooldownDuration)) : 0
+
+/** 武器独立冷却读模拟剩余时间，切手持照常显示；暂停时红光也停住。 */
+const weaponCooldowns=computed(()=>{
+  void props.tick
+  return CELLS.map(c=>{
+    const id=cellId(c),charge=c.kind==='hand'&&id?findItemDef(id)?.weapon?.chargeAttack:undefined
+    if(!id||!charge?.cooldownBar||!charge.cooldown)return null
+    const remaining=props.cave.getWeaponSkillCooldown(id)
+    if(remaining<=.001)return null
+    const progress=Math.max(0,Math.min(1,1-remaining/charge.cooldown)),pulse=.5+.5*Math.sin(remaining*13)
+    return {progress,track:{background:charge.cooldownBar.background,borderColor:charge.cooldownBar.glow},
+      fill:{width:`${progress*100}%`,background:charge.cooldownBar.fill,boxShadow:`0 0 ${2+pulse*4}px ${charge.cooldownBar.glow}`,opacity:.65+pulse*.35}}
+  })
+})
 
 /** 符卡槽是否已装备（有符卡才能用；空槽灰显） */
 const isSpellReady = (c: BarCell): boolean => c.kind === 'spell' && !!cellId(c)
@@ -63,7 +80,10 @@ function onClickCell(c: BarCell, i: number): void {
   if (isClickSuppressed() || isInventoryMouseOpen()) return
   if (c.kind === 'hand') props.cave.selectHand(i)
   else if (c.kind === 'quick' && c.q !== undefined) props.cave.useQuickItem(c.q)
-  else if (c.kind === 'spell') props.cave.requestCastSpellA()
+  else if (c.kind === 'spell') {
+    if(c.eq==='spellB')props.cave.requestCastSpellB()
+    else props.cave.requestCastSpellA()
+  }
 }
 
 // —— 自研指针拖拽（与背包面板同一套；常驻栏只有道具槽可作拖起源） ——
@@ -75,6 +95,7 @@ function cloneIcon(el: HTMLElement): HTMLElement {
 }
 
 function onCellPointerDown(e: PointerEvent, el: HTMLElement, c: BarCell): void {
+  if (e.pointerType === 'touch') return
   if (isInventoryMouseOpen()) return
   // 武器/符卡格只响应点击，不可拖起；空道具槽也不拖
   if (c.kind !== 'quick' || c.q === undefined || !props.cave.quickSlots.get(c.q)) return
@@ -127,6 +148,7 @@ const hoverId = computed<ItemId | null>(() => {
 })
 const hoverDef = computed(() => (hoverId.value ? findItemDef(hoverId.value) : null))
 function onEnter(i: number, e: MouseEvent): void {
+  if (touchControls.value) return
   if (isInventoryMouseOpen()) return
   hover.value = { i, x: e.clientX, y: e.clientY }
 }
@@ -172,7 +194,7 @@ function emptyHint(c: BarCell): string {
         @mousemove="onMove"
         @mouseleave="onLeave"
       >
-        <span class="keyhint">{{ c.key }}</span>
+        <span class="keyhint">{{ keyHint(c) }}</span>
         <ItemIcon v-if="cellId(c)" :id="cellId(c)" :size="34" />
         <!-- 空槽暗纹：短剑线条（武器槽） -->
         <svg v-else-if="c.kind === 'hand' && c.eq !== 'pick'" class="ghost-ico" viewBox="0 0 24 24">
@@ -180,6 +202,8 @@ function emptyHint(c: BarCell): string {
         </svg>
         <span v-else-if="c.kind === 'spell'" class="ghost-word">{{ t('ui.hotbar.ghost_spell') }}</span>
         <span v-else class="ghost-dot">▢</span>
+        <span v-if="foodShade(c) > .001" class="food-cd" :style="{ height: `${foodShade(c) * 100}%` }" aria-hidden="true"></span>
+        <span v-if="weaponCooldowns[i]" class="weapon-cd" :style="weaponCooldowns[i]!.track" role="progressbar" :aria-label="t('ui.stats.cooldown')" :aria-valuemin="0" :aria-valuemax="100" :aria-valuenow="Math.round(weaponCooldowns[i]!.progress*100)"><i :style="weaponCooldowns[i]!.fill"></i></span>
         <!-- 符卡 CD 旋灭遮罩（从下往上消退） -->
         <span
           v-if="c.kind === 'spell' && isSpellReady(c) && props.spellCd > 0.001"
@@ -217,10 +241,15 @@ function emptyHint(c: BarCell): string {
         <div class="tt-name tt-empty">{{ emptyHint(hoverCell) }}</div>
       </template>
     </div>
+    <!-- 右侧附属入口绝对定位，不参与快捷栏宽度计算，保持栏体始终居中。 -->
+    <slot name="right" />
   </div>
 </template>
 
 <style scoped>
+.weapon-cd{position:absolute;left:5px;right:5px;bottom:4px;height:4px;border:1px solid;pointer-events:none;z-index:3;box-shadow:0 1px 3px #000a}
+.weapon-cd>i{display:block;height:100%}
+.food-cd{position:absolute;left:0;right:0;top:0;background:#0a0913c4;border-bottom:1px solid #ddc48a66;pointer-events:none;z-index:2;transition:height .1s linear}
 .hotbar {
   /* 底部居中挂带（主人指定改回居中）；半透明轻量件，南门通道从栏下透得见 */
   position: absolute;

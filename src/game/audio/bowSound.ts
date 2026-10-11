@@ -1,5 +1,6 @@
+import { randomAudio } from '../../core/simulation/random'
 /** 短促的弦绳拍击、木材振动与箭身擦风；不保留乐器式持续音高。 */
-export function createBowReleaseSample(sampleRate:number,charged:boolean,rng:()=>number=Math.random):Float32Array {
+export function createBowReleaseSample(sampleRate:number,charged:boolean,rng:()=>number=randomAudio):Float32Array {
   const duration=charged?.18:.15,length=Math.ceil(sampleRate*duration),samples=new Float32Array(length)
   const fiberMix=1-Math.exp(-Math.PI*2*2200/sampleRate),woodMix=1-Math.exp(-Math.PI*2*700/sampleRate)
   const airMix=1-Math.exp(-Math.PI*2*3600/sampleRate),bodyMix=1-Math.exp(-Math.PI*2*180/sampleRate)

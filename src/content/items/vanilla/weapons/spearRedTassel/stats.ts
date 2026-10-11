@@ -7,7 +7,7 @@ const slash = meleeMove({ shape: 'slash', damage: 36, reach: RED_SPEAR_REACH, an
   windup: .09, active: .12, recover: .18, knockback: 50, stun: .3, aoe: { mode: 'secondary', retention: .5 } })
 /** 三戳共用前后摇，各自拥有完整的 120ms 判定和独立命中。 */
 export const stats = {
-  rarity: 3, tier: 3, maxStack: 1, equipSlot: 'weaponA', combat: { penetration: 20, critChance: .15 }, melee: slash,
+  grade: 3, maxStack: 1, equipSlot: 'weaponA', combat: { penetration: 3, critChance: .15 }, melee: slash,
   meleePattern: { mode: 'mixed', moves: [
     { ...slash, sweepDirection: 1 }, { ...slash, sweepDirection: -1 },
     { ...slash, shape: 'stab', stabWidth: 26, active: .36, repeatHits: 3, powerCoefficient: .39 },

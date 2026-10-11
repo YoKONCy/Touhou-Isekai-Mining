@@ -1,11 +1,14 @@
 /** 状态系统不依赖渲染或场景；所有计时均由游戏逻辑时间推进。 */
 export type StatusKind = 'buff' | 'debuff'
 export type RemovalReason = 'expired' | 'source' | 'death' | 'scene' | 'manual'
-export type StatusStat = 'physicalDamageTaken' | 'moveSpeed' | 'attackSpeed' | 'damageTaken' | 'damageDealt' | 'dodgeCooldown' | 'spellCooldown' | 'manaCost' | 'healing'
+export type StatusStat = 'physicalDamageTaken' | 'magicDamageTaken' | 'moveSpeed' | 'attackSpeed' | 'damageTaken' | 'damageDealt' | 'physicalDamageDealt' | 'physicalResist' | 'projectileReduction' | 'hurtIFrame' | 'dodgeCooldown' | 'spellCooldown' | 'manaCost' | 'healing'
 export interface StatusOwner {
   hp: number
   alive: boolean
   heal(amount: number): number
+  restoreMana?(amount: number): number
+  /** 固定的状态真实伤害，由实体受伤入口维护死亡和飘字。 */
+  takeStatusDamage?(amount:number,source:string):void
 }
 export interface StatusEvents {
   beforeDamage: { amount: number; kind: string; cancelled: boolean }
@@ -33,6 +36,8 @@ export interface StatusDefinition {
   /** 手持来源解除后继续保留的秒数；重新握持恢复常驻，不叠加。 */
   heldReleaseDuration?: number
   stacking?: 'refresh' | 'stack' | 'independent'
+  /** 跨来源也只保留一个实例；刷新时更新施加者，跳伤节拍保持连续。 */
+  unique?:boolean
   maxStacks?: number
   priority?: number
   persistOnDeath?: boolean
@@ -41,6 +46,8 @@ export interface StatusDefinition {
   incapacitated?: boolean
   /** 技能封印只禁止主动技能，不冻结普通走位，也不受弹幕僵直抗性削减。 */
   skillsDisabled?: boolean
+  /** 饱腹等状态禁止进食，其余移动与战斗行为不受影响。 */
+  preventsEating?: boolean
   /** 暂时不能被攻击锁定或命中，计时独立于受伤和闪避无敌帧。 */
   untargetable?: boolean
   afterimage?: StatusAfterimage
@@ -54,7 +61,7 @@ export interface StatusDefinition {
 export interface StatusInstance {
   readonly key: number
   readonly definition: StatusDefinition
-  readonly source: string
+  source: string
   remaining: number | null
   stacks: number
   intervalElapsed: number
@@ -72,6 +79,7 @@ export interface StatusSnapshot {
   remaining: number | null
   stacks: number
 }
+export interface SavedStatus { id:string; source:string; remaining:number|null; elapsed:number }
 export class StatusEffects {
   private instances: StatusInstance[] = []
   private sequence = 0
@@ -79,11 +87,13 @@ export class StatusEffects {
   get untargetable(): boolean { return this.instances.some(s => s.definition.untargetable) }
   get incapacitated(): boolean { return this.instances.some(s => s.definition.incapacitated) }
   get skillsDisabled(): boolean { return this.instances.some(s => s.definition.skillsDisabled) }
+  get eatingDisabled(): boolean { return this.instances.some(s => s.definition.preventsEating) }
   private context(instance: StatusInstance): StatusContext { return { owner: this.owner, effects: this, instance } }
   add(definition: StatusDefinition, source: string, duration: number | null | undefined = definition.duration): number {
-    const existing = this.instances.find(s => s.definition.id === definition.id && s.source === source)
+    const existing = this.instances.find(s => s.definition.id === definition.id && (s.source === source||definition.unique))
     if (existing && definition.stacking !== 'independent') {
       existing.remaining = duration ?? null
+      existing.source=source
       if (definition.stacking === 'stack') existing.stacks = Math.min(definition.maxStacks ?? 1, existing.stacks + 1)
       definition.onRefresh?.(this.context(existing))
       return existing.key
@@ -146,8 +156,8 @@ export class StatusEffects {
       const activeDt = s.remaining === null ? dt : Math.min(dt, s.remaining)
       if (s.definition.interval && s.definition.interval > 0) {
         s.intervalElapsed += activeDt
-        while (s.intervalElapsed >= s.definition.interval && this.instances.includes(s)) {
-          s.intervalElapsed -= s.definition.interval
+        while (s.intervalElapsed + 1e-8 >= s.definition.interval && this.instances.includes(s)) {
+          s.intervalElapsed = Math.max(0, s.intervalElapsed - s.definition.interval)
           s.definition.onTick?.(this.context(s))
         }
       }
@@ -159,6 +169,24 @@ export class StatusEffects {
   }
   snapshot(): StatusSnapshot[] {
     return this.instances.map(s => ({ key: s.key, id: s.definition.id, kind: s.definition.kind, nameKey: s.definition.nameKey, descriptionKey: s.definition.descriptionKey, effectKey: s.definition.effectKey, conditionKey: s.definition.conditionKey, icon: s.definition.icon, source: s.source, remaining: s.remaining, stacks: s.stacks }))
+  }
+  /** 随身增益保存纯数据；同步到已有数组，避免每帧为跨场景状态分配新对象。 */
+  syncSaved(prefix:string,target:SavedStatus[]):void {
+    let index=0
+    for(const s of this.instances)if(s.source.startsWith(prefix)){
+      const entry=target[index]??{id:s.definition.id,source:s.source,remaining:s.remaining,elapsed:0}
+      entry.id=s.definition.id;entry.source=s.source;entry.remaining=s.remaining;entry.elapsed=s.intervalElapsed
+      target[index++]=entry
+    }
+    target.length=index
+  }
+  restoreSaved(saved:readonly SavedStatus[],definition:(id:string)=>StatusDefinition|undefined):void {
+    for(const entry of saved){
+      const def=definition(entry.id)
+      if(!def||entry.remaining!==null&&(!Number.isFinite(entry.remaining)||entry.remaining<=0)||!entry.source.startsWith('food:'))continue
+      const key=this.add(def,entry.source,entry.remaining),instance=this.instances.find(s=>s.key===key)
+      if(instance)instance.intervalElapsed=Math.max(0,Math.min(def.interval??0,Number(entry.elapsed)||0))
+    }
   }
   /** 渲染只查询所需状态，不为每帧生成整份 HUD 快照。 */
   remaining(id: string): number | null | undefined {

@@ -1,3 +1,4 @@
+import { randomStory } from '../../../../core/simulation/random'
 import type { NpcConversation } from '../../../../game/story/npcDialogue'
 import type { CharacterProfile } from '../../../../shared/profile'
 import { furnaceStage, materialCount } from '../../../../shared/production'
@@ -57,7 +58,7 @@ export function pickReimuEntry(profile: CharacterProfile): string {
     const unseen=topics.filter(topic=>!profile.flagBool(`quest.reimu.daily.${topic}.seen`))
     const pool=(unseen.length?unseen:topics).map(topic=>`${topic}_1`)
     const candidates=pool.filter(entry=>entry!==profile.flag('quest.reimu.lastTopic'))
-    const choices=candidates.length?candidates:pool,entry=choices[Math.floor(Math.random()*choices.length)]!
+    const choices=candidates.length?candidates:pool,entry=choices[Math.floor(randomStory()*choices.length)]!
     profile.setFlag('quest.reimu.lastTopic',entry)
     return entry
   }
@@ -67,7 +68,7 @@ export function pickReimuEntry(profile: CharacterProfile): string {
   const last = profile.flags['quest.reimu.lastTopic']
   const pool = unseen.length ? unseen : ['ta1', 'tb1', ...(profile.flagBool('quest.reimu.cooking.done') ? [] : ['hello'])]
   const candidates = pool.filter(entry => entry !== last)
-  const entry = (candidates.length ? candidates : pool)[Math.floor(Math.random() * (candidates.length || pool.length))]
+  const entry = (candidates.length ? candidates : pool)[Math.floor(randomStory() * (candidates.length || pool.length))]
   profile.setFlag('quest.reimu.lastTopic', entry)
   return entry
 }

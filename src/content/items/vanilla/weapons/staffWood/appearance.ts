@@ -56,6 +56,8 @@ export function drawWoodStaff(ctx: CanvasRenderingContext2D, view: HeldWeaponVie
     const phase = motion.phase === 'active' ? 1 - motion.timer / motion.move.active : 0
     ctx.translate(0, (motion.segment === 0 ? -.7 : .7) * Math.sin(Math.max(0, phase) * Math.PI))
   }
+  // 与战斗权杖同样收细一半；握持、掉落和动作残影共用这张材质。
+  ctx.scale(1, .5)
   ctx.drawImage(staffSprite(), -34 * STAFF_LENGTH_SCALE, -8, 128 * STAFF_LENGTH_SCALE, 16)
   ctx.restore()
 }

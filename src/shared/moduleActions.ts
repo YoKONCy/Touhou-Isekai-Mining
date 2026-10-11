@@ -3,6 +3,7 @@ import { ENABLED_SLOTS, slotAccepts, TRINKET_SLOTS } from './equipment'
 import { getItemDef, type EquipSlot } from './itemDefs'
 import type { Slot } from './inventory'
 import { QUICK_ACCEPT_KINDS } from './quickSlots'
+import type { SearchView } from './search'
 
 /** 当前模块提供给背包与快捷栏的最小动作面，不依赖具体玩法模块。 */
 export type ModuleActions = Pick<CharacterModuleActions, keyof CharacterModuleActions>
@@ -12,11 +13,25 @@ export abstract class CharacterModuleActions {
   get inventory() { return this.character.inventory }
   get equipment() { return this.character.equipment }
   get quickSlots() { return this.character.quickSlots }
+  get foodCooldown() { return this.character.food.remaining }
+  get foodCooldownDuration() { return this.character.food.duration }
+  getWeaponSkillCooldown(_id:string):number { return 0 }
+  selectCostume(costume:'default'|'old_miner'):boolean {
+    if(costume==='old_miner'&&!this.character.flagBool('unlock.costume.old_miner'))return false
+    this.character.costume=costume;return true
+  }
+  get actionsLocked():boolean { return false }
+  /** 剧情与转场阻止新操作，界面仍保留自己的关闭入口。 */
+  get inputBlocked():boolean { return false }
+  getSearchView(): SearchView | null { return null }
+  takeSearchSlot(_slot: number): void {}
+  cancelSearch(): void {}
   /** 控制台按批领取弹药；空间不足时完整拒绝，按钮不会只发一部分。 */
   debugGiveAmmo(id:string,quantity=100):boolean {
     const def=getItemDef(id)
     if(def.kind!=='ammunition'||!Number.isSafeInteger(quantity)||quantity<1)return false
-    const space=this.inventory.slots.reduce((n,slot)=>n+(!slot?def.maxStack:slot.id===id?def.maxStack-slot.qty:0),0)
+    const cap=this.inventory.stackLimit(id)
+    const space=this.inventory.slots.reduce((n,slot)=>n+(!slot?cap:slot.id===id?Math.max(0,cap-slot.qty):0),0)
     if(space<quantity)return false
     return this.inventory.add(id,quantity)===quantity
   }
@@ -24,8 +39,10 @@ export abstract class CharacterModuleActions {
   abstract consumeItem(id: string): boolean
   abstract selectHand(index: number): void
   abstract requestCastSpellA(): void
+  abstract requestCastSpellB(): void
   /** 光标拿放装备的统一入口；镐只能替换，不能卸空。 */
   setEquipment(slot: EquipSlot, id: string | null): boolean {
+    if (this.actionsLocked) return false
     if (!ENABLED_SLOTS.has(slot) || slot === 'pick' && !id || id && !slotAccepts(slot, id)) return false
     this.equipment.set(slot, id)
     this.equipmentChanged()
@@ -48,10 +65,10 @@ export abstract class CharacterModuleActions {
     this.quickSlots.consumeOne(index)
     return true
   }
-  private merge(src: NonNullable<Slot>, dst: Slot): { src: Slot; dst: Slot } {
+  private merge(src: NonNullable<Slot>, dst: Slot, cap = getItemDef(src.id).maxStack): { src: Slot; dst: Slot } {
     if (dst?.id === src.id) {
-      const put = Math.min(getItemDef(src.id).maxStack - dst.qty, src.qty)
-      if (put > 0) return { src: src.qty > put ? { id: src.id, qty: src.qty - put } : null, dst: { id: dst.id, qty: dst.qty + put } }
+      const put = Math.min(cap - dst.qty, src.qty)
+      if (put > 0) return { src: src.qty > put ? { ...src, qty: src.qty - put } : null, dst: { ...dst, qty: dst.qty + put } }
     }
     return { src: dst, dst: src }
   }
@@ -59,6 +76,7 @@ export abstract class CharacterModuleActions {
     const src = this.inventory.slots[from]
     if (!src || !QUICK_ACCEPT_KINDS.has(getItemDef(src.id).kind)) return false
     const result = this.merge(src, this.quickSlots.get(to))
+    if (result.src && result.src.qty > this.inventory.stackLimit(result.src.id)) return false
     this.inventory.slots[from] = result.src
     this.quickSlots.set(to, result.dst)
     return true
@@ -66,7 +84,15 @@ export abstract class CharacterModuleActions {
   quickToInv(from: number, to: number): void {
     const src = this.quickSlots.get(from)
     if (!src) return
-    const result = this.merge(src, this.inventory.slots[to])
+    const cap = this.inventory.stackLimit(src.id)
+    const dst = this.inventory.slots[to]
+    if (!dst) {
+      const put = this.inventory.depositAt(to, src, src.qty)
+      this.quickSlots.set(from, src.qty > put ? { ...src, qty: src.qty - put } : null)
+      return
+    }
+    if (dst.id !== src.id && src.qty > cap) return
+    const result = this.merge(src, dst, cap)
     this.quickSlots.set(from, result.src)
     this.inventory.slots[to] = result.dst
   }
@@ -98,25 +124,27 @@ export abstract class CharacterModuleActions {
     const def = getItemDef(slot.id)
     const target = def.kind === 'weapon'
       ? (!this.equipment.get('weaponA') ? 'weaponA' : !this.equipment.get('weaponB') ? 'weaponB' : 'weaponA')
-      : def.kind === 'spellcard' ? 'spellA'
+      : def.kind === 'spellcard' ? (!this.equipment.get('spellA') ? 'spellA' : !this.equipment.get('spellB') ? 'spellB' : 'spellA')
         : def.equipSlot === 'trinket' ? TRINKET_SLOTS.find(s => !this.equipment.get(s)) ?? 'trinketA'
           : def.equipSlot
     return target ? this.equipFromSlotTo(index, target) : false
   }
   equipFromSlotTo(index: number, target: EquipSlot): boolean {
+    if (this.actionsLocked) return false
     const slot = this.inventory.slots[index]
     if (!slot || !ENABLED_SLOTS.has(target) || !slotAccepts(target, slot.id)) return false
-    const old = this.equipment.set(target, slot.id)
+    const old = this.equipment.setStack(target, slot)
     this.inventory.removeAt(index)
-    if (old) this.inventory.placeAt(index, old)
+    if (old) this.inventory.slots[index]=old
     this.equipmentChanged()
     return true
   }
   unequipTo(slot: EquipSlot, index: number): boolean {
-    const id = this.equipment.get(slot)
-    if (!id || slot === 'pick' || !ENABLED_SLOTS.has(slot) || this.inventory.slots[index]) return false
+    if (this.actionsLocked) return false
+    const stack = this.equipment.getStack(slot)
+    if (!stack || slot === 'pick' || !ENABLED_SLOTS.has(slot) || this.inventory.slots[index]) return false
     this.equipment.set(slot, null)
-    this.inventory.placeAt(index, id)
+    this.inventory.slots[index]=stack
     this.equipmentChanged()
     return true
   }

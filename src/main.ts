@@ -9,6 +9,10 @@ import './styles.css'
 import './ui/game-ui.css'
 import './ui/hud-theme.css'
 import './ui/title-hud.css'
+import './ui/mobile.css'
+import { startDisplayAdaptation } from './browser/display'
+
+startDisplayAdaptation()
 
 // 全程禁用浏览器原生右键菜单：捕获阶段挂在 window 上，
 // 画布、背包、仓库、对话等任何界面都不允许弹出系统菜单（右键自身的游戏逻辑不受影响）

@@ -12,6 +12,7 @@ export interface QuestJournalData {
   category?:QuestCategory
   id:string;chapter:string;title:string;summary:string;giver:string;status:string;completed:boolean
   objectives:readonly QuestObjective[];goal:string;action?:{label:string;disabled:boolean}
+  rewards?:readonly {kind:'recipe'|'feature'|'item';id?:string;label?:string;quantity?:number}[]
 }
 export interface QuestActionResult {ok:boolean;message:string;scene?:string}
 /** 任务定义属于内容；手账只渲染状态，交付仍由各任务的原子事务处理。 */

@@ -13,6 +13,7 @@
  * 当前仅提供 zh_cn 全量中文；切到其他语言只需再丢一份对应 JSON 并 setLang()。
  */
 import { ref } from 'vue'
+import { touchControls, viewport } from '../browser/display'
 import { keymap, keyLabel, MOUSE_LEFT, MOUSE_RIGHT, type ActionId } from '../core/keymap'
 
 export type LangCode = string
@@ -128,6 +129,8 @@ export function t(key: string, params?: I18nParams): string {
 export function formatKeyBindings(text:string):string{
   return text.replace(/\{key:([a-zA-Z0-9_]+)\}/g,(marker,action:string)=>{
     if(!Object.hasOwn(keymap.bindings,action))return marker
+    if(touchControls.value)return t(`ui.mobile.key.${action}`)
+    if(viewport.lastInput==='gamepad')return t(`ui.gamepad.key.${action}`)
     const token=keymap.primary(action as ActionId)
     if(token===MOUSE_LEFT)return t('ui.key.mouse_left')
     if(token===MOUSE_RIGHT)return t('ui.key.mouse_right')

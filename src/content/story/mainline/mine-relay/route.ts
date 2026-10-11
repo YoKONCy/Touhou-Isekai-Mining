@@ -15,6 +15,6 @@ export function buildMineRelayPlan(): FloorPlan {
   return { rooms, doors, slotCols: RELAY_ROOM_COUNT, slotRows: 1, slots: Int16Array.from(rooms.map(r => r.id + 1)), startId: 0, exitId: RELAY_ROOM_COUNT - 1 }
 }
 export const mineRelayRoomSpec: ScriptedRoomSpec = {
-  enemyRange: [2, 3], oreRange: [26, 32], noMonsterBurst: true, noChest: true, noProps: true,
+  enemyRange: [2, 3], oreRange: [13, 16], noMonsterBurst: true, noChest: true, noProps: true,
   ambient: { dimCenter: .62, dimEdge: .82, litCenter: .29, litEdge: .56 }
 }

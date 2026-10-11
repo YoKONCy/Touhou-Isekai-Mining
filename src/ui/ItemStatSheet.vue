@@ -2,10 +2,11 @@
 import { computed } from 'vue'
 import type { ItemDef } from '../content/items/types'
 import { findMineralDef } from '../content/minerals/registry'
-import { t } from '../i18n'
+import { t, formatKeyBindings } from '../i18n'
 import ItemStatIcon from './ItemStatIcon.vue'
+import { FOOD_COOLDOWN_SECONDS } from '../shared/food'
 
-const props=defineProps<{def:ItemDef;expanded:boolean;rangedCrit:number;shootingDeviation:number}>()
+const props=defineProps<{def:ItemDef;expanded:boolean;rangedCrit:number;shootingDeviation:number;durability?:number}>()
 interface Stat {key:string;icon:string;value:string|number;unit?:string;note?:string;wide?:boolean}
 interface Group {key:string;stats:Stat[]}
 const rounded=(n:number)=>Number(n.toFixed(3))
@@ -14,10 +15,18 @@ const groups=computed(()=>{
   const add=(key:string,stats:Array<Stat|null>)=>{const items=stats.filter((v):v is Stat=>v!==null);if(items.length)result.push({key,stats:items})}
   const stat=(key:string,icon:string,value:string|number,unit?:string):Stat=>({key,icon,value,unit})
   const addSkills=()=>{
+    if(d.weapon?.fixedMagicDamage)add('skills',[stat('fixedMagicDamage','magic',d.weapon.fixedMagicDamage)])
     const rangedCharge=r?.charge
     if(rangedCharge)add('skills',[{key:'weaponSkill',icon:'effect',value:t(rangedCharge.nameKey),note:t(rangedCharge.descriptionKey),wide:true}])
+    const chargedFinisher=r?.chargedFinisher,chargeRoll=d.rangedChargeRoll
+    if(chargedFinisher)add('skills',[{key:'weaponSkill',icon:'magic',value:t(chargedFinisher.nameKey),note:t(chargedFinisher.descriptionKey),wide:true}])
+    if(chargeRoll)add('skills',[{key:'weaponSkill',icon:'crit',value:t(chargeRoll.nameKey),note:t(chargeRoll.descriptionKey),wide:true}])
+    const contact=d.meleeHitEffect
+    if(contact)add('skills',[{key:'weaponSkill',icon:'effect',value:t(contact.nameKey),note:t(contact.descriptionKey),wide:true}])
     const descriptions=d.weapon?.skillDescriptions
     const criticalPassive=d.weapon?.criticalPassive
+    const killDropPassive=d.weapon?.killDropPassive
+    if(killDropPassive)add('skills',[{key:'weaponSkill',icon:'effect',value:t(killDropPassive.nameKey),note:t(killDropPassive.descriptionKey),wide:true}])
     if(criticalPassive)add('skills',[{key:'weaponSkill',icon:'crit',value:t(criticalPassive.nameKey),note:t(criticalPassive.descriptionKey),wide:true}])
     if(descriptions)add('skills',[
       {key:'weaponSkill',icon:'effect',value:t(descriptions.summaryKey),wide:true},
@@ -38,12 +47,24 @@ const groups=computed(()=>{
       fullMove&&fullMove.damage!==m?.damage?stat('chargeDamage','damage',fullMove.damage):null,
       charge.minimumMoveMultiplier < 1 ? stat('chargeMinimumSpeed','speed',rounded(charge.minimumMoveMultiplier*100),'percent') : null,
       ...(charge.burst ? [stat('burstCount','slash',charge.burst.count), stat('burstDuration','cycle',charge.burst.duration,'seconds'),stat('cooldown','cooldown',charge.burst.cooldown,'seconds')] : []),
+      ...(charge.areaBurst ? [stat('burstCount','slash',charge.areaBurst.count),stat('burstDuration','cycle',charge.areaBurst.duration,'seconds'),stat('reach','reach',charge.areaBurst.range,'pixels'),stat('width','width',charge.areaBurst.width,'pixels')] : []),
       charge.cooldown !== undefined ? stat('cooldown','cooldown',charge.cooldown,'seconds') : null,
       ...(charge.readyEffects?.definitions??[]).map(effect=>({...stat('chargeBuff','effect',t(effect.nameKey)),note:t(effect.effectKey??effect.descriptionKey),wide:true})),
       ...charge.tiers.map(tier=>({...stat(tier.progress>=1?'fullCharge':'halfCharge','damage',`×${tier.multiplier}`),note:t('ui.stats.chargeThreshold',{seconds:rounded(tier.progress*charge.duration)})})),
       ...(charge.fullHitEffects??[]).map(effect=>({...stat('chargeHitEffect','effect',t(effect.nameKey)),note:t('ui.stats.effectSeconds',{seconds:effect.duration??0})}))
     ])
   }
+  add('accessory',[
+    combat?.lightRadiusMultiplier!==undefined?stat('lightRadius','radius',`+${rounded((combat.lightRadiusMultiplier-1)*100)}`,'percent'):null,
+    combat?.meleeCritChance!==undefined?stat('meleeCrit','crit',`+${rounded(combat.meleeCritChance*100)}`,'percent'):null,
+    combat?.meleeWeaponDamageBonus!==undefined?stat('meleeWeaponDamageBonus','damage',`+${rounded(combat.meleeWeaponDamageBonus*100)}`,'percent'):null,
+    combat?.spellCooldownReduction!==undefined?stat('spellCooldownReduction','cooldown',`−${rounded(combat.spellCooldownReduction*100)}`,'percent'):null,
+    combat?.dodgeDistanceBonus!==undefined?stat('dodgeDistanceBonus','reach',`+${rounded(combat.dodgeDistanceBonus*100)}`,'percent'):null,
+    combat?.dodgeCooldownReduction!==undefined?stat('dodgeCooldownReduction','cooldown',`−${rounded(combat.dodgeCooldownReduction*100)}`,'percent'):null,
+    combat?.moveSpeedMultiplier!==undefined?stat('moveSpeedMultiplier','speed',rounded(combat.moveSpeedMultiplier*100),'percent'):null,
+    combat?.dodgeCooldownMultiplier!==undefined?stat('dodgeCooldownMultiplier','cooldown',`×${rounded(combat.dodgeCooldownMultiplier)}`):null,
+    d.durability!==undefined?stat('durability','effect',`${props.durability??d.durability} / ${d.durability}`):null
+  ])
   if(!props.expanded){
     add('essentials',[
       m||r?{...stat('damage','damage',m?.innerZone?`${m.damage} / ${m.innerZone.damage}`:m?.damage??r!.damage),note:m?.innerZone?t('ui.stats.outerInnerDamage'):undefined}:null,
@@ -67,6 +88,7 @@ const groups=computed(()=>{
     m||r?stat('damage','damage',m?.damage??r!.damage):null,
     combat?.critChance!==undefined?stat('crit','crit',rounded((combat.critChance+(r?props.rangedCrit:0))*100),'percent'):null,
     combat?.penetration!==undefined?stat('penetration','penetration',combat.penetration):null,
+    combat?.magicPenetration!==undefined?stat('magicPenetration','magic',combat.magicPenetration):null,
     m?stat('coefficient','coefficient',m.powerCoefficient??rounded(m.windup+m.active+m.recover)):null
   ])
   if(m?.innerZone)add('innerZone',[
@@ -75,7 +97,8 @@ const groups=computed(()=>{
   add('defense',[
     combat?.physicalResist!==undefined?stat('physicalResist','physical',combat.physicalResist):null,
     combat?.magicResist!==undefined?stat('magicResist','magic',combat.magicResist):null,
-    combat?.projectileReduction!==undefined?stat('projectileReduction','physical',combat.projectileReduction):null
+    combat?.projectileReduction!==undefined?stat('projectileReduction','physical',combat.projectileReduction):null,
+    combat?.projectileReductionRange?stat('projectileReduction','physical',`${combat.projectileReductionRange[0]}–${combat.projectileReductionRange[1]}`):null
   ])
   if(m){
     add('handling',[
@@ -111,8 +134,15 @@ const groups=computed(()=>{
   if(s){
     const waves=s.waves??1
     add('spell',[
-      stat('damage','magic',s.damage),stat('radius','radius',s.radius,'pixels'),stat('mana','mana',s.manaCost),
-      stat('cooldown','cooldown',s.cooldown,'seconds'),stat('knockback','knockback',s.knockback),stat('stun','stun',s.stun,'seconds')
+      s.damage>0?stat('damage','magic',s.damage):null,
+      s.scope==='room'?stat('scope','radius',t('ui.stats.scope.room')):stat('radius','radius',s.radius,'pixels'),stat('mana','mana',s.manaCost),
+      stat('cooldown','cooldown',s.cooldown,'seconds'),s.channelTime?stat('channelTime','windup',s.channelTime,'seconds'):null,
+      s.knockback>0?stat('knockback','knockback',s.knockback):null,s.stun>0?stat('stun','stun',s.stun,'seconds'):null
+    ])
+    if(s.control)add('effects',[
+      stat('bulletSlow','speed',rounded((1-s.control.bulletSpeedMultiplier)*100),'percent'),
+      stat('effectDuration','cooldown',s.control.duration,'seconds'),
+      ...s.control.enemyEffects.map(effect=>({...stat('enemyEffect','effect',t(effect.nameKey)),note:effect.skillsDisabled?t('ui.stats.skillsDisabled'):t(effect.effectKey??effect.descriptionKey),wide:true}))
     ])
     if(waves>1)add('waves',[
       stat('waves','waves',waves),stat('waveInterval','cycle',s.waveInterval??.4,'seconds'),stat('totalDamage','damage',s.damage*waves)
@@ -126,9 +156,14 @@ const groups=computed(()=>{
     mineral?stat('mineralHp','hardness',mineral.hp[0]===mineral.hp[1]?mineral.hp[0]:`${mineral.hp[0]}–${mineral.hp[1]}`,'hp'):null,
     mineral?stat('requiredPower','mining',mineral.requiredMiningPower,'tier'):null
   ])
-  if(d.consume?.heal!==undefined)add('recovery',[stat('heal','heal',d.consume.heal,'hp')])
+  if(d.consume)add('recovery',[
+    d.consume.heal!==undefined?stat('heal','heal',d.consume.heal,'hp'):null,
+    stat('foodCooldown','cooldown',d.consume.satiety??FOOD_COOLDOWN_SECONDS,'seconds'),
+    d.consume.status?{...stat('consumeEffect','effect',t(d.consume.status.nameKey)),note:t(d.consume.status.effectKey??d.consume.status.descriptionKey),wide:true}:null,
+    d.consume.status?stat('effectDuration','cooldown',d.consume.statusDuration??d.consume.status.duration??0,'seconds'):null
+  ])
   const held:Stat[]=[]
-  const modifierIcons:Record<string,string>={physicalDamageTaken:'physical',moveSpeed:'speed',attackSpeed:'active',damageTaken:'physical',damageDealt:'damage',dodgeCooldown:'cooldown',spellCooldown:'cooldown',manaCost:'mana',healing:'heal'}
+  const modifierIcons:Record<string,string>={physicalDamageTaken:'physical',projectileReduction:'physical',moveSpeed:'speed',attackSpeed:'active',damageTaken:'physical',damageDealt:'damage',dodgeCooldown:'cooldown',spellCooldown:'cooldown',manaCost:'mana',healing:'heal'}
   for(const effect of [...(d.weapon?.heldEffects??[]),...(d.weapon?.afterDodgeEffects??[])]){
     const modifiers=effect.modifiers??[]
     const afterDodge=d.weapon?.afterDodgeEffects?.includes(effect)
@@ -149,6 +184,7 @@ const groups=computed(()=>{
 })
 const label=(key:string)=>t(`ui.stats.${key}`)
 const unit=(key?:string)=>key?t(`ui.stats.unit.${key}`):''
+const deviceText=(value:string|number)=>typeof value==='string'?formatKeyBindings(value):value
 </script>
 
 <template>
@@ -158,7 +194,7 @@ const unit=(key?:string)=>key?t(`ui.stats.unit.${key}`):''
       <div class="stat-grid">
         <div v-for="(entry,index) in group.stats" :key="`${entry.key}:${index}`" class="stat-entry" :class="{wide:entry.wide}" :aria-label="`${label(entry.key)} ${entry.value}${unit(entry.unit)}${entry.note?'，'+entry.note:''}`">
           <ItemStatIcon :kind="entry.icon"/>
-          <div><span class="stat-label">{{label(entry.key)}}</span><strong class="stat-value">{{entry.value}}<small v-if="entry.unit">{{unit(entry.unit)}}</small></strong><p v-if="entry.note">{{entry.note}}</p></div>
+          <div><span class="stat-label">{{label(entry.key)}}</span><strong class="stat-value">{{deviceText(entry.value)}}<small v-if="entry.unit">{{unit(entry.unit)}}</small></strong><p v-if="entry.note">{{deviceText(entry.note)}}</p></div>
         </div>
       </div>
     </section>

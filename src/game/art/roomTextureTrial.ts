@@ -43,16 +43,16 @@ export function createRoomTextureTrial(
 
   // 2x 超采样（同矿洞纹理）
   const SS = 2
-  const mk = (): [HTMLCanvasElement, CanvasRenderingContext2D] => {
+  const mk = (height=H): [HTMLCanvasElement, CanvasRenderingContext2D] => {
     const cv = document.createElement('canvas')
     cv.width = W * SS
-    cv.height = H * SS
+    cv.height = height * SS
     const c = cv.getContext('2d')!
     c.setTransform(SS, 0, 0, SS, 0, 0)
     return [cv, c]
   }
   const [base, bctx] = mk()
-  const [face, fctx] = mk()
+  const [face, fctx] = mk(Math.min(H,wall+t*3))
 
   const doorSet = new Set(doors.map((d) => d.col * 1000 + d.row))
   const isDoor = (c: number, r: number): boolean => doorSet.has(c * 1000 + r)

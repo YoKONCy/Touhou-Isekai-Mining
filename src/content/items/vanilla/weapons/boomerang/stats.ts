@@ -2,8 +2,7 @@ import type { ItemDef } from '../../../types'
 
 /** attackInterval是通用远程攻击间隔（秒），本武器回收后开始计时。 */
 export const stats = {
-  rarity: 1,
-  tier: 2,
+  grade: 1,
   maxStack: 1,
   equipSlot: 'weaponA',
   combat: {

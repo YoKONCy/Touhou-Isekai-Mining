@@ -1,3 +1,4 @@
+import { randomGeneration } from '../../core/simulation/random'
 /**
  * 敌人注册表 + 自然刷怪加权混编入口
  */
@@ -17,8 +18,9 @@ const floorWeight=(def:EnemyDef,floor:number)=>def.spawn?.floorWeights?.[floor]?
  * 引擎刷怪只调它——加新怪只要在 Def 里写 spawn.weight，本函数零改动。
  * @returns 总权为 0（无合格怪）时返回 null
  */
-export function rollEnemyId(roomKind: string, depth: number, floor = 1): EnemyId | null {
+export function rollEnemyId(roomKind: string, depth: number, floor = 1, allowed?:readonly EnemyId[]): EnemyId | null {
   const pool = enemies.select((d) => {
+    if (allowed && !allowed.includes(d.id)) return false
     const s = d.spawn
     if (!s || floorWeight(d,floor) <= 0 || s.fixedCount) return false
     const rooms = s.rooms ?? DEFAULT_ROOMS
@@ -29,13 +31,14 @@ export function rollEnemyId(roomKind: string, depth: number, floor = 1): EnemyId
     if (s.maxFloor !== undefined && floor > s.maxFloor) return false
     return true
   })
-  return weightedPick(pool, (d) => floorWeight(d,floor))?.id ?? null
+  return weightedPick(pool, (d) => floorWeight(d,floor), randomGeneration)?.id ?? null
 }
 
 /** 楼层专属固定敌人独立于随机抽取，也不会被挖矿爆怪重复选中。 */
-export function fixedEnemyIds(roomKind:string,floor:number):EnemyId[]{
+export function fixedEnemyIds(roomKind:string,floor:number,allowed?:readonly EnemyId[]):EnemyId[]{
   const ids:EnemyId[]=[]
   for(const def of enemies.all()){
+    if(allowed&&!allowed.includes(def.id))continue
     const s=def.spawn
     if(!s?.fixedCount||!s.rooms?.includes(roomKind))continue
     if(s.minFloor!==undefined&&floor<s.minFloor||s.maxFloor!==undefined&&floor>s.maxFloor)continue

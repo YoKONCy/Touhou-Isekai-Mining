@@ -1,3 +1,4 @@
+import { randomVisual } from '../../core/simulation/random'
 /** 世界坐标余烬组件：区域、数量、配色独立配置，时钟由场景传入。 */
 interface Ember { x:number; y:number; vy:number; size:number; seed:number; freq:number; amp:number; tw:number; spr:number; base:number }
 export function makeGlowSprite(rgb:string, size=40):HTMLCanvasElement {
@@ -12,16 +13,16 @@ export class EmberField {
   private sprites:HTMLCanvasElement[]=[]
   constructor(private readonly bounds:{left:number;right:number;top:number;bottom:number},private readonly count=34,private readonly colors=['255,84,42','255,142,58','255,190,104']) {}
   reset():void {
-    const rand=(a:number,b:number)=>a+Math.random()*(b-a)
+    const rand=(a:number,b:number)=>a+randomVisual()*(b-a)
     const layers=[{size:[3,4.5],vy:[10,16],base:.3},{size:[5,6.5],vy:[16,24],base:.55},{size:[7,9],vy:[24,34],base:.85}]
     this.particles=[]
     for(let i=0;i<this.count;i++){
-      const roll=Math.random(),q=layers[roll<.45?0:roll<.8?1:2]
-      this.particles.push({x:rand(this.bounds.left,this.bounds.right),y:rand(this.bounds.top+4,this.bounds.bottom-2),vy:rand(q.vy[0],q.vy[1]),size:rand(q.size[0],q.size[1]),seed:rand(0,Math.PI*2),freq:rand(.5,1.1),amp:rand(8,22),tw:rand(2.2,4.6),spr:Math.random()<.6?0:Math.random()<.6?1:2,base:q.base})
+      const roll=randomVisual(),q=layers[roll<.45?0:roll<.8?1:2]
+      this.particles.push({x:rand(this.bounds.left,this.bounds.right),y:rand(this.bounds.top+4,this.bounds.bottom-2),vy:rand(q.vy[0],q.vy[1]),size:rand(q.size[0],q.size[1]),seed:rand(0,Math.PI*2),freq:rand(.5,1.1),amp:rand(8,22),tw:rand(2.2,4.6),spr:randomVisual()<.6?0:randomVisual()<.6?1:2,base:q.base})
     }
   }
   update(dt:number):void {
-    for(const p of this.particles){p.y-=p.vy*dt;if(p.y<this.bounds.top){p.y=this.bounds.bottom;p.x=this.bounds.left+Math.random()*(this.bounds.right-this.bounds.left)}}
+    for(const p of this.particles){p.y-=p.vy*dt;if(p.y<this.bounds.top){p.y=this.bounds.bottom;p.x=this.bounds.left+randomVisual()*(this.bounds.right-this.bounds.left)}}
   }
   render(g:CanvasRenderingContext2D,time:number):void {
     if(!this.sprites.length)this.sprites=this.colors.map(color=>makeGlowSprite(color))

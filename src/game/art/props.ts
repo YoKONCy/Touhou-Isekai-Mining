@@ -12,6 +12,9 @@
 import { CONFIG } from '../config'
 import type { Collider, DoorSlot } from '../tilemap'
 import { propDefs } from '../../content/props/registry'
+import { weightedPick } from '../../content/core/Registry'
+import { searchDensity } from '../../content/search/rules'
+import type { SearchRoomContext } from '../../content/search/types'
 import type { PropDef, PropId, PropSegment } from '../../content/props/types'
 import { ART, hash2 } from './artPalette'
 import type { SteamVent } from './roomTextureE'
@@ -37,6 +40,8 @@ export interface Prop {
   segments?: readonly PropSegment[]
   /** 动态物资点是否挡弹幕（缺省查 Def；废木/宝箱等借用 id 时显式给 false）。 */
   blockBullets?: boolean
+  /** 首次翻找时打开，使用模拟时间驱动开合；续战保存已打开状态。 */
+  searchOpenedAt?:number
 }
 
 /** 世界坐标碰撞段（压扁胶囊＝矩形段身＋两端半圆） */
@@ -190,7 +195,8 @@ export function layoutProps(
   spawnX: number,
   spawnY: number,
   vents: readonly SteamVent[],
-  orePoints: readonly { x: number; y: number }[]
+  orePoints: readonly { x: number; y: number }[],
+  searchContext: SearchRoomContext = { floor: 1 }
 ): Prop[] {
   const { tile: t, roomCols: cols, roomRows: rows, wallThickness: wt } = CONFIG
   const wall = wt * t
@@ -257,7 +263,7 @@ export function layoutProps(
     return false
   }
 
-  // 大件组（3~4 格矿业设施）单独收集，统一摇号：每房至多一件，墙边为主、少量中置。
+  // 大件组统一摇号；默认每房至多一件，搜索密度加成可增加搜索设施的尝试次数。
   const largeDefs: PropDef[] = []
 
   // 遍历注册表按布局规则摆放（注册顺序即摆放顺序；MOD 摆件带 layout 即自动进房）
@@ -269,24 +275,37 @@ export function layoutProps(
       return
     }
     const saltBase = di * 16 + 1
-    // chance 缺省=每房必出
-    if (rule.chance !== undefined && hash2(seed, saltBase) >= rule.chance) return
+    const density = def.search ? searchDensity(searchContext, def.search.cols === 2 ? 'small' : 'large', def.id, def.search.profile, def.search.fields) : 1
+    const expected = Math.max(0, (rule.chance ?? 1) * density)
+    const whole = Math.floor(expected)
+    const groups = whole + (hash2(seed, saltBase) < expected - whole ? 1 : 0)
     const [lo, hi] = rule.count
     const n = lo + Math.floor(hash2(seed, saltBase + 1) * (hi - lo + 1))
-    for (let i = 0; i < n; i++) tryPlace(def, saltBase + i, rule.radius)
-    // 中部带追加件（原大石 40% 中置）
-    if (rule.midBonus !== undefined && hash2(seed, saltBase + 2) < rule.midBonus) {
-      tryPlace(def, saltBase + 99, rule.radius, true)
+    for (let group = 0; group < groups; group++) {
+      const salt = saltBase + group * 4096
+      for (let i = 0; i < n; i++) tryPlace(def, salt + i, rule.radius)
+      // 中部带追加件（原大石 40% 中置），保留默认布局的盐值。
+      if (rule.midBonus !== undefined && hash2(seed, salt + 2) < rule.midBonus) {
+        tryPlace(def, salt + 99, rule.radius, true)
+      }
     }
   })
 
   const lp = CONFIG.art.largeProps
-  if (lp.enabled && largeDefs.length > 0 && hash2(seed, 7777) < lp.chance) {
-    const def = largeDefs[Math.floor(hash2(seed, 7778) * largeDefs.length)]
-    const mid = hash2(seed, 7779) < lp.midChance
-    // 大件半径大：墙边选址失败再退到中部，尽量不空摇号
-    if (!tryPlace(def, 9001, def.layout!.radius, mid, [2.0, 3.0])) {
-      tryPlace(def, 9002, def.layout!.radius, true)
+  if (lp.enabled && largeDefs.length > 0) {
+    const candidates = largeDefs.map(def => ({ def, weight: def.search ? searchDensity(searchContext, def.search.cols === 2 ? 'small' : 'large', def.id, def.search.profile, def.search.fields) : 1 }))
+    // 总尝试次数与候选权重一起调整，避免搜索设施加成挤掉普通布景的生成机会。
+    const expected = lp.chance * candidates.reduce((sum, candidate) => sum + candidate.weight, 0) / largeDefs.length
+    const whole = Math.floor(expected)
+    const groups = whole + (hash2(seed, 7777) < expected - whole ? 1 : 0)
+    for (let group = 0; group < groups; group++) {
+      const picked = weightedPick(candidates, candidate => candidate.weight, () => hash2(seed, 7778 + group * 4096))
+      if (!picked) break
+      const def = picked.def, mid = hash2(seed, 7779 + group * 4096) < lp.midChance
+      // 大件半径大：墙边选址失败再退到中部，尽量不空摇号。
+      if (!tryPlace(def, 9001 + group * 4096, def.layout!.radius, mid, [2.0, 3.0])) {
+        tryPlace(def, 9002 + group * 4096, def.layout!.radius, true)
+      }
     }
   }
 
@@ -303,9 +322,9 @@ function shadow(ctx: CanvasRenderingContext2D, x: number, y: number, rx: number,
   ctx.fill()
 }
 
-export function renderProp(ctx: CanvasRenderingContext2D, p: Prop): void {
+export function renderProp(ctx: CanvasRenderingContext2D, p: Prop,time=0): void {
   // 外观由 PropDef 提供（官方 Def 复用下面五个程序化绘制器，MOD 可自画）
-  propDefs.require(p.id).render(ctx, p)
+  propDefs.require(p.id).render(ctx, p,time)
 }
 
 /** 大石头：不规则岩体 + 顶截面受光 + 裂纹，偶发顶苔 */

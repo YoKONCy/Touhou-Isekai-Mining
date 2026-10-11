@@ -6,6 +6,8 @@
 export type EventHandler<T = unknown> = (payload: T) => void
 
 export class EventBus<EventMap extends object = Record<string, unknown>> {
+  /** 组合根可阻止回放产生真实结算、弹窗或持久化副作用。 */
+  accept: ((type: keyof EventMap) => boolean) | null = null
   private handlers = new Map<keyof EventMap, Set<EventHandler>>()
 
   /** 订阅事件，返回取消订阅函数 */
@@ -24,6 +26,7 @@ export class EventBus<EventMap extends object = Record<string, unknown>> {
   }
 
   emit<K extends keyof EventMap>(type: K, payload: EventMap[K]): void {
+    if(this.accept&&!this.accept(type))return
     const set = this.handlers.get(type)
     if (!set) return
     // 拷贝一份：回调内允许自行退订，不会炸迭代器

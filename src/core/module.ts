@@ -16,12 +16,21 @@ export interface ModuleContext<E extends object = Record<string, unknown>> {
 }
 
 export interface IGameModule {
+  /** 完整玩法快照与安全恢复入口，和检查点存档分开。 */
+  captureSimulation?(): unknown
+  restoreSimulation?(state: unknown): void
+  /** 录制时检查外部操作的轻量状态，避免每个逻辑步复制整层房间与弹幕。 */
+  captureInputState?(): unknown
   /** 模块唯一 id（switchTo 时用） */
   readonly id: string
   // 上下文用 any 放宽：具体模块（如 CaveModule）可以收窄为 ModuleContext<GameEvents>
   /** 进入模块（可携带任意 payload，如矿洞深度） */
   onEnter(ctx: ModuleContext<any>, payload?: unknown): void
-  /** 每帧逻辑更新 */
+  /** 在暂停判断前只处理界面快捷键；不能推进移动、战斗或计时。 */
+  handleUIInput?(engine: EngineContext): void
+  /** 暂停期间仅同步视口等显示数据，不传入玩法时间。 */
+  updatePaused?(engine: EngineContext): void
+  /** 每个固定逻辑步更新，dt 为模拟时间。 */
   update(dt: number, engine: EngineContext): void
   /** 每帧渲染 */
   render(g: CanvasRenderingContext2D, engine: EngineContext): void

@@ -45,17 +45,34 @@ function wheel(e:WheelEvent):void{
   changeZoom(zoom.value+(e.deltaY<0?.12:-.12),point)
 }
 let drag:{id:number;x:number;y:number;panX:number;panY:number;scaleX:number;scaleY:number}|null=null
+const fingers=new Map<number,{x:number;y:number}>()
+let pinch:{distance:number;zoom:number;anchor:{x:number;y:number}}|null=null
 function startPan(e:PointerEvent):void{
+  if(e.pointerType==='touch'){
+    fingers.set(e.pointerId,{x:e.clientX,y:e.clientY})
+    if(fingers.size===2&&svg.value){
+      const [a,b]=[...fingers.values()],matrix=svg.value.getScreenCTM()
+      if(matrix){const point=new DOMPoint((a!.x+b!.x)/2,(a!.y+b!.y)/2).matrixTransform(matrix.inverse());pinch={distance:Math.max(1,Math.hypot(a!.x-b!.x,a!.y-b!.y)),zoom:zoom.value,anchor:{x:point.x,y:point.y}};drag=null;dragging.value=true;svg.value.setPointerCapture(e.pointerId)}
+      return
+    }
+  }
   if(e.button!==0||e.target instanceof Element&&e.target.closest('[data-room]'))return
   const matrix=svg.value?.getScreenCTM();if(!matrix||!svg.value)return
   drag={id:e.pointerId,x:e.clientX,y:e.clientY,panX:pan.value.x,panY:pan.value.y,scaleX:matrix.a,scaleY:matrix.d}
   svg.value.setPointerCapture(e.pointerId);dragging.value=true
 }
 function movePan(e:PointerEvent):void{
+  if(fingers.has(e.pointerId))fingers.set(e.pointerId,{x:e.clientX,y:e.clientY})
+  if(pinch&&fingers.size===2){const [a,b]=[...fingers.values()];changeZoom(pinch.zoom*Math.hypot(a!.x-b!.x,a!.y-b!.y)/pinch.distance,pinch.anchor);return}
   if(!drag||drag.id!==e.pointerId)return
   pan.value={x:Math.max(-bounds.value.w*.65,Math.min(bounds.value.w*.65,drag.panX-(e.clientX-drag.x)/drag.scaleX)),y:Math.max(-bounds.value.h*.65,Math.min(bounds.value.h*.65,drag.panY-(e.clientY-drag.y)/drag.scaleY))}
 }
-function endPan(e:PointerEvent):void{if(drag?.id!==e.pointerId)return;if(svg.value?.hasPointerCapture(e.pointerId))svg.value.releasePointerCapture(e.pointerId);drag=null;dragging.value=false}
+function endPan(e:PointerEvent):void{
+  fingers.delete(e.pointerId)
+  if(pinch){pinch=null;drag=null;dragging.value=false}
+  if(svg.value?.hasPointerCapture(e.pointerId))svg.value.releasePointerCapture(e.pointerId)
+  if(drag?.id===e.pointerId){drag=null;dragging.value=false}
+}
 function slab(r:MapRoom,w=82,h=62):string{
   const {x,y}=center(r),j=Math.sin(r.id*37.1)*2
   return `M${x-w/2+3} ${y-h/2+2} L${x+w/2-5} ${y-h/2+j} L${x+w/2+1} ${y+h/2-5} L${x+w/2-5} ${y+h/2+1} L${x-w/2+2} ${y+h/2+j} L${x-w/2-1} ${y-h/2+8} Z`

@@ -1,3 +1,4 @@
+import { randomCombat } from '../../core/simulation/random'
 /**
  * kite_shooter 模板：保持距离 + 两种弹幕节拍
  * 走位全部经过 wantVelocity 的前瞻避障：
@@ -18,6 +19,7 @@ export const kiteShooterBrain: EnemyBrain = {
     }
     const c = host.def.kite
     if (!c) return
+    const lineOfSight=host.hasLineOfSight(map,player.x,player.y)
     // —— 感知：进入视野即永久锁定玩家（拉开不脱战，仅玩家死亡才解除；
     //    alerted 剧情警戒怪无视距离出生即索敌；loseSight 字段保留供后续
     //    嘲讽/脱战机制复用） ——
@@ -25,7 +27,7 @@ export const kiteShooterBrain: EnemyBrain = {
       if (host.ai !== 'kite') host.ai = 'kite'
     } else if (!player.alive && host.ai === 'kite') {
       host.ai = 'idle'
-      host.aiTimer = 0.5 + Math.random() * 0.6
+      host.aiTimer = 0.5 + randomCombat() * 0.6
     }
 
     let targetVx = 0
@@ -38,7 +40,8 @@ export const kiteShooterBrain: EnemyBrain = {
           const kind = host.windup === 'ring' ? 'ring' : 'straight'
           host.pendingShots.push({
             kind,
-            projectileId: kind === 'ring' ? c.ringProjectileId : c.straightProjectileId
+            projectileId: kind === 'ring' ? c.ringProjectileId : c.straightProjectileId,
+            volley: kind === 'straight' ? c.straightVolley : undefined
           })
           if (kind === 'ring') host.ringCd = c.ringInterval
           else host.straightCd = c.straightInterval
@@ -52,7 +55,7 @@ export const kiteShooterBrain: EnemyBrain = {
           host.strafeDir *= -1
           // 绕障偏转偏好跟随横移方向，绕墙与绕人走位一致
           host.avoidBias = host.strafeDir
-          host.strafeTimer = 1.4 + Math.random() * 1.2
+          host.strafeTimer = 1.4 + randomCombat() * 1.2
         }
 
         const ang = Math.atan2(player.y - host.y, player.x - host.x)
@@ -76,14 +79,16 @@ export const kiteShooterBrain: EnemyBrain = {
           speed = c.kiteSpeed * 0.8
         }
         // 僵直中走位照常（风筝步伐不停），这正是"僵直只封出招不封移动"
-        ;({ x: targetVx, y: targetVy } = host.wantVelocity(map, wantAng, speed))
+        ;({ x: targetVx, y: targetVy } = distP>c.kiteMax||!lineOfSight
+          ? host.navigateTo(map,player.x,player.y,speed)
+          : host.navigateTo(map,host.x+Math.cos(wantAng)*90,host.y+Math.sin(wantAng)*90,speed))
 
         // —— 开火节拍：到点不立即吐，进入可被打断的前摇（环弹优先）。
         //    僵直中节拍冻结、不能起新前摇（stun 结束后从剩余 CD 继续等） ——
-        if (host.canUseSkills) {
+        if (host.canUseSkills && lineOfSight) {
           host.ringCd -= dt
           host.straightCd -= dt
-          if (host.ringCd <= 0) {
+          if (c.ringCount > 0 && host.ringCd <= 0) {
             host.windup = 'ring'
             host.windupT = c.ringWindup
           } else if (host.straightCd <= 0) {
@@ -95,17 +100,17 @@ export const kiteShooterBrain: EnemyBrain = {
     } else {
       host.aiTimer -= dt
       if (host.ai === 'idle' && host.aiTimer <= 0) {
-        const a = Math.random() * Math.PI * 2
+        const a = randomCombat() * Math.PI * 2
         host.wanderX = Math.cos(a)
         host.wanderY = Math.sin(a)
         host.ai = 'wander'
-        host.aiTimer = 1 + Math.random() * 1.4
+        host.aiTimer = 1 + randomCombat() * 1.4
       } else if (host.ai === 'wander') {
         const a = Math.atan2(host.wanderY, host.wanderX)
         ;({ x: targetVx, y: targetVy } = host.wantVelocity(map, a, c.wanderSpeed))
         if (host.aiTimer <= 0) {
           host.ai = 'idle'
-          host.aiTimer = 0.5 + Math.random() * 0.8
+          host.aiTimer = 0.5 + randomCombat() * 0.8
         }
       }
     }

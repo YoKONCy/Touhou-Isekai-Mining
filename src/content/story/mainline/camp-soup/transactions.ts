@@ -2,6 +2,7 @@ import type { CharacterProfile } from '../../../../shared/profile'
 import { WOOD_ID, SOUP_ID, SALT_SOUP_ID, ROCK_STONE_ID, SPELL_HARAE_ID } from '../../../items/vanilla/ids'
 import { t, itemName } from '../../../../i18n'
 import { SOUP_RECIPE, SALT_SOUP_RECIPE, produce, spendMaterials, scaleRecipe } from '../../../../shared/production'
+import { cookingRecipes, type CookingMethod } from '../../../../shared/cookingRecipes'
 
 /** 修缮与烹饪共用同一份配方，界面展示和实际扣料保持一致。 */
 export const POT_REPAIR_COST: ReadonlyArray<readonly [string, number]> = [[ROCK_STONE_ID, 30], [WOOD_ID, 20]]
@@ -19,10 +20,11 @@ export function repairPot(c:CharacterProfile):string {
   if(!spend(c,POT_REPAIR_COST))return t('ui.camp.materials_missing')
   c.setFlag('base.pot.repaired',true);return t('ui.camp.pot_repaired')
 }
-export function cookSoupBatch(c:CharacterProfile,id=SOUP_ID,count=1):{ok:boolean;message:string}{
-  if(!c.flagBool('base.pot.repaired'))return {ok:false,message:t('ui.camp.need_repair')}
-  if(id!==SOUP_ID&&id!==SALT_SOUP_ID)return {ok:false,message:t('quest.reimu_cooking.unavailable')}
-  const recipe=scaleRecipe(id===SALT_SOUP_ID?SALT_SOUP_RECIPE:SOUP_RECIPE,count)
+export function cookSoupBatch(c:CharacterProfile,id=SOUP_ID,count=1,method:CookingMethod='pot'):{ok:boolean;message:string}{
+  if(!c.flagBool(method==='pot'?'base.pot.repaired':'base.grill.built'))return {ok:false,message:t('ui.camp.need_repair')}
+  const definition=cookingRecipes(c,method).find(recipe=>recipe.id===id)
+  if(!definition)return {ok:false,message:t('quest.reimu_cooking.unavailable')}
+  const recipe=scaleRecipe(definition,count)
   if(!recipe)return {ok:false,message:t('ui.cooking.quantity_invalid')}
   const result=produce(c,recipe)
   return {ok:result==='ready',message:result==='ready'?t('ui.camp.received',{item:itemName(id),qty:recipe.qty}):t(result==='space'?'ui.camp.bag_full':result==='locked'?'quest.reimu_cooking.unavailable':'ui.camp.materials_missing')}
@@ -51,6 +53,7 @@ export function deliverSoup(c:CharacterProfile):string {
     else c.storage.add(SPELL_HARAE_ID,1)
   }
   c.setFlag('quest.reimu.cooking.done',true)
+  c.discovery.unlock(SPELL_HARAE_ID)
   const gain=owned?'':'　'+t('ui.camp.received',{item:itemName(SPELL_HARAE_ID),qty:1})
   return t('quest.reimu_cooking.delivered')+gain
 }

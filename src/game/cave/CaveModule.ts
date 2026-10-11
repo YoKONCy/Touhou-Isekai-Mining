@@ -1,3 +1,16 @@
+import { setPlayerAppearance } from '../../shared/playerAppearance'
+import { canvasViewport } from '../../core/rendering/Viewport'
+import { searchRewardEffects,collectSearchReward,settleSearchRewards } from '../../shared/searchRewards'
+import { LocalPlayers, type LocalPlayer, type LocalPlayersSnapshot } from '../simulation/LocalPlayers'
+import type { SearchView } from '../../shared/search'
+import { idlePlayerCommand, type PlayerCommand } from '../../core/simulation/PlayerCommand'
+import type { PlayerAppearance } from '../../shared/playerAppearance'
+import { SnapshotCodec, type StateFields } from '../../core/simulation/snapshot'
+import type { RoomSnapshot } from './RoomRuntime'
+import type { BattleSnapshot } from '../simulation/BattleSimulation'
+import { readPlayerIntent } from '../simulation/PlayerIntent'
+import { touchControls } from '../../browser/display'
+import { randomCombat, randomGeneration, withGenerationSeed } from '../../core/simulation/random'
 /**
  * 矿洞模块（IGameModule 首个实现）
  *
@@ -46,7 +59,7 @@ import {
 } from '../../content/items/vanilla/ids'
 import type { Slot } from '../../shared/inventory'
 import { QUICK_ACCEPT_KINDS } from '../../shared/quickSlots'
-import type { CharacterProfile } from '../../shared/profile'
+import { CharacterProfile } from '../../shared/profile'
 import { deriveCombat, expNeeded, loseDeathExp, passiveEquipment } from '../../shared/combat'
 import { dialogue } from '../dialogue/dialogueService'
 import { tutorial } from '../dialogue/tutorial'
@@ -58,10 +71,11 @@ import { sfx } from '../audio/Sfx'
 import { Player } from '../Player'
 import { doorDirOf, generateFloorPlan, otherRoom } from './dungeon/bsp'
 import type { Dir, FloorPlan, RoomDef } from './dungeon/types'
-import { RoomRuntime, type RoomHost, type RoomInput } from './RoomRuntime'
+import { RoomRuntime, type RoomHost, type RoomInput, type RoomParticipant } from './RoomRuntime'
 import { FourthFloorDirector } from './FourthFloorDirector'
 import { FOURTH_FLAGS } from '../../content/story/mainline/fourth-rescue/state'
-import { BIOME_DEEP_HOLLOW_ID } from '../../content/biomes/vanilla/ids'
+import { buildOldHellFloorPlan } from './dungeon/oldHellFloor'
+import { layoutRoomDoors,doorArrival,roomDimensions } from './dungeon/roomDoors'
 import { STRANGE_GEL_ID } from '../../content/items/vanilla/ids'
 import { PrologueDirector, type PrologueHost } from './PrologueDirector'
 import { buildProloguePlan } from './prologue/prologueFloor'
@@ -71,7 +85,7 @@ type FadePhase = 'none' | 'out' | 'in'
 /** 手持切换 action（实际按键在 keymap：1 武器A / 2 武器B / 3 镐） */
 const HAND_ACTIONS: ActionId[] = ['hand1', 'hand2', 'hand3']
 /** 道具快捷槽使用键：4 / 5 / 6（暂未纳入改键表） */
-const QUICK_KEYS = ['Digit4', 'Digit5', 'Digit6']
+const QUICK_ACTIONS = ['quick1', 'quick2', 'quick3'] as const
 /** 手持序号 → 装备槽（顺序即 DESIGN_MEMO §4.4 契约） */
 const HAND_SLOTS = ['weaponA', 'weaponB', 'pick'] as const
 
@@ -93,21 +107,10 @@ const EMPTY_ROOM_INPUT: RoomInput = {
   interactPressed: false
 }
 
-function arrivePoint(room: RoomRuntime, dir: Dir, doorId: number): { x: number; y: number; facing: number } {
-  const t = CONFIG.tile
-  const { roomCols: C, roomRows: R, wallThickness: W } = CONFIG
+function arrivePoint(room: RoomRuntime, doorId: number): { x: number; y: number; facing: number } {
   // 同墙多门按实际连接定位，不能落到该方向的第一扇门。
   const door = room.doors.find((d) => d.doorId === doorId)!
-  switch (dir) {
-    case 'W':
-      return { x: (W + 0.5) * t, y: (door.row + 0.5) * t, facing: 0 }
-    case 'E':
-      return { x: (C - W - 1 + 0.5) * t, y: (door.row + 0.5) * t, facing: Math.PI }
-    case 'N':
-      return { x: (door.col + 0.5) * t, y: (W + 0.5) * t, facing: Math.PI / 2 }
-    case 'S':
-      return { x: (door.col + 0.5) * t, y: (R - W - 1 + 0.5) * t, facing: -Math.PI / 2 }
-  }
+  return doorArrival(door)
 }
 
 /** 大地图/罗盘用的房间只读视图 */
@@ -161,6 +164,7 @@ export class CaveModule implements IGameModule, PrologueHost {
   }
   private depth = 1
   private plan!: FloorPlan
+  private roomSeed = 0
   /** 本层距撤离点的最大 BFS 步数（普通房刷怪权重区间的归一化基准） */
   /** 玩家实体（PrologueHost 接口要求公开；每次新趟重建） */
   player!: Player
@@ -171,6 +175,13 @@ export class CaveModule implements IGameModule, PrologueHost {
    */
   get inventory() {
     return this.character.inventory
+  }
+  get foodCooldown(): number { return this.character.food.remaining }
+  get foodCooldownDuration(): number { return this.character.food.duration }
+  getWeaponSkillCooldown(id:string):number { return this.player?.getWeaponSkillCooldown(id)??0 }
+  selectCostume(costume:'default'|'old_miner'):boolean {
+    if(costume==='old_miner'&&!this.character.flagBool('unlock.costume.old_miner'))return false
+    this.character.costume=costume;this.player.costume=costume;return true
   }
   get equipment() {
     return this.character.equipment
@@ -188,6 +199,17 @@ export class CaveModule implements IGameModule, PrologueHost {
   private camera!: Camera
   /** 批次 E：矿洞光照（环境压暗 + 矿工帽暖光圈） */
   private light!: CaveLight
+  getSearchView(): SearchView | null { return this.current?.searchView(this.player) ?? null }
+  get actionsLocked():boolean{return this.player?.isChanneling??false}
+  override get inputBlocked():boolean{return this.locked||this.storyLock||this.fade!=='none'||this.entryReveal>=0||!!this.relay?.blocksInput||!!this.fourth?.blocksInput||dialogue.isActive||tutorial.isModal}
+  takeSearchSlot(slot: number): void {
+    const view = this.getSearchView()
+    if (view) this.mctx.engine.input.queueSearch({ playerId: this.localPlayers.primaryId, containerId: view.id, slot })
+  }
+  cancelSearch(): void {
+    const view = this.getSearchView()
+    if (view) this.mctx.engine.input.queueSearch({ playerId: this.localPlayers.primaryId, containerId: view.id, slot: -2 })
+  }
   private roomCache = new Map<number, RoomRuntime>()
   private currentId = -1
   private current!: RoomRuntime
@@ -223,6 +245,7 @@ export class CaveModule implements IGameModule, PrologueHost {
   }
   /** 快捷栏点击符卡 A 的挂号（实际结算在 update 中执行，需要 engine 震屏） */
   private spellARequested = false
+  private spellBRequested = false
 
   // —— PrologueHost 窄接口（导演只准通过这些面驱动模块） —— //
   get profile(): CharacterProfile {
@@ -236,12 +259,67 @@ export class CaveModule implements IGameModule, PrologueHost {
   }
   /** 房间运行时对模块的回调集合（构造时绑定，读写均经档案三件套） */
   private readonly host: RoomHost
+  private readonly participantHosts = new Map<string, RoomHost>()
+  private activeParticipants:RoomParticipant[]=[]
+  private participantEntries=new WeakMap<Player,RoomParticipant>()
+  get canAddLocalPlayer():boolean { return !!this.current && !this.director && !this.locked && !dialogue.isActive && !this.fourth?.blocksInput && !this.relay?.blocksInput }
+  debugAddLocalPlayer(appearance:PlayerAppearance):string {
+    if(!this.canAddLocalPlayer)throw new Error(t('ui.local_players.not_ready'))
+    const profile=new CharacterProfile();profile.playerAppearance=appearance;profile.setFlag('prologue.done',true)
+    const member=this.localPlayers.add(profile);this.localPlayers.ensureEntities(this.current.map,this.player,(x,y,r)=>this.current.canPlacePlayer(x,y,r))
+    return member.id
+  }
+  debugRemoveLocalPlayer(id:string):void {
+    if(id===this.localPlayers.primaryId)return
+    const member=this.localPlayers.get(id)
+    if(member?.entity)this.current.detachPlayer(member.entity)
+    this.participantHosts.delete(id);this.localPlayers.remove(id)
+    if(this.localPlayers.allDown&&!this.director)this.finishRun('cave:died')
+  }
+  private participantHost(member:LocalPlayer):RoomHost {
+    let host=this.participantHosts.get(member.id)
+    if(host)return host
+    const gain=(amount:number)=>{
+      const multiplier=Math.min(CONFIG.exp.depthCap,1+CONFIG.exp.depthFactor*(this.depth-1))
+      if(member.profile.gainExp(Math.round(amount*multiplier))>0){member.entity?.applyGrowth(deriveCombat(member.profile.combat),false);member.entity?.showLevelUp()}
+    }
+    host={...this.host,inventory:member.profile.inventory,
+      searchEffects:()=>searchRewardEffects(member.profile),collectSearchReward:id=>collectSearchReward(member.profile,id),
+      onKill:amount=>{this.kills++;gain(amount)},
+      onMine:kind=>gain(kind==='ore'?CONFIG.exp.mineOre:CONFIG.exp.mineRock),
+      onItemFound:id=>{this.host.onItemFound?.(id);if(id===STRANGE_GEL_ID)member.profile.setFlag('story.strangeGel.found',true)},
+      onPlayerDowned:()=>false,
+      equipItem:(slot,id)=>{member.profile.equipment.set(slot,id);this.localPlayers.sync(member);return true}}
+    this.participantHosts.set(member.id,host);return host
+  }
+  private participants(input:RoomInput,engine:EngineContext,dt:number,frozen=false):RoomParticipant[] {
+    this.localPlayers.bindPrimary(this.player);this.localPlayers.ensureEntities(this.current.map,this.player,(x,y,r)=>this.current.canPlacePlayer(x,y,r))
+    const commands=frozen?[]:this.localPlayers.readCommands(engine.input,this.mctx.manager.simulation.tick)
+    if(!this.director)for(const player of this.localPlayers.entities)player.beginMineRun(`${this.roomSeed}:${this.character.round}`)
+    const result=this.activeParticipants;result.length=0
+    let primary=this.participantEntries.get(this.player)
+    if(!primary){primary={player:this.player,input,host:this.host};this.participantEntries.set(this.player,primary)}
+    primary.input=input;result.push(primary)
+    for(const member of this.localPlayers.extras){
+      const player=member.entity;if(!player)continue
+      const host=this.participantHost(member)
+      const command=commands.find(command=>command.playerId===member.id)??idlePlayerCommand(member.id,player.x,player.y,player.facing)
+      if(!frozen)this.localPlayers.apply(member,command,engine,this.current,host)
+      player.scp127.observe(frozen?0:dt,player,frozen||this.entryReveal>=0)
+      player.scp127.noteArena(this.current.def.id,this.current.isCleared)
+      let entry=this.participantEntries.get(player)
+      if(!entry){entry={player,input:command,host};this.participantEntries.set(player,entry)}
+      entry.input=command;entry.host=host;result.push(entry)
+    }
+    return result
+  }
 
   setStoryLock(v: boolean): void {
     this.storyLock = v
   }
 
   setHand(i: number): void {
+    if(this.player?.isChanneling)return
     this.selected = i
     this.syncMelee()
   }
@@ -269,10 +347,11 @@ export class CaveModule implements IGameModule, PrologueHost {
   /**
    * @param character 账号级角色档案（组合根 main.ts 读档/建档后注入；矿洞与基地共享同一实例）
    */
-  constructor(private readonly character: CharacterProfile) {
+  constructor(private readonly character: CharacterProfile, readonly localPlayers = new LocalPlayers(character)) {
     this.host = {
       inventory: this.character.inventory,
       onItemFound: id => { if (id === STRANGE_GEL_ID) this.character.setFlag('story.strangeGel.found', true) },
+      searchEffects:()=>searchRewardEffects(this.character),collectSearchReward:id=>collectSearchReward(this.character,id),
       claimMiningChest: () => this.claimMiningChest(),
       claimGuaranteedMiningChest:()=>{
         if(!this.relay||this.miningChestClaimed)return false
@@ -293,7 +372,7 @@ export class CaveModule implements IGameModule, PrologueHost {
       // 序章基地东门（剧情出口）：导演验收后落 flag 并收尾转正式第一层
       requestStoryExit: (ref) => this.director?.onStoryExit(ref),
       requestExtract: () => { if (!this.fourth?.active) this.finishRun('cave:extract') },
-      onPlayerDied: () => this.finishRun('cave:died'),
+      onPlayerDied: () => { if(this.localPlayers.allDown)this.finishRun('cave:died') },
       // B2：教学期倒下由导演接管（不甘独白 + 半血复活）；返回 false 才走死亡结算
       onPlayerDowned: () => this.director?.handlePlayerDowned() ?? false,
       onInteract: (it) => {this.director?.onInteract(it);this.relay?.onInteract(it.ref);this.fourth?.onInteract(it.ref)},
@@ -331,10 +410,11 @@ export class CaveModule implements IGameModule, PrologueHost {
       bottom: CONFIG.roomRows * CONFIG.tile
     })
     this.light = new CaveLight(ctx.engine.viewW, ctx.engine.viewH)
+    this.camera.setFraming(CONFIG.roomCols*CONFIG.tile,CONFIG.roomRows*CONFIG.tile)
     this.offRestart = ctx.bus.on('cave:restart', () => {
       sfx.setCaveMusic(false)
       sfx.setCaveAmbient(false)
-      ctx.manager.transitionTo('base', { arrival: true, extracted: this.extracted, fromFloor:this.depth, explorationDeath: !this.extracted && this.character.flagBool('prologue.done') }, !this.player.alive)
+      ctx.manager.transitionTo('base', { arrival: true, extracted: this.extracted, fromFloor:this.depth, explorationDeath: !this.extracted && this.character.flagBool('prologue.done') }, !this.extracted&&this.localPlayers.allDown)
     })
     this.offRequestPanel = ctx.bus.on('ui:requestPanel', (kind) => this.setPanel(kind))
     // 批次 E：浏览器要求用户手势后才能出声，首次按键/点击懒初始化音频
@@ -349,14 +429,17 @@ export class CaveModule implements IGameModule, PrologueHost {
   }
 
   onExit(): void {
+    this.current?.cancelSearches()
+    for(const room of this.roomCache.values())room.releaseRenderResources()
     sfx.setKedamaMusic(false)
     this.player?.cancelCharge()
     dialogue.cancel()
     sfx.stopFootsteps()
-    this.current?.clearDoomsday(this.player)
+    for(const player of this.localPlayers.entities){this.current?.clearDoomsday(player);player.cancelCharge();player.effects.clear('scene')}
     this.player?.effects.clear('scene')
     this.player?.tarot.clear()
     this.player?.bow.clear()
+    this.player?.scp127.clearFlights()
     sfx.setCaveAmbient(false)
     sfx.setCaveMusic(false)
     floorTitle.dismiss()
@@ -369,12 +452,72 @@ export class CaveModule implements IGameModule, PrologueHost {
     this.offAudioUnlock = null
   }
 
+  /** 演出中的回调不是战斗数据；只在可操作边界建立恢复点。 */
+  captureInputState():unknown {
+    if(this.director||this.relay||dialogue.isActive||this.fourth?.blocksInput||this.storyLock||this.locked||this.panel==='inventory')throw new Error(t('ui.simulation.not_ready'))
+    return {profile:this.character.captureSimulation(),party:this.localPlayers.extras.map(member=>[member.id,member.controller,member.profile.captureSimulation(),member.entity?.x,member.entity?.y,member.entity?.hp,member.entity?.alive]),player:[this.player.x,this.player.y,this.player.hp,this.player.mana,this.player.alive,this.player.debugGod,this.player.activeToolId],room:this.currentId,kills:this.kills,cast:this.spellARequested,castB:this.spellBRequested,phase:this.fourth?.phase,enemies:this.current.snapshotEnemies.map(enemy=>[enemy.entityId,enemy.x,enemy.y,enemy.hp,enemy.alive]),ore:this.current.oreLeft,cleared:this.current.isCleared}
+  }
+  captureSimulation():unknown {
+    if(this.director||this.relay||dialogue.isActive||this.fourth?.blocksInput||this.storyLock||this.locked||this.panel==='inventory')throw new Error(t('ui.simulation.not_ready'))
+    const codec=new SnapshotCodec([this.player])
+    this.localPlayers.bindReferences(codec)
+    for(const room of this.roomCache.values()){codec.add(room);room.bindSnapshotReferences(codec)}
+    const fields:StateFields={}
+    const source=this as unknown as Record<string,unknown>
+    for(const key of ['roomSeed','depth','currentId','fade','fadeT','pendingDoor','doorCooldown','miningChestClaimed','kills','extracted','survivalIntroPending','blackAlpha','entryReveal','entryTitlePending','spellARequested','spellBRequested'])fields[key]=codec.encode(source[key])
+    return {version:1,profile:this.character.captureSimulation(codec),player:this.player.captureSimulation(codec),localPlayers:this.localPlayers.capture(codec),plan:{...structuredClone(this.plan),slots:Array.from(this.plan.slots)},rooms:[...this.roomCache.values()].map(room=>room.captureSimulation(codec)),fields,fourth:this.fourth?.captureSimulation(codec)??null}
+  }
+  restoreSimulation(raw:unknown):void {
+    const state=raw as {version:number;profile:StateFields;player:StateFields;localPlayers?:LocalPlayersSnapshot;plan:FloorPlan;rooms:RoomSnapshot[];fields:StateFields;fourth:StateFields|null}
+    if(state.version!==1||!state.rooms?.length)throw new Error(t('ui.simulation.invalid'))
+    dialogue.cancel();tutorial.dismiss();floorTitle.dismiss()
+    const codec=new SnapshotCodec()
+    this.character.restoreSimulation(state.profile,codec)
+    setPlayerAppearance(this.character.playerAppearance)
+    if(!this.player)this.player=new Player(0,0)
+    ;(this.player as {entityId:string}).entityId=String(state.player.entityId);codec.add(this.player)
+    this.localPlayers.bindPrimary(this.player);this.localPlayers.prepareRestore(state.localPlayers,codec);this.participantHosts.clear()
+    this.director=null;this.relay=null;this.storyLock=false;this.locked=false;this.panel=null
+    this.plan={...structuredClone(state.plan),slots:Int16Array.from(state.plan.slots)}
+    for(const room of this.roomCache.values())room.releaseRenderResources()
+    this.roomCache.clear()
+    for(const slice of state.rooms){
+      const room=new RoomRuntime(slice.definition,this.player.x,this.player.y,slice.script??undefined)
+      room.restoreSimulation(slice,codec);codec.add(room);this.roomCache.set(room.def.id,room)
+    }
+    this.spellBRequested=false
+    codec.restore(this,state.fields)
+    const room=this.roomCache.get(this.currentId)
+    if(!room)throw new Error(t('ui.simulation.invalid'))
+    this.current=room
+    this.player.ammoInventory=this.character.inventory;this.player.scp127.bind(this.character)
+    this.player.restoreSimulation(state.player,codec,room.map)
+    this.localPlayers.finishRestore(state.localPlayers,codec,room.map)
+    room.rememberPlayers(this.localPlayers.entities)
+    this.fourth=state.fourth?new FourthFloorDirector(this.character,()=>this.mctx.manager.transitionTo('base',{arrival:true,extracted:true,fromFloor:4,rumiaArrival:true})):null
+    if(this.fourth){
+      const active=state.rooms.find(slice=>slice.definition.landmark==='kedama_arena')
+      if(active)this.fourth.onRoomEnter(this.roomCache.get(active.definition.id)!,true,true)
+      this.fourth.restoreSimulation(state.fourth!,codec)
+    }
+    this.camera.setBounds({left:0,top:0,right:room.map.cols*room.map.tile,bottom:room.map.rows*room.map.tile});this.camera.snapTo(this.player)
+    this.mctx.bus.emit('ui:panel',null)
+    sfx.setKedamaMusic(!!this.fourth?.active);if(!this.fourth?.active)sfx.setCaveMusic(true,this.depth===5?'old_hell':'cave')
+  }
+  /** 当前房间可导出给不依赖 Canvas 的正式战斗驱动。 */
+  captureBattleSimulation():BattleSnapshot {
+    const codec=new SnapshotCodec([this.player]);this.current.bindSnapshotReferences(codec)
+    this.localPlayers.bindReferences(codec)
+    return {version:1,profile:this.character.captureSimulation(codec),player:this.player.captureSimulation(codec),localPlayers:this.localPlayers.capture(codec),room:this.current.captureSimulation(codec),hitStop:this.mctx.engine.captureTiming?.().hitStop??0,kills:this.kills,miningChestClaimed:this.miningChestClaimed,terminal:this.locked}
+  }
+
   /**
    * 生成全新一层（背包/装备/等级全部保留；每次调用＝新一趟下矿）
    * @param mode prologue＝新档序章固定脚本楼层（无饭团/无随机）；normal＝正常随机下矿
    */
   private startNewRun(mode: 'normal' | 'prologue'): void {
     floorTitle.dismiss()
+    this.roomSeed = Math.floor(randomGeneration()*4294967296)
     this.director = null
     this.relay = mode==='normal'&&shouldStartMineRelay(this.character,this.depth)
       ? new MineRelayDirector(this.character,()=>this.finishRun('cave:extract')) : null
@@ -393,11 +536,14 @@ export class CaveModule implements IGameModule, PrologueHost {
       this.plan=buildMineRelayPlan()
     } else if(this.depth===4){
       this.plan=buildFourthFloorPlan()
+    } else if(this.depth===5){
+      this.plan=buildOldHellFloorPlan()
     } else {
       this.plan = generateFloorPlan()
-      for (const room of this.plan.rooms) { room.floor = this.depth; if (this.depth === 5) room.biomeId = BIOME_DEEP_HOLLOW_ID }
+      for (const room of this.plan.rooms) room.floor = this.depth
       if(this.depth===3)configureThirdFloor(this.plan)
     }
+    for(const room of this.roomCache.values())room.releaseRenderResources()
     this.roomCache.clear()
     this.miningChestClaimed = false
     this.kills = 0
@@ -405,6 +551,7 @@ export class CaveModule implements IGameModule, PrologueHost {
     this.locked = false
     this.storyLock = false
     this.setPanelSilent(null)
+    this.spellARequested=false;this.spellBRequested=false
     this.fade = 'none'
     this.fadeT = 0
     this.pendingDoor = -1
@@ -439,45 +586,52 @@ export class CaveModule implements IGameModule, PrologueHost {
 
   /** 进入（并按需懒创建）一个房间，重定位玩家与相机 */
   private enterRoom(roomId: number, fromDoorId: number): void {
+    this.current?.cancelSearches()
     const def = this.plan.rooms.find((r) => r.id === roomId)!
     let room = this.roomCache.get(roomId)
     if (!room) {
-      let sx = (CONFIG.roomCols * CONFIG.tile) / 2
-      let sy = (CONFIG.roomRows * CONFIG.tile) / 2
+      const size=roomDimensions(def)
+      let sx = (size.cols * CONFIG.tile) / 2
+      let sy = (size.rows * CONFIG.tile) / 2
       if (fromDoorId >= 0) {
         // 落点本身就是合法地面，同时用作刷怪/矿脉的出生留空中心
         const p = this.previewArrive(def, fromDoorId)
         sx = p.x
         sy = p.y
       }
-      room = new RoomRuntime(def, sx, sy, this.director?.specForRoom(roomId)??(this.relay?mineRelayRoomSpec:def.landmark==='kedama_arena'&&this.fourth?this.fourth.specForArena():undefined))
+      room = withGenerationSeed(this.roomSeed^Math.imul(roomId+1,0x9e3779b9),()=>new RoomRuntime(def, sx, sy, this.director?.specForRoom(roomId)??(this.relay?mineRelayRoomSpec:def.landmark==='kedama_arena'&&this.fourth?this.fourth.specForArena():undefined)))
       this.roomCache.set(roomId, room)
     }
 
     this.current?.clearDoomsday(this.player)
+    for(const member of this.localPlayers.entities){member.meleeEchoes.length=0;member.areaBurst=null}
     if (this.player.rangedFlight && !this.player.rangedFlight.returning) {
       this.player.rangedFlight.returning = true
       this.player.rangedFlight.hits.clear()
     }
     this.player.tarot.clear()
     this.player.bow.clear()
+    this.player.scp127.clearFlights()
     room.clearDoomsday(this.player)
     this.current = room
     this.currentId = roomId
 
     if (fromDoorId >= 0) {
-      const dir = doorDirOf(def, fromDoorId)
-      const p = arrivePoint(room, dir, fromDoorId)
+      const p = arrivePoint(room, fromDoorId)
       this.player.x = p.x
       this.player.y = p.y
       this.player.facing = p.facing
     } else {
       // 入口房：房间中央
-      this.player.x = (CONFIG.roomCols * CONFIG.tile) / 2
-      this.player.y = (CONFIG.roomRows * CONFIG.tile) / 2
+      this.player.x = (room.map.cols * room.map.tile) / 2
+      this.player.y = (room.map.rows * room.map.tile) / 2
     }
     this.player.vx = 0
     this.player.vy = 0
+
+    if(fromDoorId<0)this.localPlayers.beginScene(this.player,room.map,(x,y,r)=>room.canPlacePlayer(x,y,r))
+    else {this.localPlayers.bindPrimary(this.player);this.localPlayers.placeExtras(room.map,this.player,(x,y,r)=>room.canPlacePlayer(x,y,r))}
+    room.rememberPlayers(this.localPlayers.entities)
 
     room.onPlayerEnter()
     this.survivalIntroPending=def.encounter==='survival'&&!this.character.flagBool('story.monsterRoom.seen')
@@ -485,8 +639,8 @@ export class CaveModule implements IGameModule, PrologueHost {
     this.camera.setBounds({
       left: 0,
       top: 0,
-      right: CONFIG.roomCols * CONFIG.tile,
-      bottom: CONFIG.roomRows * CONFIG.tile
+      right: room.map.cols * room.map.tile,
+      bottom: room.map.rows * room.map.tile
     })
     this.camera.snapTo({ x: this.player.x, y: this.player.y })
     this.doorCooldown = CONFIG.dungeon.doorTriggerCooldown
@@ -498,39 +652,20 @@ export class CaveModule implements IGameModule, PrologueHost {
 
   /**
    * 构造前预估落点（RoomRuntime 生成敌人/矿脉时需要出生留空中心）。
-   * 门格位算法与 RoomRuntime.layoutDoors 完全一致（中点/错峰），
-   * 这里直接复刻计算，避免房间提前实例化。
+   * 与运行时共用同一份门口和落点查询，避免异形岩岸产生两套位置算法。
    */
   private previewArrive(def: RoomDef, doorId: number): { x: number; y: number } {
-    const t = CONFIG.tile
-    const { roomCols: C, roomRows: R, wallThickness: W } = CONFIG
-    const dir = doorDirOf(def, doorId)
-    const sameDir = def.doors.filter((d) => d.dir === dir)
-    const index = Math.max(0, sameDir.findIndex((d) => d.doorId === doorId))
-    const count = sameDir.length
-    const mid = (size: number): number => Math.floor(size / 2)
-    const offset = (() => {
-      if (count === 1) return 0
-      if (count === 2) return index === 0 ? -4 : 4
-      if (count === 3) return [-6, 0, 6][index]
-      const size=dir==='W'||dir==='E'?R:C
-      return Math.round(W+2+(size-W-3-(W+2))*index/(count-1))-mid(size)
-    })()
-    let col: number
-    let row: number
-    if (dir === 'W' || dir === 'E') {
-      col = dir === 'W' ? W + 0.5 : C - W - 1 + 0.5
-      row = mid(R) + offset + 0.5
-    } else {
-      col = mid(C) + offset + 0.5
-      row = dir === 'N' ? W + 0.5 : R - W - 1 + 0.5
-    }
-    return { x: col * t, y: row * t }
+    return doorArrival(layoutRoomDoors(def).find(door=>door.doorId===doorId)!)
   }
 
   private beginTransition(doorId: number): void {
+    if (this.panel === 'inventory') {
+      this.mctx.bus.emit('ui:inventoryReturn', undefined)
+      this.setPanel(null)
+    }
     if (this.fade !== 'none' || this.locked || this.panel !== null || this.doorCooldown > 0) return
-    this.player.cancelCharge()
+    this.current.cancelSearches()
+    for(const player of this.localPlayers.entities)player.cancelCharge()
     this.fade = 'out'
     this.fadeT = 0
     this.pendingDoor = doorId
@@ -539,8 +674,10 @@ export class CaveModule implements IGameModule, PrologueHost {
   /** 撤离/死亡 → 冻结并通知 UI；死亡损失随实际扣除一起记录。 */
   private finishRun(kind: 'cave:extract' | 'cave:died'): void {
     if (this.locked) return
+    this.mctx.bus.emit('ui:inventoryReturn', undefined)
     this.locked = true
     this.extracted = kind === 'cave:extract'
+    for(const member of this.localPlayers.all)settleSearchRewards(member.profile,this.extracted)
     if(this.extracted&&!this.director)completeSmeltingRun(this.character)
     if(this.extracted&&this.depth===2)this.character.setFlag('story.secondFloor.returned',true)
     if(this.extracted){
@@ -552,13 +689,26 @@ export class CaveModule implements IGameModule, PrologueHost {
     // 死亡按物品规则丢失随身素材，扣除本级已有经验的 25%；装备、等级与仓库不受影响。
     if (!this.extracted) {
       lostExp = loseDeathExp(this.character.combat)
-      for (const inv of [this.inventory, this.quickSlots]) {
+      for (const inv of [this.inventory, this.quickSlots, this.character.trash]) {
         for (let i = 0; i < inv.slots.length; i++) {
           const stack = inv.slots[i]
           if (stack && itemCarryRules(stack.id).loseOnDeath) {
             // 清空槽位前记录实扣数量，同种物品跨背包与快捷栏合并展示。
             lostItems.set(stack.id, (lostItems.get(stack.id) ?? 0) + stack.qty)
             inv.slots[i] = null
+          }
+        }
+      }
+    }
+    for(const member of this.localPlayers.extras){
+      const profile=member.profile
+      if(this.extracted){completeSmeltingRun(profile);profile.deepestDepth=Math.max(profile.deepestDepth,this.depth)}
+      else {
+        loseDeathExp(profile.combat)
+        for(const inventory of [profile.inventory,profile.quickSlots,profile.trash]){
+          for(let index=0;index<inventory.slots.length;index++){
+            const stack=inventory.slots[index]
+            if(stack&&itemCarryRules(stack.id).loseOnDeath)inventory.slots[index]=null
           }
         }
       }
@@ -600,7 +750,8 @@ export class CaveModule implements IGameModule, PrologueHost {
   private setPanel(kind: UIPanelKind | null): void {
     if (this.locked) return
     if (kind && this.fourth?.blocksInput) return
-    if (kind) this.player.cancelCharge()
+    if (kind) this.current.cancelSearch(this.player)
+    if (kind) for(const player of this.localPlayers.entities)player.cancelCharge()
     this.panel = kind
     this.director?.onPanelChanged(kind)
     if (kind === 'map' && !this.director) {
@@ -614,6 +765,8 @@ export class CaveModule implements IGameModule, PrologueHost {
   private syncMelee(): void {
     if (!this.player) return
     this.player.ammoInventory=this.inventory
+    this.player.bindEquipment(this.equipment)
+    this.player.scp127.bind(this.character)
     this.player.equipmentCombat = passiveEquipment(this.equipment)
     const id = this.equipment.get(HAND_SLOTS[this.selected])
     this.player.setMelee(id ? getItemDef(id).melee ?? null : null, id)
@@ -633,6 +786,7 @@ export class CaveModule implements IGameModule, PrologueHost {
 
   /** 切换手持（键 1/2/3；面板打开时也允许顺手切） */
   selectHand(index: number): void {
+    if (this.player.isChanneling) return
     if (index < 0 || index >= HAND_SLOTS.length || index === this.selected) return
     this.selected = index
     this.syncMelee()
@@ -845,11 +999,14 @@ export class CaveModule implements IGameModule, PrologueHost {
   requestCastSpellA(): void {
     this.spellARequested = true
   }
+  requestCastSpellB(): void {
+    this.spellBRequested = true
+  }
 
-  /** 释放符卡 A：读装备槽符卡 → Player 灵力/CD 门控 → 房间做伤害/消弹/演出 */
-  private tryCastSpellA(engine: EngineContext): void {
+  /** 读取指定符卡槽，经灵力/CD 门控后交给房间结算。 */
+  private tryCastSpell(engine: EngineContext,slot:'spellA'|'spellB'): void {
     if (this.locked || !this.player.alive) return
-    const id = this.equipment.get('spellA')
+    const id = this.equipment.get(slot)
     const def = id ? getItemDef(id).spell : null
     if (!def) return
     if (this.player.castSpell(def)) {
@@ -862,13 +1019,12 @@ export class CaveModule implements IGameModule, PrologueHost {
    * 两格拖放结算（格可位于背包/道具槽不同容器）：
    * 同类尽量合并到目标堆，合不下或异类则整堆交换。纯函数，由调用方写回容器。
    */
-  private mergeOrSwap(src: NonNullable<Slot>, dst: Slot): { src: Slot; dst: Slot } {
+  private mergeOrSwap(src: NonNullable<Slot>, dst: Slot, cap = getItemDef(src.id).maxStack): { src: Slot; dst: Slot } {
     if (dst && dst.id === src.id) {
-      const cap = getItemDef(src.id).maxStack
       const put = Math.min(cap - dst.qty, src.qty)
       if (put > 0) {
         const left = src.qty - put
-        return { src: left > 0 ? { id: src.id, qty: left } : null, dst: { id: dst.id, qty: dst.qty + put } }
+        return { src: left > 0 ? { ...src, qty: left } : null, dst: { ...dst, qty: dst.qty + put } }
       }
     }
     return { src: dst, dst: src }
@@ -879,6 +1035,7 @@ export class CaveModule implements IGameModule, PrologueHost {
     const src = this.inventory.slots[invIndex]
     if (!src || !QUICK_ACCEPT_KINDS.has(getItemDef(src.id).kind)) return false
     const r = this.mergeOrSwap(src, this.quickSlots.get(qIndex))
+    if (r.src && r.src.qty > this.inventory.stackLimit(r.src.id)) return false
     this.inventory.slots[invIndex] = r.src
     this.quickSlots.set(qIndex, r.dst)
     return true
@@ -888,7 +1045,14 @@ export class CaveModule implements IGameModule, PrologueHost {
   quickToInv(qIndex: number, invIndex: number): void {
     const src = this.quickSlots.get(qIndex)
     if (!src) return
-    const r = this.mergeOrSwap(src, this.inventory.slots[invIndex])
+    const cap = this.inventory.stackLimit(src.id), dst = this.inventory.slots[invIndex]
+    if (!dst) {
+      const put = this.inventory.depositAt(invIndex, src, src.qty)
+      this.quickSlots.set(qIndex, src.qty > put ? { ...src, qty: src.qty - put } : null)
+      return
+    }
+    if (dst.id !== src.id && src.qty > cap) return
+    const r = this.mergeOrSwap(src, dst, cap)
     this.quickSlots.set(qIndex, r.src)
     this.inventory.slots[invIndex] = r.dst
   }
@@ -911,6 +1075,7 @@ export class CaveModule implements IGameModule, PrologueHost {
 
   /** 光标拿放装备后同步招式；镐只能替换，不能卸空。 */
   setEquipment(slot: EquipSlot, id: ItemId | null): boolean {
+    if (this.actionsLocked) return false
     if (!ENABLED_SLOTS.has(slot) || slot === 'pick' && !id || id && !slotAccepts(slot, id)) return false
     this.equipment.set(slot, id)
     this.syncMelee()
@@ -936,7 +1101,7 @@ export class CaveModule implements IGameModule, PrologueHost {
           ? 'weaponB'
           : 'weaponA' // 两槽都占着：挤进 A，旧武器回背包格
     }
-    if (def.kind === 'spellcard') return 'spellA'
+    if (def.kind === 'spellcard') return !this.equipment.get('spellA')?'spellA':!this.equipment.get('spellB')?'spellB':'spellA'
     // 饰品类（物品声明虚拟槽 'trinket'）：自动进第一个空着的饰品槽，全满则挤 A
     if (def.equipSlot === 'trinket') {
       return TRINKET_SLOTS.find((s) => this.equipment.get(s) === null) ?? 'trinketA'
@@ -946,61 +1111,85 @@ export class CaveModule implements IGameModule, PrologueHost {
 
   /** 背包格 → 穿到指定装备槽（槽位类型门控；旧装备回格） */
   equipFromSlotTo(index: number, targetSlot: EquipSlot): boolean {
+    if (this.actionsLocked) return false
     const invSlot = this.inventory.slots[index]
     if (!invSlot) return false
     if (!ENABLED_SLOTS.has(targetSlot) || !slotAccepts(targetSlot, invSlot.id)) return false
-    const old = this.equipment.set(targetSlot, invSlot.id)
+    const old = this.equipment.setStack(targetSlot, invSlot)
     this.inventory.removeAt(index)
-    if (old) this.inventory.placeAt(index, old)
+    if (old) this.inventory.slots[index]=old
     this.syncMelee()
     return true
   }
 
   /** 装备槽 → 放回背包空格（镐槽必须始终有镐，不允许卸空） */
   unequip(slot: EquipSlot): boolean {
+    if (this.actionsLocked) return false
     if (!ENABLED_SLOTS.has(slot) || slot === 'pick') return false
-    const id = this.equipment.get(slot)
-    if (!id) return false
+    const stack = this.equipment.getStack(slot)
+    if (!stack) return false
     const empty = this.inventory.firstEmpty()
     if (empty < 0) return false
     this.equipment.set(slot, null)
-    this.inventory.placeAt(empty, id)
+    this.inventory.slots[empty]=stack
     this.syncMelee()
     return true
   }
 
   /** 拖拽装备槽 → 指定背包格（仅空格接受；镐槽同样禁卸） */
   unequipTo(slot: EquipSlot, index: number): boolean {
+    if (this.actionsLocked) return false
     if (!ENABLED_SLOTS.has(slot) || slot === 'pick') return false
-    const id = this.equipment.get(slot)
-    if (!id || this.inventory.slots[index]) return false
+    const stack = this.equipment.getStack(slot)
+    if (!stack || this.inventory.slots[index]) return false
     this.equipment.set(slot, null)
-    this.inventory.placeAt(index, id)
+    this.inventory.slots[index]=stack
     this.syncMelee()
     return true
   }
 
   /** 背包格丢出世界（在玩家身边生成地面掉落物） */
   dropFromSlot(index: number): void {
+    const stack=this.inventory.slots[index];if(!stack)return
     const id = this.inventory.removeAt(index)
     if (!id) return
-    const a = Math.random() * Math.PI * 2
-    const d = 30 + Math.random() * 14
-    this.current.spawnGroundDrop(id, this.player.x + Math.cos(a) * d, this.player.y + Math.sin(a) * d)
+    const a = randomCombat() * Math.PI * 2
+    const d = 30 + randomCombat() * 14
+    this.current.spawnGroundDrop(id, this.player.x + Math.cos(a) * d, this.player.y + Math.sin(a) * d,stack.durability)
   }
 
   /** 光标拆堆栈丢到脚下：持有几个就生成几个地面掉落物（在玩家身边散开） */
   dropHeld(stack: NonNullable<Slot>): boolean {
     if (this.locked || !this.player.alive) return false
     for (let n = 0; n < stack.qty; n++) {
-      const a = Math.random() * Math.PI * 2
-      const d = 26 + Math.random() * 22
-      this.current.spawnGroundDrop(stack.id, this.player.x + Math.cos(a) * d, this.player.y + Math.sin(a) * d)
+      const a = randomCombat() * Math.PI * 2
+      const d = 26 + randomCombat() * 22
+      this.current.spawnGroundDrop(stack.id, this.player.x + Math.cos(a) * d, this.player.y + Math.sin(a) * d,stack.durability)
     }
     return true
   }
 
+  handleUIInput(engine: EngineContext): void {
+    const { input } = engine
+    if (input.suppressed || this.locked || this.relay?.blocksInput || this.fourth?.blocksInput || dialogue.isActive) return
+    if (input.actionPressed('panel')) this.setPanel(this.panel === 'inventory' ? null : 'inventory')
+    if (input.actionPressed('map')) this.setPanel(this.panel === 'map' ? null : 'map')
+    if (input.actionPressed('pause')) {
+      if (this.panel === null && this.getSearchView()) this.cancelSearch()
+      else this.setPanel(this.panel === null ? 'pause' : null)
+    }
+    if (input.justPressed('KeyN')) sfx.toggleMute()
+    if (this.panel !== null && this.panel !== 'pause') {
+      for (const a of HAND_ACTIONS) if (input.actionPressed(a)) this.selectHand(HAND_ACTIONS.indexOf(a))
+    }
+  }
+  updatePaused(engine: EngineContext): void {
+    this.camera.resize(engine.viewW, engine.viewH)
+    this.light.resize(engine.viewW, engine.viewH)
+  }
   update(dt: number, engine: EngineContext): void {
+    this.player.scp127.observe(dt, this.player, dialogue.isActive || this.storyLock || this.panel !== null && this.panel !== 'inventory' || engine.input.suppressed || !!this.fourth?.blocksInput || !!this.relay?.blocksInput || this.entryReveal >= 0)
+    this.player.scp127.noteArena(this.current.def.id, this.current.isCleared)
     if (dialogue.isActive || this.storyLock || engine.input.suppressed) this.player.cancelCharge()
     sfx.setCaveAmbient(true)
     const { input } = engine
@@ -1009,18 +1198,10 @@ export class CaveModule implements IGameModule, PrologueHost {
     this.light.resize(engine.viewW, engine.viewH)
 
     // 鼠标世界坐标（瞄准）
-    const world = this.camera.screenToWorld(input.mouseX, input.mouseY)
+    const rawWorld = this.camera.screenToWorld(input.mouseX, input.mouseY)
+    const world = input.resolveWorldPointer(rawWorld.x,rawWorld.y,this.player)
     input.worldMouseX = world.x
     input.worldMouseY = world.y
-
-    // —— 面板开关键（结算锁定时禁用）；ESC：游戏中开暂停菜单，面板打开时关闭当前面板；
-    //    N = 音效静音切换（无 UI 入口，避开战斗键位） ——
-    if (!this.locked&&!this.relay?.blocksInput&&!this.fourth?.blocksInput&&!dialogue.isActive) {
-      if (input.justPressed('Tab', 'KeyI')) this.setPanel(this.panel === 'inventory' ? null : 'inventory')
-      if (input.actionPressed('map')) this.setPanel(this.panel === 'map' ? null : 'map')
-      if (input.justPressed('Escape')) this.setPanel(this.panel === null ? 'pause' : null)
-      if (input.justPressed('KeyN')) sfx.toggleMute()
-    }
 
     this.doorCooldown = Math.max(0, this.doorCooldown - dt)
 
@@ -1032,7 +1213,7 @@ export class CaveModule implements IGameModule, PrologueHost {
       // 普通入矿从首次可操作更新开始显影，祈祷卡停留期间不提前消耗标题。
       if (this.entryTitlePending) {
         this.entryTitlePending = false
-        if(!this.fourth?.active)sfx.setCaveMusic(true)
+        if(!this.fourth?.active)sfx.setCaveMusic(true,this.depth===5?'old_hell':'cave')
         floorTitle.show(this.relay?'story.mineRelay.route_title':this.depth===5?'floor.title.cave_fifth':this.depth===4?'floor.title.cave_fourth':this.depth===3?'floor.title.cave_third':this.depth===2?'floor.title.cave_second':'floor.title.cave_first', undefined, { holdMs: 850 })
         if (!this.character.flagBool('tutorial.map.seen')) {
           tutorial.show('story.tut.map', { durationMs: 99999999 })
@@ -1077,14 +1258,8 @@ export class CaveModule implements IGameModule, PrologueHost {
       return
     }
 
-    // 面板打开：玩法冻结。背包/大地图允许 1/2/3 顺手切换手持；暂停菜单完全冻结
-    if (this.panel !== null) {
-      if (this.panel !== 'pause') {
-        for (const a of HAND_ACTIONS) {
-          if (input.actionPressed(a)) this.selectHand(HAND_ACTIONS.indexOf(a))
-        }
-      }
-      this.camera.update(dt)
+    // 背包只占界面输入，世界与角色计时继续；其他模态面板仍暂停。
+    if (this.panel !== null && this.panel !== 'inventory') {
       return
     }
 
@@ -1092,8 +1267,15 @@ export class CaveModule implements IGameModule, PrologueHost {
       this.survivalIntroPending=false
       playNextStory('cave.monsterRoom',{profile:this.character})
     }
-    if(this.entryReveal<0)this.relay?.update(dt,engine,this.current,this.player)
-    if(this.entryReveal<0)this.fourth?.update(dt,engine,this.current,this.player)
+    // 主控倒下后由存活队友承担场景站位，剧情进度仍写入主控档案。
+    const storyPlayer=this.player.alive?this.player:this.localPlayers.entities.find(player=>player.alive)??this.player
+    if(this.entryReveal<0)this.relay?.update(dt,engine,this.current,storyPlayer)
+    if(this.entryReveal<0)this.fourth?.update(dt,engine,this.current,storyPlayer)
+    if (this.panel === 'inventory' && (this.fourth?.blocksInput || this.relay?.blocksInput || dialogue.isActive || this.storyLock || tutorial.isModal)) {
+      this.mctx.bus.emit('ui:inventoryReturn', undefined)
+      this.setPanel(null)
+    }
+    if (this.fourth?.blocksInput || this.relay?.blocksInput || dialogue.isActive || this.storyLock || tutorial.isModal) this.current.cancelSearches()
     if(this.fourth?.blocksInput){this.camera.follow({x:this.player.x,y:this.player.y},dt);this.camera.update(dt);return}
     if(this.relay?.blocksInput){this.camera.update(dt);return}
     // 对话/剧情演出/模态教程：玩家输入全冻结，但房间继续 update（敌人/特效/演出照常呼吸）
@@ -1101,7 +1283,7 @@ export class CaveModule implements IGameModule, PrologueHost {
       // 正常探索的短旁白暂停战斗与计时，避免阅读时被弹幕命中。
       if(dialogue.isActive&&!this.director){this.camera.update(dt);return}
       // 演出冻结：玩家也停摆，世界 dt 与玩家 dt 同源即可
-      this.current.update(wdt, engine, this.player, EMPTY_ROOM_INPUT, this.host, wdt)
+      this.current.updatePlayers(wdt, engine, this.participants(EMPTY_ROOM_INPUT,engine,wdt,true), wdt)
       if (tutorial.isModal) {
         // 模态教程气泡：交互键仅用于确认关闭（点击由组件处理）
         if (input.actionPressed('interact')) tutorial.dismiss()
@@ -1112,49 +1294,34 @@ export class CaveModule implements IGameModule, PrologueHost {
       return
     }
 
-    // —— 快捷栏按键：1/2/3 切手持（走键位映射），4/5/6 用道具，E 释放符卡 A（R=符卡 B 预留） ——
+    // —— 快捷栏按键：1/2/3 切手持，4/5/6 用道具，E/R 释放符卡 A/B ——
     for (const a of HAND_ACTIONS) {
       if (input.actionPressed(a)) this.selectHand(HAND_ACTIONS.indexOf(a))
     }
-    for (let i = 0; i < QUICK_KEYS.length; i++) {
-      if (input.justPressed(QUICK_KEYS[i])) this.useQuickItem(i)
+    for (let i = 0; this.panel !== 'inventory' && i < QUICK_ACTIONS.length; i++) {
+      if (input.actionPressed(QUICK_ACTIONS[i]!)) this.useQuickItem(i)
     }
-    if (input.justPressed('KeyE') || this.spellARequested) this.tryCastSpellA(engine)
-    this.spellARequested = false
+    if (this.panel !== 'inventory' && input.actionPressed('spellA') || this.spellARequested) this.tryCastSpell(engine,'spellA')
+    if (this.panel !== 'inventory' && input.actionPressed('spellB') || this.spellBRequested) this.tryCastSpell(engine,'spellB')
+    this.spellARequested = false;this.spellBRequested = false
 
     // —— 正常玩法（移动/攻击/闪避/交互全走 action 键位映射） ——
-    let mx = 0
-    let my = 0
-    if (input.isActionDown('moveLeft')) mx -= 1
-    if (input.isActionDown('moveRight')) mx += 1
-    if (input.isActionDown('moveUp')) my -= 1
-    if (input.isActionDown('moveDown')) my += 1
     const dead = !this.player.alive
     // 序章醒来房未解锁闪避：三种闪避输入全部掐断（短闪/长闪都发不出来）
     const dodgeOn = !this.director || this.director.dodgeUnlocked
-    const roomInput: RoomInput = {
-      moveX: dead ? 0 : mx,
-      moveY: dead ? 0 : my,
-      dodgePressed: !dead && dodgeOn && input.actionPressed('dodge'),
-      dodgeHeld: !dead && dodgeOn && input.isActionDown('dodge'),
-      dodgeReleased: !dead && dodgeOn && input.actionReleased('dodge'),
-      attackPressed: !dead && input.actionPressed('attack'),
-      specialPressed: !dead && input.actionPressed('special'),
-      specialHeld: !dead && input.isActionDown('special'),
-      specialReleased: !dead && input.actionReleased('special'),
-      attackHeld: !dead && input.isActionDown('attack'),
-      attackReleased: !dead && input.actionReleased('attack'),
-      pointerX: input.worldMouseX,
-      pointerY: input.worldMouseY,
-      interactPressed: !dead && input.actionPressed('interact')
-    }
+    const intent=readPlayerIntent(input,input.worldMouseX,input.worldMouseY,this.panel !== 'inventory')
+    const roomInput:RoomInput={...intent,moveX:dead?0:intent.moveX,moveY:dead?0:intent.moveY,
+      attackPressed:!dead&&intent.attackPressed,attackHeld:!dead&&intent.attackHeld,attackReleased:!dead&&intent.attackReleased,
+      specialPressed:!dead&&intent.specialPressed,specialHeld:!dead&&intent.specialHeld,specialReleased:!dead&&intent.specialReleased,
+      dodgePressed:!dead&&dodgeOn&&intent.dodgePressed,dodgeHeld:!dead&&dodgeOn&&intent.dodgeHeld,dodgeReleased:!dead&&dodgeOn&&intent.dodgeReleased,
+      interactPressed:!dead&&this.panel !== 'inventory'&&intent.interactPressed}
 
     // 世界吃顿帧 dt，玩家吃真实 dt（顿帧不拖慢攻速与移动）
-    this.current.update(wdt, engine, this.player, roomInput, this.host, dt)
-    this.fourth?.update(0,engine,this.current,this.player)
+    this.current.updatePlayers(wdt, engine, this.participants(roomInput,engine,dt), dt)
+    this.fourth?.update(0,engine,this.current,this.player.alive?this.player:this.localPlayers.entities.find(player=>player.alive)??this.player)
     // B2：序章阶段推进（移动距离/清场计数/靠近灵梦/封印计时）
     this.director?.update(dt)
-    this.camera.follow({ x: this.player.x, y: this.player.y }, dt)
+    this.camera.follow(this.player.alive?this.player:this.localPlayers.entities.find(player=>player.alive)??this.player,dt)
     this.camera.update(dt)
   }
 
@@ -1164,7 +1331,7 @@ export class CaveModule implements IGameModule, PrologueHost {
 
     ctx.save()
     this.camera.apply(ctx)
-    this.current.render(ctx, this.player)
+    this.current.renderPlayers(ctx, this.localPlayers.entities, this.player)
     this.relay?.render(ctx)
     // 批次 E：光照压在全部世界内容之上（世界坐标；切房黑罩在屏幕空间另盖）
     if (CONFIG.art.slice) {
@@ -1177,30 +1344,42 @@ export class CaveModule implements IGameModule, PrologueHost {
           : { center: A.dimCenter, edge: A.dimEdge })
       if(this.depth>=2&&!this.current.ambientLevel){ambient.center=Math.min(.94,ambient.center+.07);ambient.edge=Math.min(.98,ambient.edge+.04)}
       // 帽灯全向柔光 + 房间光源（火把/地缝/矿簇；矿簇屏外自动剔除）
-      const lamp = makeLampLight(this.player.x, this.player.y)
+      const playerPosition=this.player.renderPosition
+      const lightView=canvasViewport(ctx)
+      const lamp = makeLampLight(playerPosition.x, playerPosition.y,this.player.equipmentCombat.lightRadiusMultiplier??1)
       // 漆黑醒来房：视野被黑暗压迫，帽灯视域收八成，光圈外真的什么都没有
       if (this.current.pitchBlack) lamp.r *= 0.8
       const lightSources: LightSource[] = [
         lamp,
+        ...this.localPlayers.extras.flatMap(member=>{
+          if(!member.entity?.alive)return []
+          const position=member.entity.renderPosition
+          return [makeLampLight(position.x,position.y,member.entity.equipmentCombat.lightRadiusMultiplier??1)]
+        }),
         ...this.current.getRoomLights({
-          x: this.camera.x,
-          y: this.camera.y,
-          w: this.camera.visibleW,
-          h: this.camera.visibleH
+          x: lightView.left,
+          y: lightView.top,
+          w: lightView.right-lightView.left,
+          h: lightView.bottom-lightView.top
         })
       ]
       this.light.render(
         ctx,
-        Math.round(this.camera.x),
-        Math.round(this.camera.y),
+        lightView.left,
+        lightView.top,
         this.camera.zoom,
         ambient,
         lightSources
       )
     }
+    this.current.renderSearchMarkers(ctx)
     // 光束与状态文字是发光层，不被矿洞光照遮罩压黑。
-    this.current.renderDoomsday(ctx, this.player)
-    if (CONFIG.art.slice) this.player.renderDoomCrescents(ctx, 'all')
+    for(const player of this.localPlayers.entities){
+      this.current.renderDoomsday(ctx, player)
+      if (CONFIG.art.slice) player.renderDoomCrescents(ctx, 'all')
+      player.scp127.renderOverlay(ctx, player)
+    }
+    this.localPlayers.renderLabels(ctx)
     ctx.restore()
     renderNausea(ctx, engine.viewW, engine.viewH, this.player)
     renderHurtScreen(ctx, engine.viewW, engine.viewH, this.player)
@@ -1239,9 +1418,10 @@ export class CaveModule implements IGameModule, PrologueHost {
     if (this.panel === null && !dialogue.isActive && !this.locked && this.fade === 'none' && this.blackAlpha < .05) {
       this.director?.renderTorchGuide(ctx, this.camera, engine.viewW, engine.viewH)
       this.director?.renderMiningGuide(ctx, this.camera, engine.viewW, engine.viewH)
+      this.director?.renderSearchGuide(ctx, this.camera, engine.viewW, engine.viewH)
     }
     this.fourth?.renderScreen(ctx,engine.viewW,engine.viewH)
-    const rawHint = this.current.interactHint
+    const rawHint = this.current.hintFor(this.player)
     const hint = rawHint ? formatKeyBindings(rawHint) : null
     if (hint && this.panel === null && !dialogue.isActive && !this.locked && !this.director?.black) {
       ctx.save()
@@ -1292,8 +1472,8 @@ export class CaveModule implements IGameModule, PrologueHost {
       ctx.restore()
     }
 
-    // 准星（屏幕空间；面板打开时隐藏，交还鼠标）
-    if (this.panel === null && !this.locked) {
+    // 准星只跟随画布；移入搜索等界面时交还系统指针，避免留下冻结的准星。
+    if (this.panel === null && !this.locked && !touchControls.value && engine.input.pointerOverCanvas) {
       const mx = engine.input.mouseX
       const my = engine.input.mouseY
       ctx.strokeStyle = 'rgba(255,255,255,0.85)'
@@ -1333,7 +1513,8 @@ export class CaveModule implements IGameModule, PrologueHost {
       x: Math.round(this.player.x),
       y: Math.round(this.player.y),
       speed: Math.round(this.player.speedNow),
-      hp: Math.round(this.player.hp),
+      // 保留真实生命值，由 HUD 统一向下取整，避免矿洞与基地显示采用不同规则。
+      hp: this.player.hp,
       hpRatio: this.player.hpRatio,
       mana: Math.round(this.player.mana),
       manaRatio: this.player.manaRatio,

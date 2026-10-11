@@ -19,6 +19,8 @@ import { drawSceneMetal, drawSceneStone, drawSharedMineral, type MetalForm } fro
 import { mineAssetsReady } from './mineAssets'
 import { MINERAL_RUBY_ID } from '../../content/minerals/vanilla/ids'
 import { drawCoalFormation } from '../../content/items/vanilla/materials/deepMaterialAppearance'
+import { drawOldHellMineral,isOldHellMineral } from './oldHellResourceArt'
+import { renderCollectible } from './collectibleHighlight'
 
 /** 取某矿格的美术色板（矿种真值在注册表；缺色板属于配置错误直接抛出） */
 function paletteOf(ore: OreTile): OrePalette {
@@ -108,7 +110,7 @@ const ROCK_MATS: RockPalette[] = [
 
 /** 官方金属矿各用独立形态；通用金属材质保留给已有内容包。 */
 function metalForm(form?:string):MetalForm|null{
-  return form==='copper'||form==='iron'||form==='gold'?form:form==='metal'?'copper':null
+  return form==='copper'||form==='iron'||form==='gold'||form==='silver'?form:form==='metal'?'copper':null
 }
 
 /** 一根晶体的几何（格内局部坐标） */
@@ -161,6 +163,10 @@ function clusterCenter(ore: OreTile, t: number): { x: number; y: number } {
 
 /** 单格矿脉岩基（TileMap 生成时调用，画进 oreLayer 离屏层） */
 export function drawOreBase(ctx: CanvasRenderingContext2D, ore: OreTile): void {
+  if(isOldHellMineral(ore.kind)){
+    const x=(ore.col+.5)*CONFIG.tile+ore.offsetX,y=(ore.row+.5)*CONFIG.tile+ore.offsetY
+    ctx.save();ctx.fillStyle='#19151166';ctx.beginPath();ctx.ellipse(x,y+19,23,5,0,0,Math.PI*2);ctx.fill();ctx.restore();return
+  }
   if (ore.vein === 'rock') {
     if(minerals.require(ore.kind).visual.form==='salt'){if(!drawSharedMineral(ctx,ore,paletteOf(ore))){drawSceneStone(ctx,ore);drawSaltCrust(ctx,ore)}}
     else drawSceneStone(ctx,ore)
@@ -772,6 +778,13 @@ export function drawOreCrystals(
   ore: OreTile,
   time: number
 ): void {
+  const x=(ore.col+.5)*CONFIG.tile+ore.offsetX,y=(ore.row+.5)*CONFIG.tile+ore.offsetY
+  renderCollectible(ctx,ore,{x:x-48,y:y-56,width:96,height:104},g=>drawOreCrystalsCurrent(g,ore,time),g=>{
+    drawOreBase(g,ore);drawOreCrystalsCurrent(g,ore,0)
+  })
+}
+function drawOreCrystalsCurrent(ctx:CanvasRenderingContext2D,ore:OreTile,time:number):void {
+  if(drawOldHellMineral(ctx,ore,time))return
   // 岩包态：不画晶簇；藏矿且敲到后半血时，裂纹深处才隐约露出矿色碎点
   if (ore.vein === 'rock') {
     drawRockCracksReveal(ctx, ore)
@@ -927,7 +940,7 @@ export function oreLight(ore: OreTile, time: number): LightSource {
   const t = CONFIG.tile
   const mineral = minerals.require(ore.kind)
   const a = mineral.palette
-  const cc = metalForm(mineral.visual.form)?{x:t/2,y:t/2}:clusterCenter(ore, t)
+  const cc = metalForm(mineral.visual.form)||isOldHellMineral(ore.kind)?{x:t/2,y:t/2}:clusterCenter(ore, t)
   const breathe = 0.85 + 0.15 * Math.sin(time * 1.6 + ore.col * 1.7 + ore.row * 0.9)
   const flashK = ore.flash / CONFIG.mine.hitFlash
   return {

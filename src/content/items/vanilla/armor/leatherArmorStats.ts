@@ -1,12 +1,11 @@
 import type { ItemDef } from '../../types'
 
 export const stats = {
-  rarity: 1,
-  tier: 2,
+  grade: 1,
   maxStack: 1,
   equipSlot: 'outfit',
   combat: {
-    physicalResist: 15,
+    physicalResist: 2,
     magicResist: 0
   }
 } satisfies Partial<ItemDef>

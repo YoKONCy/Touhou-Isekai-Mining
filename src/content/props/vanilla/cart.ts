@@ -2,6 +2,7 @@
 import type { PropDef } from '../types'
 import { PROP_CART_ID } from './ids'
 import { drawCart } from '../../../game/art/props'
+import { SEARCH_SUPPLIES_TABLE } from '../../loot/vanilla/searchSupplies'
 
 export const propCart: PropDef = {
   id: PROP_CART_ID,
@@ -13,5 +14,6 @@ export const propCart: PropDef = {
     radius: 28
   },
   render: drawCart,
+  search: { cols:3,rows:4,table:SEARCH_SUPPLIES_TABLE },
   tags: ['metal', 'cover']
 }

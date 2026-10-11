@@ -1,10 +1,11 @@
+import { randomAudio } from '../../../../../core/simulation/random'
 import type { AudioEngine } from '../../../../../game/audio/Sfx'
 import type { HitMaterial } from '../../../../enemies/types'
 
 /** 借鉴双截棍的宽带压风和重武器分层经验：低中频为主体，短尾、低共振。 */
 export function woodStaffSound(audio: AudioEngine, phase: 'windup' | 'active' | 'recover', segment: number): void {
   audio.ensure()
-  const tone = (segment === 0 ? .95 : 1.08) * (.98 + Math.random() * .04)
+  const tone = (segment === 0 ? .95 : 1.08) * (.98 + randomAudio() * .04)
   const pan = segment === 0 ? -.08 : .08
   if (phase === 'windup') {
     // 起手只保留握带摩擦，不用撞击瞬态伪装力量。
@@ -27,7 +28,7 @@ export function woodStaffSound(audio: AudioEngine, phase: 'windup' | 'active' | 
 export function woodStaffHit(audio: AudioEngine, material: HitMaterial): void {
   audio.ensure()
   if (!audio.gate('staff:impact', .045)) return
-  const tone = .97 + Math.random() * .06
+  const tone = .97 + randomAudio() * .06
   audio.noise({ dur: .04, buf: audio.brownNoise, type: 'lowpass', curve: [900, 420, 150],
     q: .4, vol: .22, env: 'hit', rev: .045 })
   audio.noise({ dur: .022, type: 'bandpass', curve: [1300, 650, 280], q: .55,

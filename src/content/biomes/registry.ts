@@ -1,3 +1,4 @@
+import { randomGeneration } from '../../core/simulation/random'
 /**
  * 生物群系注册表 + 投放查表 helper
  */
@@ -19,7 +20,7 @@ export function getBiomeDef(id: BiomeId): BiomeDef {
 function rollRange(range: readonly [number, number]): number {
   const [lo, hi] = range
   if (hi <= lo) return lo
-  return lo + Math.floor(Math.random() * (hi - lo + 1))
+  return lo + Math.floor(randomGeneration() * (hi - lo + 1))
 }
 
 /**
@@ -44,7 +45,7 @@ export function rollEnemyCount(
   const tier=room.encounter==='survival'?Math.max(0,b.depthMultipliers.length-2):Math.min(depth-1,b.depthMultipliers.length-1)
   const multiplier=b.depthMultipliers[tier]??1
   const expected=Math.max(0,average*multiplier),base=Math.floor(expected)
-  return base+(Math.random()<expected-base?1:0)
+  return base+(randomGeneration()<expected-base?1:0)
 }
 
 /** 按房型取矿脉格数量区间 */

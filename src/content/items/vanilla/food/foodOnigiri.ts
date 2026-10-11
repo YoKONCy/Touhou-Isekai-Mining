@@ -104,7 +104,6 @@ function drawGroundOnigiri({ ctx, x, y, r }: GroundDropView): void {
 const def: ItemDef = {
   id: FOOD_ONIGIRI_ID,
   kind: 'consumable',
-  tier: 1,
   color: '#f2ece0',
   hi: '#ffffff',
   text: '#9fe6a8',

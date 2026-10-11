@@ -75,6 +75,8 @@ export class PlayerAnimator {
   private supportGrip: WeaponGrip | undefined
   /** 手中是否持有武器（默认 true 兼容旧调用方） */
   private armed = true
+  private searching = false
+  setSearching(active: boolean): void { this.searching = active }
 
   /** 最近一帧姿态（外部残影环形缓存会直接存它） */
   private out: PlayerPose
@@ -123,6 +125,13 @@ export class PlayerAnimator {
   /** 渲染前同步专属动作角，不额外推进动画时钟。 */
   setArmAim(angle: number | null, bend = 0): void { this.armAim = angle; this.armBend = bend }
   setWeaponMotion(body?: WeaponBodyMotion, grip?: WeaponGrip): void { this.bodyMotion = body; this.supportGrip = grip }
+  /** 在当前步态上采样指定武器动作，不改动玩家真正的动画状态与复用姿态。 */
+  sampleWeaponPose(aim:number,armAim:number|null,bend:number,body?:WeaponBodyMotion,grip?:WeaponGrip):PlayerPose {
+    const previous={out:this.out,armAim:this.armAim,armBend:this.armBend,body:this.bodyMotion,grip:this.supportGrip,armed:this.armed,rolling:this.rolling}
+    this.out=this.blankPose(this.dir,aim);this.armAim=armAim;this.armBend=bend;this.bodyMotion=body;this.supportGrip=grip;this.armed=true;this.rolling=false
+    try {const pose=this.build(aim);return {...pose,bone:{...pose.bone}}}
+    finally {this.out=previous.out;this.armAim=previous.armAim;this.armBend=previous.armBend;this.bodyMotion=previous.body;this.supportGrip=previous.grip;this.armed=previous.armed;this.rolling=previous.rolling}
+  }
   get bodyFacing(): number { return dirAngle(this.dir) }
   get motionTime(): number { return this.t }
   get gaitPhase(): number { return this.cycle }
@@ -169,6 +178,8 @@ export class PlayerAnimator {
 
   /** 产出本帧姿态（纯计算，无副作用） */
   build(aim: number): PlayerPose {
+    this.out.nearLegScale = undefined; this.out.farLegScale = undefined
+    this.out.supportInFront = undefined; this.out.accessoryInFront = undefined
     // —— 翻滚团身：长轴对齐翻滚方向 + 整组旋转一周，四肢抱收（dir 固定 down 不镜像） ——
     if (this.rolling) {
       return this.buildRoll()
@@ -305,8 +316,29 @@ export class PlayerAnimator {
     pose.phase = φ
     pose.time = t
     b.spine += this.bodyMotion?.lean ?? 0
-    pose.weaponAngle = undefined; pose.supportWeaponAngle = undefined; pose.supportGripWeight = undefined; pose.gripInFront = undefined
+    // 武器招式仅在声明时覆盖腿部骨角，结束后自然回到原来的行走与站立姿态。
+    const legs = this.bodyMotion?.legs
+    pose.nearLegScale = legs?.near?.scale; pose.farLegScale = legs?.far?.scale
+    if (legs?.near) { b.thighNear = legs.near.thigh; b.shinNear = legs.near.shin }
+    if (legs?.far) { b.thighFar = legs.far.thigh; b.shinFar = legs.far.shin }
+    pose.weaponAngle = undefined; pose.weaponHand = undefined; pose.palmOffset = undefined; pose.supportWeaponAngle = undefined; pose.supportGripWeight = undefined; pose.gripInFront = undefined
     if (this.supportGrip) applySupportGrip(pose, this.armAim ?? aim, this.supportGrip)
+    if (this.searching) {
+      // 俯身屈膝、低头交替翻找；四向与兄妹各自的肩线比例继续由原骨架负责。
+      const side = dir === 'left' || dir === 'right', rummage = Math.sin(t * 12)
+      pose.rootY += 2.4
+      pose.rootX += side ? (dir === 'right' ? 1.5 : -1.5) : 0
+      b.spine -= .18; b.head += .22
+      b.thighFar = Math.PI / 2 + .22; b.shinFar = Math.PI / 2 - .42
+      b.thighNear = Math.PI / 2 - .22; b.shinNear = Math.PI / 2 + .42
+      b.armNearUpper = side ? 2.12 : 1.9
+      b.armFarUpper = side ? 1.98 : 1.24
+      b.armNearLower = (side ? 2.55 : 2.12) + rummage * .18
+      b.armFarLower = (side ? 2.42 : .95) - rummage * .18
+      pose.weaponAngle = undefined; pose.supportWeaponAngle = undefined
+      pose.supportGripWeight = undefined; pose.weaponHand = undefined; pose.gripInFront = undefined
+      pose.supportInFront = undefined; pose.accessoryInFront = undefined
+    }
     return pose
   }
 
@@ -325,7 +357,7 @@ export class PlayerAnimator {
    * - 两腿深蹲收、两臂抱紧、头埋下；披风/头发不飘（团在身上）。
    */
   private buildRoll(): PlayerPose {
-    this.out.weaponAngle = undefined; this.out.supportWeaponAngle = undefined; this.out.supportGripWeight = undefined; this.out.gripInFront = undefined
+    this.out.weaponAngle = undefined; this.out.weaponHand = undefined; this.out.palmOffset = undefined; this.out.supportWeaponAngle = undefined; this.out.supportGripWeight = undefined; this.out.gripInFront = undefined
     const p = Math.min(1, this.rollT / this.rollDur)
     const curl = Math.sin(p * Math.PI) // 团身度 0→1→0
     // 末段 0.78~1：单膝/单手前撑起身关键帧（近侧手脚朝翻滚方向伸出）

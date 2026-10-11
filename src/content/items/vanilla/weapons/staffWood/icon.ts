@@ -3,7 +3,7 @@ import { STAFF_LENGTH_SCALE } from './appearance'
 
 export const WOOD_STAFF_ICON = svgIcon(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <defs><linearGradient id="staff-wood" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#e0bd8b"/><stop offset=".3" stop-color="#ae804b"/><stop offset=".65" stop-color="#805331"/><stop offset="1" stop-color="#4a3425"/></linearGradient></defs>
-  <g transform="translate(14 50) rotate(-45) scale(${STAFF_LENGTH_SCALE} 1)">
+  <g transform="translate(14 50) rotate(-45) scale(${STAFF_LENGTH_SCALE} .5)">
     <path d="M-5-3 60-3.5 64-2 64 2 60 3.5-5 3Z" fill="url(#staff-wood)" stroke="#32251d" stroke-width="1.5" stroke-linejoin="round"/>
     <path d="M0-1.8 19-1.5M36-2 59-2M40 .6Q46-.8 55 1" fill="none" stroke="#e8cd9e" stroke-width=".7"/>
     <path d="M39 1Q49 2.9 57 .8" fill="none" stroke="#513728" stroke-width=".8"/>

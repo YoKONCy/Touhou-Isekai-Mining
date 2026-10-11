@@ -2,6 +2,7 @@
 import type { PropDef } from '../types'
 import { PROP_TIMBER_COLLAPSE_ID } from './ids'
 import { drawTimberCollapse } from '../../../game/art/props'
+import { SEARCH_SUPPLIES_TABLE } from '../../loot/vanilla/searchSupplies'
 
 export const propTimberCollapse: PropDef = {
   id: PROP_TIMBER_COLLAPSE_ID,
@@ -20,5 +21,6 @@ export const propTimberCollapse: PropDef = {
     large: true
   },
   render: drawTimberCollapse,
+  search: { cols:3,rows:4,table:SEARCH_SUPPLIES_TABLE },
   tags: ['timber', 'wreck', 'cover', 'large']
 }

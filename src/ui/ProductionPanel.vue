@@ -11,7 +11,7 @@ import { useHorizontalBrowse } from './useHorizontalBrowse'
 import ProductionVignette from './ProductionVignette.vue'
 import { sfx } from '../game/audio/Sfx'
 import { HEMP_THREAD_ID } from '../content/items/vanilla/ids'
-import {recipeUnlocked} from '../shared/production'
+import {recipeUnlocked, type Recipe} from '../shared/production'
 
 const props=defineProps<{profile:CharacterProfile;tick:number;mode:'crafting'|'furnace'}>()
 const emit=defineEmits<{repaired:[stage:number];claimed:[]}>()
@@ -31,7 +31,8 @@ const showingRepair=computed(()=>repairing.value||!!repairAnimation.value)
 const previewStage=computed(()=>repairAnimation.value?.stage??stage.value)
 const batch=computed(()=>{void props.tick;void revision.value;return props.mode==='furnace'?props.profile.smelting:null})
 const previewOutput=computed(()=>claimAnimation.value??batch.value)
-const recipes=computed(()=>{void props.tick;void revision.value;return props.mode==='crafting'?CRAFT_RECIPES.filter(r=>recipeUnlocked(props.profile,r)):SMELT_RECIPES})
+function upgradeDone(r:Recipe){return !!r.inventoryUpgrade&&Number(props.profile.flag('base.bag.stage'))>=r.inventoryUpgrade.stage}
+const recipes=computed(()=>{void props.tick;void revision.value;return props.mode==='crafting'?CRAFT_RECIPES.filter(r=>recipeUnlocked(props.profile,r)||upgradeDone(r)):SMELT_RECIPES})
 const recipe=computed(()=>recipes.value[selected.value]??recipes.value[0]!)
 const ingredients=computed(()=>{
   void props.tick;void revision.value
@@ -97,8 +98,15 @@ function act(){
   }else{
     const output=recipe.value
     if(produce(props.profile,output)!=='ready')return
-    revision.value++;message.value=t('ui.camp.received',{item:itemName(output.id),qty:output.qty})
-    animateCraft(output.id,output.qty)
+    revision.value++
+    if(output.inventoryUpgrade){
+      message.value=t('ui.production.bag_upgraded',output.inventoryUpgrade)
+      cue.value++;sfx.workbenchCraft(true);working.value=true
+      clearTimeout(timer);timer=setTimeout(()=>working.value=false,500)
+    }else{
+      message.value=t('ui.camp.received',{item:itemName(output.id),qty:output.qty})
+      animateCraft(output.id,output.qty)
+    }
   }
   void saveService.autosave()
 }
@@ -112,7 +120,7 @@ onBeforeUnmount(()=>{
   <div class="production-layout" @mousemove="hover.move">
     <aside class="plans"><span class="plan-caption">{{t(mode==='crafting'?'ui.production.craft_record':'ui.production.furnace_record')}}</span>
       <template v-if="showingRepair"><h2>{{t('ui.production.maintenance')}}</h2><ol><li v-for="i in 3" :key="i" :class="{done:previewStage>=i,current:previewStage===i-1}"><span>{{previewStage>=i?'✓':`0${i}`}}</span><div>{{t(`ui.production.stage${i}`)}}<small>{{t(previewStage>=i?'ui.camp.done':previewStage===i-1?'ui.production.current':'ui.production.later')}}</small></div></li></ol></template>
-      <template v-else><h2>{{t(mode==='crafting'?'ui.production.plans':'ui.production.smelting')}}</h2><button v-for="(r,i) in recipes" :key="r.id" class="recipe-choice" :disabled="!!batch||!!claimAnimation" :class="{selected:previewOutput?r.id===previewOutput.id:selected===i}" @click="selected=i" @mouseenter="hover.show($event,r.id)" @mouseleave="hover.leave"><ItemIcon :id="r.id" :size="37"/><span>{{itemName(r.id)}}<small>{{t(mode==='furnace'?'ui.production.batch_limit':'ui.production.yield',{n:mode==='furnace'?SMELT_BATCH_LIMIT:r.qty})}}</small></span></button></template>
+      <template v-else><h2>{{t(mode==='crafting'?'ui.production.plans':'ui.production.smelting')}}</h2><button v-for="(r,i) in recipes" :key="r.id" class="recipe-choice" :disabled="!!batch||!!claimAnimation" :class="{selected:previewOutput?r.id===previewOutput.id:selected===i}" @click="selected=i" @pointerdown="hover.beginTouch" @pointerup="hover.inspect($event,r.id)" @mouseenter="hover.show($event,r.id)" @mouseleave="hover.leave"><ItemIcon :id="r.id" :size="37"/><span>{{itemName(r.id)}}<small>{{r.inventoryUpgrade?t(upgradeDone(r)?'ui.production.upgrade_done':'ui.production.bag_capacity',r.inventoryUpgrade):t(mode==='furnace'?'ui.production.batch_limit':'ui.production.yield',{n:mode==='furnace'?SMELT_BATCH_LIMIT:r.qty})}}</small></span></button></template>
       <p>{{t(mode==='crafting'?'ui.production.fiber_hint':showingRepair?'ui.production.furnace_hint':'ui.production.batch_hint')}}</p>
     </aside>
     <main class="production-work" :class="{working}" :aria-busy="!!repairAnimation||!!claimAnimation"><div class="work-heading"><span>{{t(showingRepair?'ui.production.stage_title':mode==='crafting'?'ui.production.handmade':'ui.production.hot_work',{n:previewStage+1})}}</span><small>{{t('ui.production.source')}}</small></div>
@@ -122,10 +130,10 @@ onBeforeUnmount(()=>{
       <section v-if="claimAnimation" class="batch-ticket finished claim-ticket" role="status"><div class="batch-status"><span class="ember-seal" aria-hidden="true">✓</span><div><strong>{{t('ui.production.claim_done')}}</strong><p>{{t('ui.production.claim_output',{item:itemName(claimAnimation.id),qty:claimAnimation.qty})}}</p></div></div></section>
       <section v-else-if="batch" class="batch-ticket" :class="{finished:batch.state==='ready'}" role="status"><div class="batch-status"><span class="ember-seal" aria-hidden="true">{{batch.state==='ready'?'✓':'◷'}}</span><div><strong>{{t(batch.state==='ready'?'ui.production.batch_ready':'ui.production.batch_heating')}}</strong><p>{{t(batch.state==='ready'?'ui.production.batch_collect':'ui.production.batch_wait')}}</p></div></div><ol class="batch-route"><li class="passed">{{t('ui.production.batch_step1')}}</li><li :class="{passed:batch.state==='ready',current:batch.state==='heating'}">{{t('ui.production.batch_step2')}}</li><li :class="{current:batch.state==='ready'}">{{t('ui.production.batch_step3')}}</li></ol></section>
       <template v-else><div v-if="mode==='furnace'&&!showingRepair" class="batch-quantity"><label for="smelt-quantity">{{t('ui.production.batch_quantity')}}</label><div class="quantity-controls"><button :disabled="quantity<=1" @click="quantity--" :aria-label="t('ui.production.decrease')">−</button><input id="smelt-quantity" type="number" min="1" :max="SMELT_BATCH_LIMIT" :value="quantity" @change="setQuantity"/><button :disabled="quantity>=SMELT_BATCH_LIMIT" @click="quantity++" :aria-label="t('ui.production.increase')">+</button></div><small>{{t('ui.production.batch_limit',{n:SMELT_BATCH_LIMIT})}}</small></div>
-      <h4>{{t('ui.production.materials')}}</h4><div ref="ingredientStrip" class="material-tray" @wheel="browseWheel" @dragstart.prevent @pointerdown="beginBrowse" @pointermove="moveBrowse" @pointerup="endBrowse" @pointercancel="endBrowse" @pointerleave="leaveBrowse" @lostpointercapture="endBrowse"><div v-for="m in ingredients" :key="m.id" :class="{ready:m.owned>=m.n}" @mouseenter="hover.show($event,m.id)" @mouseleave="hover.leave"><ItemIcon :id="m.id" :size="37"/><strong>{{itemName(m.id)}}</strong><span>{{m.owned}}<small>/{{m.n}}</small></span><p>{{t(m.owned>=m.n?'ui.cooking.sufficient':'ui.cooking.short',{qty:Math.max(0,m.n-m.owned)})}}</p></div></div></template>
+      <h4>{{t('ui.production.materials')}}</h4><div ref="ingredientStrip" class="material-tray" @wheel="browseWheel" @dragstart.prevent @pointerdown="beginBrowse" @pointermove="moveBrowse" @pointerup="endBrowse" @pointercancel="endBrowse" @pointerleave="leaveBrowse" @lostpointercapture="endBrowse"><div v-for="m in ingredients" :key="m.id" :class="{ready:m.owned>=m.n}" @pointerdown="hover.beginTouch" @pointerup="hover.inspect($event,m.id)" @mouseenter="hover.show($event,m.id)" @mouseleave="hover.leave"><ItemIcon :id="m.id" :size="37"/><strong>{{itemName(m.id)}}</strong><span>{{m.owned}}<small>/{{m.n}}</small></span><p>{{t(m.owned>=m.n?'ui.cooking.sufficient':'ui.cooking.short',{qty:Math.max(0,m.n-m.owned)})}}</p></div></div></template>
       <p v-if="showingRepair&&previewStage===2" class="nozzle-hint">{{t('ui.production.nozzle_hint')}}</p>
-      <div class="production-actions"><span v-if="!showingRepair&&!batch&&!claimAnimation">{{t('ui.cooking.owned',{qty:materialCount(profile,recipe.id)})}}</span><button :disabled="status!=='ready'" @click="act">{{t(claimAnimation?'ui.production.claim_done':repairAnimation?'ui.production.repairing':showingRepair?previewStage===2?'ui.production.ignite':'ui.production.repair_step':mode==='crafting'?'ui.production.make':batch?batch.state==='heating'?'ui.production.heating':'ui.production.claim':'ui.production.smelt')}}<i>›</i></button></div>
-      <p class="production-message" role="status">{{message||t(`ui.production.status.${status}`)}}</p>
+      <div class="production-actions"><span v-if="!showingRepair&&!batch&&!claimAnimation&&!recipe.inventoryUpgrade">{{t('ui.cooking.owned',{qty:materialCount(profile,recipe.id)})}}</span><button :disabled="status!=='ready'" @click="act">{{t(claimAnimation?'ui.production.claim_done':repairAnimation?'ui.production.repairing':showingRepair?previewStage===2?'ui.production.ignite':'ui.production.repair_step':mode==='crafting'?recipe.inventoryUpgrade?upgradeDone(recipe)?'ui.production.upgrade_done':'ui.production.upgrade':'ui.production.make':batch?batch.state==='heating'?'ui.production.heating':'ui.production.claim':'ui.production.smelt')}}<i>›</i></button></div>
+      <p class="production-message" role="status">{{message||t(upgradeDone(recipe)?'ui.production.upgrade_done':`ui.production.status.${status}`)}}</p>
     </main>
     <ItemTooltip :hover="tip" :expanded="expanded" :interactive="interactive" :profile="profile" :tick="tick+revision" @enter="hover.enterCard" @leave="hover.leaveCard"/>
   </div>

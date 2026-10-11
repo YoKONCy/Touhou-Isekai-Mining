@@ -3,17 +3,16 @@ import type { ItemDef } from '../../../types'
 
 /** 时间为秒，角度为完整角度（度）。 */
 export const stats = {
-  rarity: 5,
-  tier: 5,
+  grade: 5,
   maxStack: 1,
   equipSlot: 'weaponB',
   combat: {
     critChance: .20,
-    penetration: 99
+    penetration: 25
   },
   melee: meleeMove({
     shape: 'slash',
-    damage: 666,
+    damage: 66,
     powerCoefficient: 1.8,
     reach: 72,
     angleDegrees: 154.69860468532227,
@@ -25,7 +24,7 @@ export const stats = {
     aoe: { mode: 'exponential', retention: 1 }
   }),
   empowered: {
-    damage: 3333,
+    damage: 666,
     reachMultiplier: 3,
     aoe: { mode: 'exponential' as const, retention: 1 }
   }

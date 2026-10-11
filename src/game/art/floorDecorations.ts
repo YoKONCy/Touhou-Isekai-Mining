@@ -1,25 +1,39 @@
 import { drawEmbeddedBones } from './embeddedBones'
 
-export interface BackgroundRock {x:number;y:number;radius?:number;fruitAnchor?:{x:number;y:number}}
+export interface BackgroundRock {x:number;y:number;radius?:number}
 import type { BiomeFloorStyle } from '../../content/biomes/types'
 import type { DoorSlot } from '../tilemap'
 import { drawMineSprite } from './mineAssets'
 
+interface Decoration {x:number;y:number;kind:number;radius:number;angle:number;cracked:boolean}
+/** 采集依赖的岩块位置先生成数据，贴图是否加载或重绘细节不影响生态。 */
+function layoutDecorations(width:number,height:number,wall:number,tile:number,doors:readonly DoorSlot[],seed:number,style:BiomeFloorStyle,boneCount:number):Decoration[]{
+  let state=(Math.imul(seed+83,2246822519)^0x37ac912d)>>>0
+  const rand=()=>{state^=state<<13;state^=state>>>17;state^=state<<5;return(state>>>0)/4294967296}
+  const entries:Decoration[]=[]
+  for(let i=0;i<58*style.detailDensity;i++){
+    const side=Math.floor(rand()*4)
+    const x=side<2?wall+22+rand()*(width-wall*2-44):side===2?wall+12+rand()*70:width-wall-12-rand()*70
+    const y=side>=2?wall+22+rand()*(height-wall*2-44):side===0?wall+12+rand()*70:height-wall-12-rand()*70
+    if(doors.some(d=>Math.hypot(x-(d.col+.5)*tile,y-(d.row+.5)*tile)<88)||entries.some(p=>Math.hypot(p.x-x,p.y-y)<42))continue
+    const kind=Math.floor(rand()*6),radius=15+rand()*24,angle=(rand()-.5)*1.4
+    entries.push({x,y,kind,radius,angle,cracked:kind===5&&boneCount>0&&rand()<.25})
+  }
+  return entries
+}
+export function layoutBackgroundRocks(width:number,height:number,wall:number,tile:number,doors:readonly DoorSlot[],seed:number,style:BiomeFloorStyle,boneCount=0):BackgroundRock[]{
+  return layoutDecorations(width,height,wall,tile,doors,seed,style,boneCount).filter(p=>p.kind===5).map(({x,y,radius})=>({x,y,radius}))
+}
+
 /** 静态装饰只烘焙一次；边缘丰富、中央稀疏，始终避开门口。 */
 export function drawFloorDecorations(ctx: CanvasRenderingContext2D, width: number, height: number, wall: number, tile: number, doors: readonly DoorSlot[], seed: number, style: BiomeFloorStyle,boneCount=0): BackgroundRock[] {
-  const backgroundRocks:BackgroundRock[]=[]
+  const entries = layoutDecorations(width,height,wall,tile,doors,seed,style,boneCount)
+  const backgroundRocks = entries.filter(p=>p.kind===5).map(({x,y,radius})=>({x,y,radius}))
   let state = (Math.imul(seed + 83, 2246822519) ^ 0x37ac912d) >>> 0
   const rand = (): number => { state ^= state << 13; state ^= state >>> 17; state ^= state << 5; return (state >>> 0) / 4294967296 }
-  const occupied: Array<{ x: number; y: number }> = []
+  const occupied = entries
   ctx.save(); ctx.beginPath(); ctx.rect(wall, wall, width - wall * 2, height - wall * 2); ctx.clip()
-  for (let i = 0; i < 58 * style.detailDensity; i++) {
-    const side = Math.floor(rand() * 4)
-    const x = side < 2 ? wall + 22 + rand() * (width - wall * 2 - 44) : side === 2 ? wall + 12 + rand() * 70 : width - wall - 12 - rand() * 70
-    const y = side >= 2 ? wall + 22 + rand() * (height - wall * 2 - 44) : side === 0 ? wall + 12 + rand() * 70 : height - wall - 12 - rand() * 70
-    if (doors.some(d => Math.hypot(x - (d.col + .5) * tile, y - (d.row + .5) * tile) < 88) || occupied.some(p => Math.hypot(p.x - x, p.y - y) < 42)) continue
-    occupied.push({ x, y })
-    const kind = Math.floor(rand() * 6), radius = 15 + rand() * 24
-    const angle=(rand()-.5)*1.4
+  for (const {x,y,kind,radius,angle,cracked} of entries) {
     ctx.save(); ctx.translate(x, y); ctx.rotate(angle)
     // 不规则渗色先融合地面，所有细节避免清晰的贴纸外轮廓。
     const stain = ctx.createRadialGradient(0, 0, 0, 0, 0, radius)
@@ -60,8 +74,6 @@ export function drawFloorDecorations(ctx: CanvasRenderingContext2D, width: numbe
       }
     } else {
       // 薄层岩皮剥蚀：上沿凹入、下沿受光，不画完整亮边圈。
-      const cracked=boneCount>0&&rand()<.25
-      backgroundRocks.push({x,y,radius,...(cracked?{fruitAnchor:{x:x+Math.sin(angle)*2,y:y-Math.cos(angle)*2}}:{})})
       if(drawMineSprite(ctx,'ground-rubble',-radius,-radius*.45,radius*2,radius)){
         if(cracked){ctx.strokeStyle='#302d3b';ctx.lineWidth=.8;ctx.beginPath();ctx.moveTo(-6,-5);ctx.lineTo(-2,-2);ctx.lineTo(-4,1);ctx.lineTo(3,3);ctx.stroke()}
         ctx.restore();continue

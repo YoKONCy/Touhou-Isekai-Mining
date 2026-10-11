@@ -1,3 +1,18 @@
+import { SnapshotCodec, type StateFields } from '../../core/simulation/snapshot'
+import { nextEntityId, emitSimulationEvent } from '../../core/simulation/events'
+import { simulationAppearance, withSimulationAppearance } from '../../shared/playerAppearance'
+import { layoutBackgroundRocks } from '../art/floorDecorations'
+import { profiler } from '../../core/performance/Profiler'
+import { rebuildEnemyGrid,rebuildBlockerGrid,enemyCandidates } from '../CombatSpatial'
+import { SpatialGrid } from '../../core/spatial/SpatialGrid'
+import { canvasViewport,visible,drawVisibleLayer,type Viewport } from '../../core/rendering/Viewport'
+import { roomResourceBudget } from '../../core/rendering/ResourceBudget'
+import { OldHellScene } from '../art/oldHellScene'
+import { layoutRoomDoors,slotOnWall, type RoomDoorPlacement } from './dungeon/roomDoors'
+import { withVisualSeed } from '../../core/simulation/random'
+import { KedamaBoss } from '../KedamaBoss'
+import { GrimmBoss } from '../GrimmBoss'
+import { randomCombat, randomGeneration, randomLoot, randomVisual } from '../../core/simulation/random'
 /**
  * 单个房间的运行时：瓦片地图 + 门 + 敌人 + 掉落物 + 矿脉 + 裂隙
  *
@@ -13,11 +28,14 @@ import { aoeMultiplier, meleeImpact } from '../../content/items/combatComponents
 import { CavePlants } from '../art/cavePlants'
 import { getItemDef, findItemDef, type ItemId, type SpellCardDef, type SpellFxColors } from '../../shared/itemDefs'
 import { t, hasKey, itemName, mineralName } from '../../i18n'
-import { ROCK_STONE_ID, PICK_RUSTY_ID, SWORD_IRON_ID, DOOMSDAY_ID } from '../../content/items/vanilla/ids'
+import { ROCK_STONE_ID, SILICA_SAND_ID, PICK_RUSTY_ID, SWORD_IRON_ID, DOOMSDAY_ID } from '../../content/items/vanilla/ids'
 import { rollEnemyId, fixedEnemyIds, enemies } from '../../content/enemies/registry'
+import { weightedPick } from '../../content/core/Registry'
 import { SLIME_BLUE_ID } from '../../content/enemies/vanilla/ids'
 import { findMineralDef } from '../../content/minerals/registry'
 import { DEFAULT_BIOME_ID, biomeDefs, rollEnemyCount, oreRangeForRoom } from '../../content/biomes/registry'
+import { searchDensity } from '../../content/search/rules'
+import type { SearchRoomContext, SearchEffectContext } from '../../content/search/types'
 import type { Inventory } from '../../shared/inventory'
 import { CONFIG } from '../config'
 import { sfx } from '../audio/Sfx'
@@ -45,6 +63,7 @@ import {
 import { SteamVents } from '../art/steamVents'
 import { layoutProps, renderProp, propBands, propBlocksBullets, circleHitsProp, type Prop, type PropBand } from '../art/props'
 import { drawOreCrystals, oreLight } from '../art/oreVein'
+import { renderCollectible } from '../art/collectibleHighlight'
 import { WarpField } from '../art/warpField'
 import { FogField } from '../art/fogField'
 import type { AmbientLevel, LightSource } from '../art/lighting'
@@ -52,10 +71,9 @@ import { TileMap, type DoorSlot, type OreTile } from '../tilemap'
 import type { Dir, RoomDef } from './dungeon/types'
 import type { ScriptedRoomSpec, ScriptedSpawn } from './dungeon/script'
 import type { Interactable, ItemInteractData, ChestInteractData } from './interactables'
-import { rollLoot } from '../../content/loot/registry'
 import { CaveNature, type NatureGather } from '../art/caveNature'
 import { WOOD_ID, SLIME_BALL_ID } from '../../content/items/vanilla/ids'
-import { calculateDamage, damageLabel } from '../../shared/combat'
+import { damageLabel } from '../../shared/combat'
 import { SALTPETER_ID } from '../../content/items/vanilla/materials/saltpeter'
 import { PROP_LOGS_ID } from '../../content/props/vanilla/ids'
 import { propDefs } from '../../content/props/registry'
@@ -63,8 +81,15 @@ import { updateBoomerang } from '../../content/items/vanilla/weapons/boomerang/f
 import { FurnaceWrecks } from '../art/furnaceWrecks'
 import { OLD_FURNACE_PARTS_ID } from '../../content/items/vanilla/ids'
 import { CHEST_BASIC_TABLE } from '../../content/loot/vanilla/chestBasic'
+import { SEARCH_CHEST_TABLE } from '../../content/loot/vanilla/searchSupplies'
+import { itemQualityLevel } from '../../shared/itemQuality'
 import { resolveCaveArt } from '../art/caveStyle'
 import { drawMineSprite } from '../art/mineAssets'
+import { SearchSystem, searchFeedback, type SearchContainer } from '../search/SearchSystem'
+import { RoomThreats } from './RoomThreats'
+import { RoomNavigation } from './RoomNavigation'
+import { drawSearchMarkers, drawGatherMarkers } from '../search/searchMarkers'
+import type { SearchView, SearchCommand } from '../../shared/search'
 
 /** '#rrggbb'（或 '#rgb'）+ alpha → rgba 字符串（符卡光波配色用） */
 function hexRgba(hex: string, alpha: number): string {
@@ -87,30 +112,19 @@ const PRISMA_PALETTES: Array<[string, string, string]> = [
 ]
 
 /** 玩家操作输入（模块在房间切换冻结期会传零值） */
-export interface RoomInput {
-  moveX: number
-  moveY: number
-  dodgePressed: boolean
-  dodgeHeld: boolean
-  dodgeReleased: boolean
-  /** 攻击键本帧刚按下（边沿；武器逐点击打用） */
-  attackPressed: boolean
-  /** 右键特殊攻击本帧刚按下 */
-  specialPressed: boolean
-  specialHeld?: boolean
-  specialReleased?: boolean
-  /** 攻击键当前按住（电平；镐类工具长按自动连挥用） */
-  attackHeld: boolean
-  attackReleased?: boolean
-  pointerX: number
-  pointerY: number
-  /** F 键（裂隙交互；E/R 已让给符卡） */
-  interactPressed: boolean
-}
+export type { PlayerIntent as RoomInput } from '../simulation/PlayerIntent'
+import type { PlayerIntent as RoomInput } from '../simulation/PlayerIntent'
+
+/** 同一世界中的独立玩家；个人奖励和操作回调随参与者绑定。 */
+export interface RoomParticipant { player: Player; input: RoomInput; host: RoomHost }
+interface SceneDraw {x:number;y:number;r:number;draw:(ctx:CanvasRenderingContext2D)=>void}
 
 /** 房间向模块（CaveModule）请求的外部动作 */
 export interface RoomHost {
   inventory: Inventory
+  /** 为当前玩家提供幸运、事件标记等纯数据；只在首次生成容器奖励时结算。 */
+  searchEffects?(player: Player, container: Readonly<SearchContainer>): SearchEffectContext
+  collectSearchReward?(id:string):boolean|undefined
   furnaceSearchAllowed?():boolean
   onFurnaceSearch?(found:boolean):void
   claimMiningChest?(): boolean
@@ -118,6 +132,7 @@ export interface RoomHost {
   claimGuaranteedMiningChest?(): boolean
   /** 外部技能弹幕同步参与符卡每一波净化，普通矿洞可省略。 */
   clearEnemyBullets?(x:number,y:number,radius:number):void
+  slowEnemyBullets?(duration:number,multiplier:number):void
   /** 击杀一只怪（整层统计 + 经验结算；exp 为该敌人基础经验，吃深层倍率） */
   onKill(exp: number): void
   /** 敲碎一处矿点（'rock' 普通岩石 / 'ore' 显矿矿脉；经验结算用） */
@@ -143,7 +158,7 @@ export interface RoomHost {
   equipItem?(slot: NonNullable<ItemInteractData['slot']>, item: ItemId): boolean
 }
 
-interface RuntimeDoor {
+interface RuntimeDoor extends RoomDoorPlacement {
   doorId: number
   dir: Dir
   col: number
@@ -163,26 +178,55 @@ interface ViewBounds {
   h: number
 }
 
-/** 同方位多门时在墙上的格位排布（中点优先，多门对称错开） */
-function slotOnWall(size: number, count: number, index: number): number {
-  const mid = Math.floor(size / 2)
-  if (count === 1) return mid
-  if (count === 2) return mid + (index === 0 ? -4 : 4)
-  if (count === 3) return mid + [-6, 0, 6][index]
-  const low=CONFIG.wallThickness+2,high=size-CONFIG.wallThickness-3
-  return Math.round(low+(high-low)*index/(count-1))
-}
-
 /** 房间可指定独立群系，未指定时仍沿用旧矿洞的数量与矿量配置。 */
 const currentBiome = (def: RoomDef) => biomeDefs.require(def.biomeId ?? DEFAULT_BIOME_ID)
 
+export interface RoomSnapshot {
+  version: 1
+  definition: RoomDef
+  script: ScriptedRoomSpec | null
+  fields: StateFields
+  map: ReturnType<TileMap['captureSimulation']>
+  props: Prop[]
+  nature: ReturnType<CaveNature['captureSimulation']> | null
+  wrecks: {all: FurnaceWrecks['all']; colliders: Prop[]} | null
+  enemies: Array<{type:string;content:string;x:number;y:number;state:StateFields;definition:import('../../core/simulation/snapshot').StateValue}>
+  drops: Array<{item:ItemId;x:number;y:number;state:StateFields}>
+  bullets: Array<{content:string;x:number;y:number;angle:number;state:StateFields}>
+}
+
 export class RoomRuntime {
+  readonly entityId = nextEntityId('room')
   private readonly artStyle: ReturnType<typeof resolveCaveArt>
+  private readonly oldHell: OldHellScene | null
   readonly def: RoomDef
   readonly map: TileMap
-  readonly texture: HTMLCanvasElement
+  texture: HTMLCanvasElement | null
   /** 批次 E：北墙拔高立面层（每帧盖在实体上做遮挡；旧纹理为 null） */
-  readonly textureNorth: HTMLCanvasElement | null
+  textureNorth: HTMLCanvasElement | null
+  private readonly releasePixels=()=>this.releaseRenderPixels()
+  private touchRenderBudget():void {
+    if(this.headless)return
+    const bytes=(this.texture?.width??0)*(this.texture?.height??0)*4+(this.textureNorth?.width??0)*(this.textureNorth?.height??0)*4+this.map.rasterBytes+(this.nature?.rasterBytes??0)+this.fog.rasterBytes+(this.oldHell?.rasterBytes??0)
+    roomResourceBudget.touch(this,bytes,this.releasePixels)
+  }
+  private releaseRenderPixels():void {
+    if(this.texture)this.texture.width=this.texture.height=1
+    if(this.textureNorth)this.textureNorth.width=this.textureNorth.height=1
+    this.texture=this.textureNorth=null;this.map.releaseRenderResources();this.nature?.releaseRenderResources();this.fog.releaseRenderResources();this.oldHell?.releaseRenderResources()
+  }
+  releaseRenderResources():void {roomResourceBudget.release(this);this.releaseRenderPixels()}
+  private ensureRenderTextures():void {
+    if(this.texture||this.headless||this.oldHell)return
+    const started=profiler.start(),slots=this.doors.map(door=>({col:door.col,row:door.row}))
+    withVisualSeed(this.def.id^Math.imul((this.def.floor??1)+1,0x9e3779b9),()=>{
+      if(CONFIG.art.slice){
+        const layers=this.script?.theme==='grimm'?createRoomTextureTrial(slots,this.def.id):createRoomTextureE(slots,this.def.id,this.artStyle.floor,this.def.floor??1,this.def.landmark,this.artStyle.scene)
+        this.texture=layers.base;this.textureNorth=layers.northFace
+      }else {this.texture=createRoomTexture(slots);this.textureNorth=null}
+    })
+    profiler.end('textureBake',started);this.touchRenderBudget()
+  }
   /** 批次 E：墙上火把布局（旧纹理为空数组） */
   readonly torches: readonly TorchSlot[]
   /** 批次 E：冒热气的地缝（余烬微光 + 热气粒子；旧纹理为空数组） */
@@ -203,12 +247,41 @@ export class RoomRuntime {
   /** 首领弹幕与普通弹幕使用同一份掩体缓存。 */
   get projectileBlockers(): readonly PropBand[] { return this.bulletBlockers }
   private readonly resourceColliders = new WeakMap<object, Prop>()
+  private readonly unavailableCollector = { x: 0, y: 0, half: CONFIG.player.half, alive: false }
   readonly doors: RuntimeDoor[]
   readonly fx = new FxLayer()
   /** 批次 F⑤：时空乱流氛围浮层（地面之上、实体之下） */
   private readonly warp = new WarpField()
   /** 批次 F⑦追加：漂浮动态雾气（实体之上、弹幕之下的柔遮罩） */
   private readonly fog = new FogField()
+  private readonly search = new SearchSystem()
+  searchView(player: Player): SearchView | null { return this.search.view(player, this.time) }
+  cancelSearch(player: Player): void { this.search.cancel(player) }
+  cancelSearches(): void { this.search.cancelAll(this.knownPlayers) }
+  hasSearchSession(player: Player): boolean { return this.search.hasSession(player) }
+  get searchContainers(): readonly SearchContainer[] { return this.search.containers }
+  renderSearchMarkers(ctx: CanvasRenderingContext2D): void {
+    drawSearchMarkers(ctx, this.search.containers, this.time)
+    if (this.nature) drawGatherMarkers(ctx, this.nature.gathers, this.time)
+  }
+  private takeSearch(player: Player, containerId: string, slot: number, host: RoomHost): void {
+    if (player.isChanneling) return
+    const container=this.search.container(containerId)
+    if(!container||!this.canReachSearch(player,container))return
+    if (this.search.blockedByOther(player, containerId)) {
+      this.fx.damageText(player.x, player.y - 26, t('game.search.busy_other'), '#c9b99b')
+      return
+    }
+    const added = this.search.take(player, containerId, slot, host.inventory, stack => {
+      this.fx.withPickupOwner(player.entityId, player.x, player.y, () => this.fx.pickupText(stack.id, stack.qty, '#e5d4af'))
+      host.onItemFound?.(stack.id)
+      emitSimulationEvent({ type: 'pickup', source: containerId, collector: player.entityId, item: stack.id, quantity: stack.qty })
+    },host.collectSearchReward)
+    if (added) sfx.searchTake()
+    else if (this.search.view(player, this.time)?.slots.some(s => s.revealed && s.item)) this.fx.damageText(player.x, player.y - 26, t('game.notify.bag_full'), '#ff9a7a')
+    const view = this.search.view(player, this.time)
+    if (view?.complete && !view.slots.some(s => s.item)) this.search.cancel(player)
+  }
 
   readonly fissure: { x: number; y: number; active: boolean } | null
 
@@ -217,9 +290,28 @@ export class RoomRuntime {
     fx: this.fx, enemies: () => this.enemies, time: () => this.time,
     onEnemyKilled: (enemy, host) => this.onEnemyKilled(enemy, host)
   })
+  private doomsdayOwner: string | null = null
+  private readonly ownerDoomsday = new Map<string, DoomsdayRoom>()
+  private doomFor(player: Player): DoomsdayRoom {
+    if (this.doomsdayOwner === null) this.doomsdayOwner = player.entityId
+    if (this.doomsdayOwner === player.entityId) return this.doomsday
+    let effect = this.ownerDoomsday.get(player.entityId)
+    if (!effect) {
+      effect = new DoomsdayRoom({fx:this.fx,enemies:()=>this.enemies,time:()=>this.time,onEnemyKilled:(enemy,host)=>this.onEnemyKilled(enemy,host)})
+      this.ownerDoomsday.set(player.entityId,effect)
+    }
+    return effect
+  }
 
-  clearDoomsday(player: Player): void { this.doomsday.clear(player) }
-  renderDoomsday(ctx: CanvasRenderingContext2D, player: Player): void { this.doomsday.render(ctx, player) }
+  clearDoomsday(player: Player): void {
+    const effect=this.doomsdayOwner===player.entityId?this.doomsday:this.ownerDoomsday.get(player.entityId)
+    effect?.clear(player)
+  }
+  renderDoomsday(ctx: CanvasRenderingContext2D, player: Player): void {
+    // 表现层只读取已存在的状态，不能因绘制频率不同创建新的模拟组件。
+    const effect=this.doomsdayOwner===player.entityId?this.doomsday:this.ownerDoomsday.get(player.entityId)
+    effect?.render(ctx,player)
+  }
 
   private enemyTotal: number
   private drops: Drop[] = []
@@ -238,6 +330,8 @@ export class RoomRuntime {
     colors?: SpellFxColors
     seed: number
     follow: boolean
+    owner?: string
+    render?: NonNullable<SpellCardDef['targetFx']>['render']
   }> = []
   /** 延迟符卡脉冲（多波次符卡：第二波及以后排期；触发时以玩家当前位置为中心） */
   private pendingSpellPulses: Array<{
@@ -246,10 +340,16 @@ export class RoomRuntime {
     def: SpellCardDef
     pulse: number
     damageBonus:number
+    owner?:string
+    channel?:boolean
   }> = []
+  private bulletSlowRemaining = 0
+  private bulletSlowMultiplier = 1
   private cleared: boolean
   /** 批次 E：火把开始点燃时刻；null=从未点燃，负值=建房前已亮（空房） */
   private litStart: number | null = null
+  /** 旧地狱清场后的散雾起点，随模拟时间与房间快照保存。 */
+  private fogClearStart: number | null = null
   /** 脚本模式：火把需手动点；每根火把的点燃时刻（未在表中 = 熄灭） */
   private manualTorch = false
   /**
@@ -262,6 +362,64 @@ export class RoomRuntime {
   /** 是否已访问过（HUD/小地图用） */
   visited = true
   private deathNotified = false
+  private readonly deathNotifiedPlayers = new Set<string>()
+  private readonly settledKills = new Set<string>()
+  private readonly interactionHints = new Map<string, string | null>()
+  private readonly playerEntities = new Map<string, Player>()
+  private knownPlayers:Player[]=[]
+  private playerScratch:Player[]=[]
+  private livingScratch:RoomParticipant[]=[]
+  private inventorySpace=new WeakMap<Inventory,Map<string,boolean>>()
+  private bladeScratch:ReturnType<Player['getProjectileErasure']>[number][]=[]
+  private separationGrid=new SpatialGrid<Enemy>()
+  private separationCandidates:Enemy[]=[]
+  private staticDraws:SceneDraw[]=[]
+  private dynamicDraws:SceneDraw[]=[]
+  private actorDraws=new WeakMap<object,SceneDraw>()
+  private collisionNext:Prop[]=[]
+  private collisionRecords=new WeakMap<Prop,{x:number;y:number;s:number;id:string;w:number|undefined;h:number|undefined;segments:Prop['segments'];block:boolean|undefined;definition:unknown}>()
+  private staticDrawKey=''
+  private prepareStaticDraws():void {
+    const key=`${this.map.oreRevision}:${this.props.length}:${this.plants?.ground.length}:${this.wrecks?.all.length}:${this.nature?.gathers.length}:${this.nature?.wood.length}:${this.interactables.length}:${this.extraSortables.length}`
+    if(this.staticDrawKey===key)return
+    this.staticDrawKey=key;const out=this.staticDraws;out.length=0
+    const add=(x:number,y:number,r:number,draw:SceneDraw['draw'])=>out.push({x,y,r,draw})
+    if(this.plants){const plants=this.plants;for(const p of plants.ground)add(p.x,p.y,180,g=>plants.renderGround(g,p,this.time))}
+    if(this.wrecks){const wrecks=this.wrecks;for(const w of wrecks.all)add(w.x,w.y,150,g=>wrecks.render(g,w,this.time,this.wreckSearchAllowed))}
+    for(const prop of this.props)add(prop.x,prop.y,180*prop.s,g=>renderProp(g,prop,this.time))
+    if(this.nature){const nature=this.nature;for(const p of nature.gathers)add(p.x,p.y,100,g=>{if(!p.done)nature.renderGather(g,p,this.time)});for(const p of nature.wood)add(p.x,p.y,100,g=>{if(p.hp>0)nature.renderWood(g,p)})}
+    for(const it of this.interactables){if(it.kind==='item')add(it.x,it.y,100,g=>{if(!it.done)this.renderGroundItem(g,it)});else if(it.kind==='chest')add(it.x,it.y,90,g=>this.renderChest(g,it))}
+    for(const building of this.oldHell?.buildings??[])add(building.x,building.y,building.radius,g=>this.oldHell!.renderBuilding(g,building,this.knownPlayers))
+    for(const rock of this.oldHell?.rocks.formations??[])add(rock.x,rock.y,rock.radius,g=>this.oldHell!.rocks.render(g,rock,this.knownPlayers))
+    if(this.oldHell)for(const door of this.doors)add((door.col+.5)*this.map.tile,(door.row+.5)*this.map.tile+38,225,g=>this.oldHell!.renderDoorway(g,door,this.time,this.knownPlayers))
+    for(const ex of this.extraSortables)add(0,ex.y,Infinity,g=>ex.draw(g,this.time))
+    this.map.forEachOre(ore=>add((ore.col+.5)*CONFIG.tile+ore.offsetX,(ore.row+1)*CONFIG.tile-2+ore.offsetY,CONFIG.tile*2,g=>drawOreCrystals(g,ore,this.time)))
+    out.sort((a,b)=>a.y-b.y)
+  }
+  private drawActors(ctx:CanvasRenderingContext2D,players:readonly Player[],view:Viewport):void {
+    this.prepareStaticDraws();const dynamic=this.dynamicDraws;dynamic.length=0
+    const add=(entity:Player|Enemy|Drop,r:number)=>{
+      let draw=this.actorDraws.get(entity);if(!draw){draw={x:0,y:0,r,draw:g=>entity.render(g)};this.actorDraws.set(entity,draw)}
+      draw.x=entity.x;draw.y=entity.y;draw.r=r;if(visible(view,draw.x,draw.y,draw.r))dynamic.push(draw)
+    }
+    for(const drop of this.drops)add(drop,40)
+    for(const enemy of this.enemies)add(enemy,enemy.def.tags?.includes('boss')?700:240)
+    for(const player of players)add(player,450)
+    dynamic.sort((a,b)=>a.y-b.y)
+    let i=0,j=0,count=0
+    while(i<this.staticDraws.length||j<dynamic.length){
+      const fixed=this.staticDraws[i],moving=dynamic[j]
+      const next=moving&&(!fixed||moving.y<=fixed.y)?dynamic[j++]:this.staticDraws[i++]
+      if(visible(view,next.x,next.y,next.r)){next.draw(ctx);count++}
+    }
+    profiler.count('drawnObjects',count)
+  }
+  rememberPlayers(players:readonly Player[]):void {
+    if(players.length===this.knownPlayers.length&&players.every((player,index)=>player===this.knownPlayers[index]))return
+    this.playerEntities.clear()
+    for(const player of players){if(this.playerEntities.has(player.entityId))throw new Error('房间收到重复玩家');this.playerEntities.set(player.entityId,player)}
+    this.knownPlayers=Array.from(players)
+  }
   private time = 0
 
   // —— B2：地面交互物（站立物 + F；与磁吸 Drop 区分） ——
@@ -273,6 +431,8 @@ export class RoomRuntime {
   readonly script: ScriptedRoomSpec | null
   /** 延迟刷怪队列（脚本怪 delay > 0；未出场也算在 enemyTotal 内，阻止提前清场） */
   private pendingSpawns: ScriptedSpawn[] = []
+  private readonly threats = new RoomThreats()
+  private readonly navigation = new RoomNavigation()
   private roomAlerted=false
 
   // —— B2：剧情实体追加（序章灵梦等），参与全屋 y-sort —— //
@@ -305,10 +465,16 @@ export class RoomRuntime {
   private sealFlash = 0
   private sealFlashDur = 1
 
+  /** 房间的搜索经济上下文只含纯数据，区域与特殊字段可由未来场景直接提供。 */
+  private searchContext(): SearchRoomContext {
+    return { floor: this.def.floor ?? 1, biomeId: this.def.biomeId ?? DEFAULT_BIOME_ID,
+      roomKind: this.def.kind, regionId: this.def.searchRegion, fields: this.def.searchFields, profile: this.def.searchProfile }
+  }
+
   /**
    * @param script 固定脚本房间规格（序章；普通房省略）
    */
-  constructor(def: RoomDef, spawnX: number, spawnY: number, script?: ScriptedRoomSpec) {
+  constructor(def: RoomDef, spawnX: number, spawnY: number, script?: ScriptedRoomSpec, private readonly headless = false) {
     this.def = def
     this.script = script ?? null
     if (script?.manualTorches) this.manualTorch = true
@@ -317,9 +483,9 @@ export class RoomRuntime {
     let backgroundRocks:readonly import('../art/floorDecorations').BackgroundRock[]=[]
     // 脚本房按固定表计数；普通房和陷阱房共用楼层预算，陷阱房选择偏多的一档。
     this.enemyTotal = script?.spawns ? script.spawns.length : script?.enemyRange
-      ? script.enemyRange[0]+Math.floor(Math.random()*(script.enemyRange[1]-script.enemyRange[0]+1))
-      : rollEnemyCount(biome, def)+(!script?fixedEnemyIds(def.kind,def.floor??1).length:0)
-    this.doors = layoutDoors(def)
+      ? script.enemyRange[0]+Math.floor(randomGeneration()*(script.enemyRange[1]-script.enemyRange[0]+1))
+      : biome.emptyContent?0:rollEnemyCount(biome, def)+(!script?fixedEnemyIds(def.kind,def.floor??1,biome.enemyIds).length+(def.extraEnemies?.length??0):0)
+    this.doors = layoutRoomDoors(def)
     // 剧情出口：追加一扇无对端房间的单向门（构造即红色封印态，openStoryExit 解封）
     if (script?.storyExit) {
       const { roomCols: C, roomRows: R, wallThickness: W } = CONFIG
@@ -331,6 +497,9 @@ export class RoomRuntime {
     const doorSlots: DoorSlot[] = this.doors.map((d) => ({ col: d.col, row: d.row }))
 
     this.map = new TileMap({
+      terrain:def.terrain,
+      mineralIds:biome.mineralIds,
+      lavaBankMinerals:script?.noOre?undefined:biome.lavaBankMinerals,
       spawnCol: Math.floor(spawnX / CONFIG.tile),
       spawnRow: Math.floor(spawnY / CONFIG.tile),
       // 矿量：noOre 清零 → spec.oreRange 脚本定量（序章极少量）→ 群系按房型随机
@@ -346,39 +515,61 @@ export class RoomRuntime {
     this.map.forEachOre((o) => {
       orePoints.push({ x: (o.col + 0.5) * CONFIG.tile, y: (o.row + 0.5) * CONFIG.tile })
     })
-    if (CONFIG.art.slice) {
+    this.oldHell=biome.environment==='old_hell'&&def.terrain?new OldHellScene(this.map,def.terrain):null
+    if(this.oldHell){
+      this.texture=this.textureNorth=null;this.torches=[];this.vents=[]
+      this.props=this.oldHell.containerProps
+    } else if (CONFIG.art.slice) {
       if (script?.theme === 'grimm') {
         // 猩红圣堂斗场：黑石砖地 + 仪式法阵 + 黑石裙墙 + 帷幔立面 + 落地火盆（无矿洞杂物）
-        const layers = createRoomTextureTrial(doorSlots, def.id)
-        this.texture = layers.base
-        this.textureNorth = layers.northFace
+        const layers = headless ? null : createRoomTextureTrial(doorSlots, def.id)
+        this.texture = layers?.base ?? null
+        this.textureNorth = layers?.northFace ?? null
         this.torches = []
         this.vents = []
       } else {
         // 批次 E：石板地 + 岩壁立面 + 坑木支架（双层）+ 墙上火把 + 苔藓地缝
         const art = this.artStyle
-        const layers = createRoomTextureE(doorSlots, def.id, art.floor, def.floor ?? 1, def.landmark, art.scene)
-        backgroundRocks=layers.backgroundRocks ?? []
-        this.texture = layers.base
-        this.textureNorth = layers.northFace
+        const layers = headless ? null : createRoomTextureE(doorSlots, def.id, art.floor, def.floor ?? 1, def.landmark, art.scene)
+        backgroundRocks=layers?.backgroundRocks ?? layoutBackgroundRocks(CONFIG.roomCols*CONFIG.tile,CONFIG.roomRows*CONFIG.tile,CONFIG.wallThickness*CONFIG.tile,CONFIG.tile,doorSlots,def.id,art.floor,art.scene.boneFragments)
+        this.texture = layers?.base ?? null
+        this.textureNorth = layers?.northFace ?? null
         this.torches = layoutTorches(doorSlots)
         this.vents = layoutSteamVents(doorSlots, def.id)
       }
       const art = this.artStyle
-      this.props = script?.noProps ? [] : layoutProps(doorSlots, def.id, spawnX, spawnY, this.vents, orePoints).map(p=>({...p,artStyle:art.scene}))
+      this.props = script?.noProps ? [] : layoutProps(doorSlots, def.id, spawnX, spawnY, this.vents, orePoints, this.searchContext()).map(p=>({...p,artStyle:art.scene}))
     } else {
-      this.texture = createRoomTexture(doorSlots)
+      this.texture = headless ? null : withVisualSeed(def.id^Math.imul((def.floor??1)+1,0x9e3779b9),()=>createRoomTexture(doorSlots))
       this.textureNorth = null
       this.torches = []
       this.vents = []
       this.props = []
     }
+    // 第三房的教学矿车固定在入口附近，清掉覆盖它的矿格与随机摆件。
+    for (const fixed of script?.searchProps ?? []) {
+      this.map.setStoryArea(fixed.x - 48, fixed.y - 56, fixed.x + 48, fixed.y + 32)
+      const props = this.props as Prop[]
+      for (let i = props.length - 1; i >= 0; i--) if (Math.hypot(props[i]!.x - fixed.x, props[i]!.y - fixed.y) < 100) props.splice(i, 1)
+      props.push({ id: fixed.id, x: fixed.x, y: fixed.y, s: fixed.s ?? 1, seed: def.id + 17, artStyle: this.artStyle.scene })
+    }
+    for (let i = 0; i < this.props.length; i++) {
+      const prop = this.props[i]!, definition = propDefs.get(prop.id), searchable = definition?.search
+      if (searchable) this.search.add({ id: `${this.entityId}:prop:${i}`, x: prop.x, y: prop.y, range: Math.max(80, (definition!.halfWidth + 48) * prop.s), cols:searchable.cols,rows: searchable.rows, table: searchable.table,
+        kind: searchable.cols === 2 ? 'small' : searchable.cols === 3 ? 'large' : 'chest', sourceId: prop.id, context: this.searchContext(), profile: searchable.profile,
+        fields: typeof searchable.fields?.markerHeight === 'number' ? {...searchable.fields,markerHeight:searchable.fields.markerHeight*prop.s} : searchable.fields,
+        nameKey: `prop.${prop.id}.name`, ref: script?.searchProps?.find(p => p.x === prop.x && p.y === prop.y)?.ref })
+    }
     this.steam = new SteamVents(this.vents)
-    if (!script?.noNature && !script) {
+    if (!script?.noNature && !script && (!biome.emptyContent||biome.gatherSpawns)) {
       // 非采矿的背景岩块与石质摆件均逐块判定，TileMap 中可挖的岩石不在此表。
       const gatherRocks=[...backgroundRocks,...this.props.filter(p=>propDefs.get(p.id)?.tags?.includes('rock')).map(p=>({x:p.x,y:p.y,radius:(propDefs.get(p.id)?.halfWidth??18)*p.s+18}))]
-      this.nature = new CaveNature(this.map, this.props, spawnX, spawnY, def.floor ?? 1, gatherRocks)
-      this.plants = new CavePlants(this.map, doorSlots, def.id, this.nature.waterBanks)
+      this.nature = new CaveNature(this.map, this.props, spawnX, spawnY, def.floor ?? 1, gatherRocks,
+        biome.gatherSpawns?{spawns:biome.gatherSpawns,terrain:def.terrain}:undefined)
+      if(!biome.gatherSpawns){
+        this.plants = new CavePlants(this.map, doorSlots, def.id, this.nature.waterBanks)
+        this.nature.attachHangingFruit(this.plants.fruitAnchors,def.floor??1)
+      }
     }
 
     if (script?.spawns) {
@@ -388,7 +579,7 @@ export class RoomRuntime {
         if ((sp.delay ?? 0) > 0) this.pendingSpawns.push(sp)
         else this.spawnEnemyAt(sp.id, sp.x, sp.y, sp.burrow === true, script.aggressive === true)
       }
-    } else {
+    } else if(!biome.emptyContent) {
       this.spawnEnemies(spawnX, spawnY)
     }
 
@@ -410,7 +601,7 @@ export class RoomRuntime {
       }
       let spot: {x:number;y:number} | null = valid(cx,cy)?{x:cx,y:cy}:null
       for (let radius=CONFIG.tile;!spot&&radius<Math.hypot(right-left,bottom-top);radius+=CONFIG.tile) {
-        const phase=Math.random()*Math.PI*2, count=Math.max(16,Math.ceil(radius*2*Math.PI/24))
+        const phase=randomGeneration()*Math.PI*2, count=Math.max(16,Math.ceil(radius*2*Math.PI/24))
         for (let i=0;i<count;i++) {
           const a=phase+i/count*Math.PI*2,x=cx+Math.cos(a)*radius,y=cy+Math.sin(a)*radius
           if(valid(x,y)){spot={x,y};break}
@@ -426,16 +617,30 @@ export class RoomRuntime {
     }
 
     if(def.furnaceWrecks?.length)this.wrecks=new FurnaceWrecks(this.map,this.props,{x:spawnX,y:spawnY},def.furnaceWrecks,[...(this.nature?.gathers??[]),...(this.nature?.wood??[]),...(this.fissure?[this.fissure]:[]),...this.enemies])
+    // 奖励房只在首次构造时判定，不占挖矿宝箱名额；重访与续战复用已保存实体。
+    if(def.kind==='reward'&&!script&&!biome.emptyContent&&randomGeneration()<.25){
+      const {left,right,top,bottom}=this.map.bounds
+      let spot:{x:number;y:number}|undefined
+      for(let attempt=0;attempt<80&&!spot;attempt++){
+        const x=attempt===0?(left+right)/2:left+40+randomGeneration()*(right-left-80)
+        const y=attempt===0?(top+bottom)/2:top+40+randomGeneration()*(bottom-top-80)
+        if(this.canPlacePlayer(x,y,28)&&!this.props.some(p=>circleHitsProp(x,y,32,p))&&!this.nature?.gathers.some(p=>Math.hypot(p.x-x,p.y-y)<52)&&!this.nature?.wood.some(p=>Math.hypot(p.x-x,p.y-y)<70)&&!this.wrecks?.all.some(p=>Math.hypot(p.x-x,p.y-y)<70))spot={x,y}
+      }
+      if(spot)this.addChestInteractable(spot.x,spot.y)
+    }
     // 无怪房间（入口/奖励）默认解封；末间/普通房清场后解封
     // 脚本房在有延迟怪时 enemyTotal 已计入，不会误入此分支；startLocked 强制初始锁门
     this.cleared = this.enemyTotal === 0 && !script?.startLocked && def.encounter!=='survival'
     if (this.cleared) {
+      // 环境探索房可能开局没有敌人，撤离裂隙也应同步激活。
+      if(this.fissure)this.fissure.active=true
       for (const d of this.doors) {
         d.open = true
         this.map.openDoor(d.col, d.row)
       }
-      // 空房进房即灯火通明（手动火把房除外：序章黑房要玩家自己点）
-      if (!this.manualTorch) this.litStart = -10
+      // 旧地狱空房也从浓雾开始渐散，其余空房沿用常亮逻辑。
+      if(this.oldHell)this.fogClearStart=this.time
+      else if (!this.manualTorch) this.litStart = -10
     }
 
     // 手动火把模式：每根墙上火把都是 F 交互点（未点燃时可交互）
@@ -458,6 +663,97 @@ export class RoomRuntime {
 
     // 常亮安全房（序章基地）：墙上火把视为早已燃着，无需清场/点火流程
     if (script?.litRoom) this.litStart = -10
+    if(!script)this.threats.initialize(this.map,biome)
+    this.refreshCollisionProps()
+    this.touchRenderBudget()
+  }
+  canPlacePlayer(x:number,y:number,r:number):boolean {
+    const b=this.map.bounds
+    if(x-r<b.left||x+r>b.right||y-r<b.top||y+r>b.bottom)return false
+    for(const [dx,dy] of [[0,0],[-r,0],[r,0],[0,-r],[0,r]])if(this.map.solidAtWorld(x+dx,y+dy))return false
+    return !this.collisionProps.some(prop=>circleHitsProp(x,y,r,prop))&&!this.enemies.some(enemy=>enemy.alive&&Math.hypot(enemy.x-x,enemy.y-y)<enemy.r+r)
+  }
+
+  /** 无头演练可明确请求首领换段，剧情演出仍由正式导演控制。 */
+  beginBossSecondStage():void {
+    for(const enemy of [...this.enemies])if(enemy instanceof KedamaBoss&&enemy.stage===1){this.summonBossGuardian(enemy);enemy.beginSecondStage()}
+  }
+  summonBossGuardian(boss:Enemy):Enemy {
+    const normal=enemies.require('touhou:slime_guardian'),b=this.map.bounds
+    const x=Math.max(b.left+55,Math.min(b.right-55,boss.x+85)),y=Math.max(b.top+55,Math.min(b.bottom-55,boss.y+35))
+    const guardian=new Enemy(x,y,normal.id,{...normal,hp:normal.hp*1.5})
+    guardian.startBurrowSpawn();guardian.alert();this.addEnemy(guardian)
+    return guardian
+  }
+  get snapshotEnemies():readonly Enemy[]{return this.enemies}
+
+  /** 注册活跃实体与静态碰撞物，命中集合恢复为同一批对象引用。 */
+  bindSnapshotReferences(codec: SnapshotCodec): void {
+    for(const entity of [...this.enemies,...this.drops,...this.bullets])codec.add(entity)
+    this.map.forEachOre(ore=>codec.reference(ore.entityId??`${this.entityId}:ore:${ore.col}:${ore.row}`,ore))
+    this.props.forEach((prop,index)=>codec.reference(`${this.entityId}:prop:${index}`,prop))
+    this.nature?.wood.forEach((wood,index)=>codec.reference(`${this.entityId}:wood:${index}`,wood))
+    this.nature?.gathers.forEach((gather,index)=>codec.reference(`${this.entityId}:gather:${index}`,gather))
+    this.interactables.forEach(item=>codec.reference(`${this.entityId}:interact:${item.id}`,item))
+  }
+  captureSimulation(codec = new SnapshotCodec()): RoomSnapshot {
+    this.bindSnapshotReferences(codec)
+    const keys=['entityId','enemyTotal','cleared','doors','fissure','litStart','fogClearStart','manualTorch','torchesEnabled','litTorchAt','visited','deathNotified','deathNotifiedPlayers','settledKills','doomsdayOwner','time','interactSeq','pendingSpawns','roomAlerted','enemiesFrozen','prismaClock','prismaArmed','prismaPoints','pendingSpellPulses','bulletSlowRemaining','bulletSlowMultiplier','weaponImpacts','survivalElapsed','survivalWave','survivalComplete','doomsday','search','threats']
+    const fields:StateFields={}
+    const source=this as unknown as Record<string,unknown>
+    for(const key of keys)fields[key]=codec.encode(source[key])
+    // 交互物自身是完整数据，其他状态中的引用才编码为实体标识。
+    fields.interactables= this.interactables.map(item=>({$type:'object',fields:codec.capture(item)}))
+    fields.ownerDoomsday = [...this.ownerDoomsday].map(([owner,effect])=>({owner,state:codec.capture(effect,['room'])}))
+    return {version:1,definition:structuredClone(this.def),script:this.script?structuredClone(this.script):null,fields,map:this.map.captureSimulation(),
+      props:structuredClone(this.props) as Prop[],nature:this.nature?.captureSimulation()??null,
+      wrecks:this.wrecks?{all:structuredClone(this.wrecks.all),colliders:structuredClone(this.wrecks.colliders)}:null,
+      enemies:this.enemies.map(enemy=>({type:enemy.simulationKind,content:enemy.def.id,x:enemy.x,y:enemy.y,state:enemy.captureSimulation(codec),definition:codec.encode(enemy.def)})),
+      drops:this.drops.map(drop=>({item:drop.itemId,x:drop.x,y:drop.y,state:drop.captureSimulation(codec)})),
+      bullets:this.bullets.map(bullet=>({content:bullet.projectileId,x:bullet.x,y:bullet.y,angle:bullet.angle,state:bullet.captureSimulation(codec)}))}
+  }
+  /** 先重建所有实例并登记 ID，再恢复引用、计时与技能队列。 */
+  restoreSimulation(snapshot:RoomSnapshot,codec = new SnapshotCodec()):void {
+    if(snapshot.version!==1||snapshot.definition.id!==this.def.id)throw new Error('房间快照不兼容')
+    ;(this as {entityId:string}).entityId=String(snapshot.fields.entityId)
+    this.map.restoreSimulation(snapshot.map)
+    ;(this.props as Prop[]).splice(0,this.props.length,...structuredClone(snapshot.props))
+    if(snapshot.nature){
+      if(!this.nature)this.nature=new CaveNature(this.map,this.props,0,0,0)
+      this.nature.restoreSimulation(snapshot.nature)
+    }else this.nature=null
+    if(snapshot.wrecks){
+      if(!this.wrecks)this.wrecks=new FurnaceWrecks(this.map,this.props,{x:0,y:0},[],[])
+      this.wrecks.all.splice(0,this.wrecks.all.length,...structuredClone(snapshot.wrecks.all))
+      this.wrecks.colliders.splice(0,this.wrecks.colliders.length,...structuredClone(snapshot.wrecks.colliders))
+    }else this.wrecks=null
+    this.enemies=snapshot.enemies.map(record=>{
+      const enemy=record.type==='kedama'?new KedamaBoss(record.x,record.y):record.type==='grimm'?new GrimmBoss(record.x,record.y):new Enemy(record.x,record.y,record.content,codec.decode(record.definition) as import('../../content/enemies/types').EnemyDef)
+      ;(enemy as {entityId:string}).entityId=String(record.state.entityId);return enemy
+    })
+    this.drops=snapshot.drops.map(record=>{const drop=new Drop(record.x,record.y,record.item);(drop as {entityId:string}).entityId=String(record.state.entityId);return drop})
+    this.bullets=snapshot.bullets.map(record=>{const bullet=new Projectile(record.x,record.y,record.angle,record.content);(bullet as {entityId:string}).entityId=String(record.state.entityId);return bullet})
+    // 完整数据先解码，随后登记被引用的交互物。
+    this.interactables=codec.decode(snapshot.fields.interactables!) as Interactable[]
+    this.bindSnapshotReferences(codec)
+    const {interactables,ownerDoomsday,...fields}=snapshot.fields
+    codec.restore(this,fields)
+    // 旧快照没有散雾计时；未清场的房间不能继承构造时空房的散雾起点。
+    if(this.oldHell&&!('fogClearStart' in fields))this.fogClearStart=this.cleared?(this.litStart!==null&&this.litStart>=0?this.litStart:this.time):null
+    this.ownerDoomsday.clear()
+    for (const record of (ownerDoomsday ?? []) as Array<{owner:string;state:StateFields}>) {
+      const effect = new DoomsdayRoom({fx:this.fx,enemies:()=>this.enemies,time:()=>this.time,onEnemyKilled:(enemy,host)=>this.onEnemyKilled(enemy,host)})
+      codec.restore(effect,record.state);this.ownerDoomsday.set(record.owner,effect)
+    }
+    snapshot.enemies.forEach((record,index)=>this.enemies[index]!.restoreSimulation(record.state,codec))
+    snapshot.drops.forEach((record,index)=>this.drops[index]!.restoreSimulation(record.state,codec))
+    snapshot.bullets.forEach((record,index)=>this.bullets[index]!.restoreSimulation(record.state,codec))
+    this.nearbyInteractable=null;this.spellFx=[];this.prismaBlasts=[]
+    this.interactionHints.clear()
+    this.staticDrawKey='';this.actorDraws=new WeakMap()
+    this.refreshCollisionProps()
+    // 兼容已经清场、但旧逻辑遗留了门标记与瓦片不一致的第五层续战快照。
+    if(this.oldHell&&this.cleared&&!this.script)this.setDoorsOpen(true,true)
   }
 
   /** 房间光源（本帧） */
@@ -465,6 +761,17 @@ export class RoomRuntime {
     if (!CONFIG.art.slice) return []
     const T = CONFIG.art.torch
     const out: LightSource[] = []
+    this.oldHell?.appendLights(out,this.time,view)
+    // 自发光怪物优先照亮近景；最多八盏小灯，死亡环弹不逐颗增加环境光源。
+    let enemyLights=0
+    for(let priority=1;priority>=0;priority--)for(const enemy of this.enemies){
+      const light=enemy.def.visual.light
+      if(!light||Math.min(1,light.priority??0)!==priority||!enemy.alive||enemy.emerging||enemyLights>=8)continue
+      const position=enemy.renderPosition,r=light.radius
+      if(view&&(position.x+r<view.x||position.x-r>view.x+view.w||position.y+r<view.y||position.y-r>view.y+view.h))continue
+      out.push({x:position.x,y:position.y-5,r,power:light.power,color:light.color,tint:light.tint})
+      enemyLights++
+    }
     // 手动火把黑房且一根未点：漆黑态——地缝/矿簇等杂光全部压下，
     // 全场只留火把座的一豆余烬指路（点火后一切恢复）
     const pitchBlack = this.manualTorch && this.litTorchAt.size === 0 || this.def.encounter==='survival'&&!this.survivalComplete
@@ -558,6 +865,7 @@ export class RoomRuntime {
     }
     // 符卡光脉：跟随玩家移动的暖金动态光源——光波真实照亮洞壁/矿簇/摆件
     for (const s of this.spellFx) {
+      if (s.render) continue
       if (s.t < 0) continue // 错峰排期未启动的光环不发光
       const k = Math.min(1, s.t / s.dur)
       const ease = 1 - Math.pow(1 - k, 3)
@@ -622,6 +930,7 @@ export class RoomRuntime {
    */
   get survivalSeconds():number|null{return this.def.encounter==='survival'&&!this.survivalComplete?Math.max(0,Math.ceil(30-this.survivalElapsed)):null}
   get ambientLevel(): AmbientLevel | null {
+    if(this.oldHell)return {center:.1,edge:.25,cc:'28,25,20',ec:'20,21,18'}
     if(this.def.encounter==='survival'){
       if(!this.survivalComplete)return {center:.8,edge:.95}
       const k=Math.min(1,(this.time-(this.litStart??this.time))/.8)
@@ -645,7 +954,10 @@ export class RoomRuntime {
     }
     if (!this.script) {
       const A = CONFIG.art.normalAmbient
-      if (this.artStyle.scene.deepHollow) return this.cleared ? { center: .34, edge: .63 } : { center: .58, edge: .83 }
+      if (this.artStyle.scene.deepHollow) {
+        const D = CONFIG.art.deepHollowAmbient
+        return this.cleared ? { center: D.litCenter, edge: D.litEdge } : { center: D.dimCenter, edge: D.dimEdge }
+      }
       return this.cleared ? { center: A.litCenter, edge: A.litEdge } : { center: A.dimCenter, edge: A.dimEdge }
     }
     return null
@@ -657,7 +969,7 @@ export class RoomRuntime {
   }
 
   get aliveEnemies(): number {
-    return this.enemies.filter((e) => e.alive).length
+    let count=0;for(const enemy of this.enemies)if(enemy.alive)count++;return count
   }
 
   get totalEnemies(): number {
@@ -677,8 +989,28 @@ export class RoomRuntime {
   /** 转阶段、战败或救援时清理双方未完成的攻击，不让对白结束后补发旧弹幕。 */
   clearCombatProjectiles(player: Player): void {
     this.bullets.length = 0; this.pendingSpellPulses.length = 0; this.weaponImpacts.length = 0
+    this.bulletSlowRemaining = 0; this.bulletSlowMultiplier = 1
     for (const enemy of this.enemies) enemy.clearPendingAttacks()
-    player.tarot.clear(); player.bow.clear(); player.rangedFlight = null; player.cancelCharge(); this.clearDoomsday(player)
+    for(const member of new Set([player,...this.playerEntities.values()])) {
+      member.meleeEchoes.length=0
+      member.areaBurst=null
+      member.tarot.clear(); member.bow.clear(); member.scp127.clearFlights(); member.rangedFlight = null; member.cancelCharge(); this.clearDoomsday(member)
+    }
+  }
+  /** 退出参与者只清除自己的待发攻击和资源效果，不清掉队友弹幕。 */
+  detachPlayer(player:Player):void {
+    player.meleeEchoes.length=0
+    player.areaBurst=null
+    this.search.cancel(player)
+    this.clearDoomsday(player)
+    this.ownerDoomsday.delete(player.entityId)
+    this.pendingSpellPulses=this.pendingSpellPulses.filter(pulse=>pulse.owner!==player.entityId)
+    this.spellFx=this.spellFx.filter(effect=>effect.owner!==player.entityId)
+    this.deathNotifiedPlayers.delete(player.entityId);this.interactionHints.delete(player.entityId)
+    this.playerEntities.delete(player.entityId)
+    this.fx.removePickupOwner(player.entityId)
+    player.tarot.clear();player.bow.clear();player.scp127.clearFlights();player.rangedFlight=null
+    for(const enemy of this.enemies)if(enemy.targetId===player.entityId)enemy.targetId=null
   }
   /** 剧情退场不算击杀，不触发额外掉落和经验。 */
   removeStoryEnemy(enemy: Enemy): void { this.enemies = this.enemies.filter(candidate => candidate !== enemy) }
@@ -714,6 +1046,7 @@ export class RoomRuntime {
   get interactHint(): string | null {
     return this.nearbyInteractable && !this.nearbyInteractable.done ? this.nearbyInteractable.hint : null
   }
+  hintFor(player: Player): string | null { return this.interactionHints.get(player.entityId) ?? null }
 
   /** 当前交互物列表（只读；导演查询用） */
   get interactableList(): readonly Interactable[] {
@@ -783,7 +1116,7 @@ export class RoomRuntime {
     return it
   }
 
-  /** 注册宝箱（F 开启 → 按战利品表掉出磁吸物；开过的箱子留开盖外形） */
+  /** 宝箱使用4×4搜索托盘，默认走独立的正式宝箱池。 */
   addChestInteractable(x: number, y: number, table: string = CHEST_BASIC_TABLE): Interactable {
     const it: Interactable = {
       id: this.interactSeq++,
@@ -797,6 +1130,8 @@ export class RoomRuntime {
       data: { table } satisfies ChestInteractData
     }
     this.interactables.push(it)
+    this.search.add({ id: `${this.entityId}:chest:${it.id}`, x, y, range: 70, cols:4,rows:4,nameKey: 'ui.search.chest', table:table===CHEST_BASIC_TABLE?SEARCH_CHEST_TABLE:table,chestId: it.id,
+      kind: 'chest', context: this.searchContext() })
     return it
   }
 
@@ -843,17 +1178,17 @@ export class RoomRuntime {
 
   /**
    * 导演手动宣告清场（spec.manualClear 房间用）：
-   * 翻 cleared 牌（环境档 dim→lit 渐变亮起来）+ 火把错峰点燃 + 解封各门 + 净化弹幕。
-   * 节拍由导演掌控——清场台词念完再调用，"先说话、后亮灯开门"。
+   * 翻 cleared 牌，按环境触发散雾或点火，同时解封各门并净化弹幕。
+   * 节拍由导演掌控，清场台词念完再调用。
    */
   storyClear(): void {
     if (this.cleared) return
     this.cleared = true
+    emitSimulationEvent({type:'clear',room:this.def.id})
     this.bullets = []
-    if (!this.manualTorch) {
-      this.litStart = this.time
-      sfx.torchIgnite()
-    }
+    this.threats.clear()
+    if(this.oldHell)this.fogClearStart=this.time
+    else if (!this.manualTorch) {this.litStart = this.time;sfx.torchIgnite()}
     this.setDoorsOpen(true)
     if (this.enemyTotal > 0) sfx.roomClear()
   }
@@ -862,8 +1197,9 @@ export class RoomRuntime {
   setDoorsOpen(open: boolean, quiet = false): void {
     for (const d of this.doors) {
       if (open) {
-        if (this.map.openDoor(d.col, d.row)) {
-          d.open = true
+        const changed=this.map.openDoor(d.col,d.row)
+        d.open=true
+        if (changed) {
           if (!quiet) {
             sfx.doorOpen()
             const cx = d.col * CONFIG.tile + CONFIG.tile / 2
@@ -872,7 +1208,7 @@ export class RoomRuntime {
           }
         }
       } else {
-        if (d.open && this.map.closeDoor(d.col, d.row)) d.open = false
+        this.map.closeDoor(d.col,d.row);d.open=false
       }
     }
   }
@@ -889,8 +1225,8 @@ export class RoomRuntime {
     for (let i = 0; i < 5; i++) {
       let p: { x: number; y: number } | null = null
       for (let tries = 0; tries < 60; tries++) {
-        const x = bounds.left + pad + Math.random() * (bounds.right - bounds.left - pad * 2)
-        const y = bounds.top + pad + Math.random() * (bounds.bottom - bounds.top - pad * 2)
+        const x = bounds.left + pad + randomCombat() * (bounds.right - bounds.left - pad * 2)
+        const y = bounds.top + pad + randomCombat() * (bounds.bottom - bounds.top - pad * 2)
         if (this.map.solidAtWorld(x, y)) continue
         if (pts.some((q) => Math.hypot(q.x - x, q.y - y) < PRISMA_R * 1.05)) continue
         p = { x, y }
@@ -924,7 +1260,7 @@ export class RoomRuntime {
       t: 0,
       dur: 0.85,
       colors: palette,
-      seed: Math.random() * Math.PI * 2
+      seed: randomVisual() * Math.PI * 2
     })
     // AOE 内静默灭怪（碎粒反馈，但不掉饭团/不走击杀经验/不计数）
     for (const e of this.enemies) {
@@ -964,6 +1300,7 @@ export class RoomRuntime {
   /** 导演复活玩家后复位死亡边沿（否则再次倒下不再通知） */
   reviveReset(): void {
     this.deathNotified = false
+    this.deathNotifiedPlayers.clear()
   }
 
   /** 剧情冻结开关（灵梦聚气对白期间：怪群不行动/无接触伤害；玩家输入由模块层冻结） */
@@ -1001,12 +1338,46 @@ export class RoomRuntime {
     return true
   }
 
+  /** 残屋容器必须沿无遮挡方向接近，不能站在外墙另一侧隔墙翻找。 */
+  private canReachSearch(player:Player,container:SearchContainer):boolean {
+    if(!this.oldHell)return true
+    const dx=container.x-player.x,dy=container.y-player.y,steps=Math.max(1,Math.ceil(Math.hypot(dx,dy)/(this.map.tile*.2)))
+    for(let i=1;i<=steps;i++)if(this.map.solidAtWorld(player.x+dx*i/steps,player.y+dy*i/steps))return false
+    return true
+  }
+
+  /** 首次成功翻找后打开实体；中断、换人和重新打开均不重播铁柜的开锁演出。 */
+  private beginSearch(player:Player,container:SearchContainer,host:RoomHost):boolean {
+    if(!this.canReachSearch(player,container))return false
+    const first=container.slots===null
+    if(!this.search.begin(player,container,first?host.searchEffects?.(player,container):undefined))return false
+    if(first){
+      const prop=this.props.find(p=>p.id===container.sourceId&&p.x===container.x&&p.y===container.y)
+      if(prop)prop.searchOpenedAt=this.time
+    }
+    if(first&&container.fields?.advanced===true){
+      sfx.sealedCabinetOpen();this.fx.searchDust(container.x,container.y-24)
+    }else sfx.searchOpen()
+    return true
+  }
+
   /** 每帧刷新最近交互物提示，并在 F 按下时结算（item/torch/chest 内置；special 回调导演） */
   private updateInteractables(player: Player, input: RoomInput, host: RoomHost): void {
+    if (player.isChanneling) return
+    const currentSearch = this.search.view(player, this.time)
+    if (currentSearch && input.interactPressed) {
+      const container = this.search.container(currentSearch.id)!
+      this.nearbyInteractable = { id: -3, kind: 'search', x: container.x, y: container.y, range: container.range, hint: t(currentSearch.searching ? 'game.search.searching' : currentSearch.slots.some(s => s.item) ? 'game.search.take_hint' : 'game.search.hint'), oneShot: false, done: false }
+      if (currentSearch.slots.some(s => s.item)) this.takeSearch(player, currentSearch.id, -1, host)
+      else if (!currentSearch.complete && !currentSearch.searching && !(input.moveX || input.moveY || input.attackHeld || input.specialHeld || input.dodgeHeld || input.dodgePressed)) {
+        if (!this.beginSearch(player, container, host)) this.fx.damageText(player.x, player.y - 24, t('game.search.busy'), '#c9b99b')
+      }
+      return
+    }
     let nearest: Interactable | null = null
     let nearestDistanceSq = Infinity
     for (const it of this.interactables) {
-      if (it.done) continue
+      if (it.done || it.kind === 'chest') continue
       // 已点燃的火把不再可交互（视觉提示也消失）
       if (it.kind === 'torch') {
         const idx = (it.data as { index: number }).index
@@ -1022,6 +1393,14 @@ export class RoomRuntime {
       if (it.range >= 0 && distanceSq <= it.range * it.range && distanceSq < nearestDistanceSq) {
         nearest = it
         nearestDistanceSq = distanceSq
+      }
+    }
+    const target = this.search.nearest(player,container=>this.canReachSearch(player,container))
+    if (target) {
+      const distance = (target.x - player.x) ** 2 + (target.y - player.y) ** 2
+      if (distance < nearestDistanceSq) {
+        nearestDistanceSq = distance
+        nearest = { id: -3, kind: 'search', x: target.x, y: target.y, range: target.range, hint: t(target.complete ? 'game.search.take_hint' : 'game.search.hint'), oneShot: false, done: false, data: target.id, ref: target.ref }
       }
     }
     let gather: NatureGather | null = null
@@ -1053,7 +1432,16 @@ export class RoomRuntime {
     if (!input.interactPressed || !nearest) return
 
     const it = nearest
-    if (it.kind === 'item') {
+    if (it.kind === 'search') {
+      const container = this.search.container(String(it.data))
+      if (container && container.revealed > 0 && container.slots?.some(Boolean)) {
+        if (this.search.open(player, container)) this.takeSearch(player, container.id, -1, host)
+        else if (this.search.blockedByOther(player, container.id)) this.fx.damageText(player.x, player.y - 24, t('game.search.busy_other'), '#c9b99b')
+        return
+      }
+      if (input.moveX || input.moveY || input.attackHeld || input.specialHeld || input.dodgeHeld || input.dodgePressed) return
+      if (container && !this.beginSearch(player, container, host)) this.fx.damageText(player.x, player.y - 24, t('game.search.busy'), '#c9b99b')
+    } else if (it.kind === 'item') {
       const data = it.data as ItemInteractData
       let grantedQty = 0
       // 单件结算：slot 直装，否则入背包；返回是否成功（静默＝不弹满包提示，附带件用）
@@ -1083,8 +1471,6 @@ export class RoomRuntime {
         it.done = true
         host.onInteract?.(it)
       }
-    } else if (it.kind === 'chest') {
-      if (this.openChest(it, player, host)) host.onInteract?.(it)
     } else {
       // special：只回调，行为（对话/开门/转阶段）完全由导演定义
       if (it.oneShot) it.done = true
@@ -1092,50 +1478,32 @@ export class RoomRuntime {
     }
   }
 
-  /** 开宝箱：按战利品表 roll 产物并从箱口抛为磁吸掉落；返回是否成功开启 */
-  private openChest(it: Interactable, _player: Player, _host: RoomHost): boolean {
-    if (it.done) return false
-    it.done = true
-    const data = it.data as ChestInteractData
-    const loot = rollLoot(data.table)
-    if (loot.length === 0) {
-      this.fx.damageText(it.x, it.y - 24, t('game.notify.chest_empty'), '#c2c8d0')
-      return true
-    }
-    for (const drop of loot) {
-      // 构造即自带随机崩落抛射；随后走普通磁吸拾取（满包会弹回，不会丢奖励）
-      for (let i = 0; i < drop.qty; i++) this.drops.push(new Drop(it.x, it.y, drop.item))
-    }
-    sfx.pickup()
-    this.fx.burst(it.x, it.y - 8, -Math.PI / 2, 14)
-    this.fx.damageText(it.x, it.y - 28, t('game.notify.chest'), '#ffd76a')
-    return true
-  }
-
   /** 五秒一批增援；三十秒只解封和点灯，不清理敌人或弹幕。 */
   private updateSurvival(dt:number,player:Player):void{
     this.survivalElapsed=Math.min(30,this.survivalElapsed+dt)
     while(this.survivalWave<5&&this.survivalElapsed>=(this.survivalWave+1)*5){
       this.survivalWave++
-      const count=Math.random()<1/3?1:2,{left,right,top,bottom}=this.map.bounds
+      const count=randomCombat()<1/3?1:2,{left,right,top,bottom}=this.map.bounds
       for(let n=0;n<count;n++){
-        const id=rollEnemyId('normal',this.def.depth,this.def.floor??1);if(!id)continue
+        const id=rollEnemyId('normal',this.def.depth,this.def.floor??1,currentBiome(this.def).enemyIds);if(!id)continue
         const definition=enemies.require(id),radius=definition.radius+3
         let point:{x:number;y:number}|null=null
         for(let tries=0;tries<160;tries++){
-          const x=left+radius+Math.random()*(right-left-radius*2),y=top+radius+Math.random()*(bottom-top-radius*2)
+          const x=left+radius+randomCombat()*(right-left-radius*2),y=top+radius+randomCombat()*(bottom-top-radius*2)
           if(Math.hypot(x-player.x,y-player.y)<110||this.enemies.some(e=>e.alive&&Math.hypot(e.x-x,e.y-y)<e.r+radius+12)||this.props.some(p=>circleHitsProp(x,y,radius,p))||this.wrecks?.colliders.some(p=>circleHitsProp(x,y,radius,p)))continue
           if([[0,0],[radius,0],[-radius,0],[0,radius],[0,-radius]].some(([dx,dy])=>this.map.solidAtWorld(x+dx!,y+dy!)))continue
           point={x,y};break
         }
         if(!point)continue
-        const kind=definition.movement==='stationary'?'burrow':definition.movement==='flying'?'ceiling':Math.random()<.5?'burrow':'ceiling'
+        const kind=definition.movement==='stationary'?'burrow':definition.movement==='flying'?'ceiling':randomCombat()<.5?'burrow':'ceiling'
         const enemy=new Enemy(point.x,point.y,id);enemy.startEncounterSpawn(kind);enemy.alert();this.enemies.push(enemy);this.enemyTotal++
         if(kind==='burrow')sfx.burrowWarn(Math.max(-.7,Math.min(.7,(point.x-player.x)/430)))
       }
     }
     if(this.survivalElapsed>=30){
-      this.survivalComplete=true;this.litStart=this.time;sfx.torchIgnite();sfx.roomClear()
+      this.survivalComplete=true
+      if(!this.oldHell){this.litStart=this.time;sfx.torchIgnite()}
+      sfx.roomClear()
       for(const door of this.doors){this.map.openDoor(door.col,door.row);door.open=true}
       sfx.doorOpen();this.fx.damageText(player.x,player.y-45,t('game.survival.open'),'#dfc897')
     }
@@ -1146,31 +1514,39 @@ export class RoomRuntime {
     const { bounds, tile } = this.map
     // 刷怪只认内容注册表：加新怪在 Def 写 spawn.weight 即可，本函数零改动
     const depth = this.def.depth ?? 0
-    const fixed=this.script?[]:fixedEnemyIds(this.def.kind,this.def.floor??1)
-    const valid=(x:number,y:number):boolean=>{
-      if(Math.hypot(x-spawnX,y-spawnY)<180||this.props.some(p=>circleHitsProp(x,y,24,p)))return false
-      if(this.enemies.some(e=>Math.hypot(e.x-x,e.y-y)<50))return false
-      return [[0,0],[-24,-24],[-24,24],[24,-24],[24,24]].every(([dx,dy])=>!this.map.solidAtWorld(x+dx!,y+dy!))
+    const allowed=currentBiome(this.def).enemyIds
+    this.refreshCollisionProps()
+    if(this.oldHell)this.navigation.configure(this.map,this.collisionProps)
+    const fixed=this.script?[]:[...(this.def.extraEnemies??[]),...fixedEnemyIds(this.def.kind,this.def.floor??1,allowed)]
+    const valid=(x:number,y:number,radius:number):boolean=>{
+      const clearance=Math.max(24,radius)
+      if(Math.hypot(x-spawnX,y-spawnY)<180||this.collisionProps.some(p=>circleHitsProp(x,y,clearance,p)))return false
+      if(this.enemies.some(e=>Math.hypot(e.x-x,e.y-y)<Math.max(50,e.r+clearance+4)))return false
+      if(![[0,0],[-clearance,-clearance],[-clearance,clearance],[clearance,-clearance],[clearance,clearance]].every(([dx,dy])=>!this.map.solidAtWorld(x+dx!,y+dy!)))return false
+      return !this.oldHell||this.navigation.canReach(x,y,spawnX,spawnY,radius)
     }
     for (let n = 0; n < this.enemyTotal; n++) {
+      const enemyId=n<fixed.length?fixed[n]:rollEnemyId(this.def.kind,depth,this.def.floor??1,allowed)
+      if(!enemyId)continue
+      const radius=enemies.require(enemyId).radius
       let x = spawnX
       let y = spawnY
       let ok = false
       for (let tries = 0; tries < 300; tries++) {
-        x = bounds.left + tile + Math.random() * (bounds.right - bounds.left - tile * 2)
-        y = bounds.top + tile + Math.random() * (bounds.bottom - bounds.top - tile * 2)
-        if(!valid(x,y))continue
+        x = bounds.left + tile + randomGeneration() * (bounds.right - bounds.left - tile * 2)
+        y = bounds.top + tile + randomGeneration() * (bounds.bottom - bounds.top - tile * 2)
+        if(!valid(x,y,radius))continue
         ok = true
         break
       }
       if (!ok) {
         // 随机落位失败时遍历内部地面，固定精英也不能卡在矿石或大型摆件里。
         search:for(let yy=bounds.top+tile;yy<bounds.bottom-tile;yy+=tile)for(let xx=bounds.left+tile;xx<bounds.right-tile;xx+=tile){
-          if(valid(xx,yy)){x=xx;y=yy;ok=true;break search}
+          if(valid(xx,yy,radius)){x=xx;y=yy;ok=true;break search}
         }
       }
-      const enemyId = n<fixed.length?fixed[n]:rollEnemyId(this.def.kind, depth,this.def.floor??1)
-      if (enemyId) this.enemies.push(new Enemy(x, y, enemyId))
+      if(!ok)continue
+      this.enemies.push(new Enemy(x,y,enemyId))
     }
   }
 
@@ -1188,18 +1564,25 @@ export class RoomRuntime {
     const cy = row * CONFIG.tile + CONFIG.tile / 2 + ore.offsetY
     // 矿物包被移除等异常情况下容错：没有 Def 就不掉矿（石料是独立物品不受影响）
     const mineral = findMineralDef(ore.kind)
+    if(mineral?.drops){
+      for(const entry of mineral.drops)if(findItemDef(entry.item)&&(entry.chance>=1||randomLoot()<entry.chance)){
+        for(let i=0;i<entry.quantity;i++)this.drops.push(new Drop(cx,cy,entry.item))
+      }
+      return
+    }
     if(mineral?.visual.form==='salt'){
       this.drops.push(new Drop(cx,cy,ROCK_STONE_ID),new Drop(cx,cy,mineral.dropItemId))
-      if(Math.random()<.2)this.drops.push(new Drop(cx,cy,mineral.dropItemId))
+      if(randomLoot()<.2)this.drops.push(new Drop(cx,cy,mineral.dropItemId))
       return
     }
     if (ore.vein === 'rock') {
-      const rockN = CONFIG.mine.rockDrop + (Math.random() < CONFIG.mine.rockBonusChance ? 1 : 0)
+      const rockN = CONFIG.mine.rockDrop + (randomLoot() < CONFIG.mine.rockBonusChance ? 1 : 0)
       for (let i = 0; i < rockN; i++) {
         this.drops.push(new Drop(cx, cy, ROCK_STONE_ID))
       }
+      if(randomLoot()<.2)this.drops.push(new Drop(cx,cy,SILICA_SAND_ID))
       if (ore.hasOre && mineral && findItemDef(mineral.dropItemId)) {
-        const oreN = 1 + (Math.random() < CONFIG.mine.rockOreBonusChance ? 1 : 0)
+        const oreN = 1 + (randomLoot() < CONFIG.mine.rockOreBonusChance ? 1 : 0)
         for (let i = 0; i < oreN; i++) {
           this.drops.push(new Drop(cx, cy, mineral.dropItemId))
         }
@@ -1209,7 +1592,7 @@ export class RoomRuntime {
     if (!mineral || !findItemDef(mineral.dropItemId)) return
     // 显矿数量按共用权重表摇号：1 个 67% / 2 个 33%。
     let n = CONFIG.mine.veinYield[0]?.[0] ?? 1
-    const roll = Math.random()
+    const roll = randomLoot()
     let acc = 0
     for (const [count, weight] of CONFIG.mine.veinYield) {
       acc += weight
@@ -1242,10 +1625,10 @@ export class RoomRuntime {
     const far = cand.filter((c) => c.d >= CONFIG.mine.burstMinPlayerDist)
     const pick =
       far.length > 0
-        ? far[Math.floor(Math.random() * far.length)] // 合格池随机取，落点不可预判
+        ? far[Math.floor(randomCombat() * far.length)] // 合格池随机取，落点不可预判
         : cand.reduce((a, b) => (b.d > a.d ? b : a)) // 兜底（贴脸挖矿）：取离玩家最远的点
     // 种类混编同样走注册表权重（房型/深度门控由 Def.spawn 声明）
-    const enemyId = rollEnemyId(this.def.kind, this.def.depth ?? 0,this.def.floor??1)
+    const enemyId = rollEnemyId(this.def.kind, this.def.depth ?? 0,this.def.floor??1,currentBiome(this.def).enemyIds)
     if (!enemyId) return
     const e = new Enemy(pick.x, pick.y, enemyId)
     e.startBurrowSpawn()
@@ -1258,7 +1641,13 @@ export class RoomRuntime {
     sfx.burrowWarn(warnPan, 0.1)
   }
 
-  private pushOutCircle(e: {x:number;y:number;vx:number;vy:number}, cx: number, cy: number, minDist: number): void {
+  private separationFree(e:{r?:number;collisionR?:number},x:number,y:number):boolean {
+    const r=e.r??e.collisionR??0,flying=e instanceof Enemy&&e.def.movement==='flying'
+    for(const [dx,dy] of [[0,0],[-r,-r],[-r,r],[r,-r],[r,r]])if(this.map.solidAtWorld(x+dx!,y+dy!,flying))return false
+    return flying||!this.collisionProps.some(prop=>circleHitsProp(x,y,r,prop))
+  }
+
+  private pushOutCircle(e: {x:number;y:number;vx:number;vy:number;r?:number;collisionR?:number}, cx: number, cy: number, minDist: number): void {
     if (!Number.isFinite(minDist) || !Number.isFinite(cx) || !Number.isFinite(cy)) return
     let dx = e.x - cx
     let dy = e.y - cy
@@ -1281,7 +1670,7 @@ export class RoomRuntime {
     if (d >= minDist) return
     const tx = e.x + nx * (minDist - d)
     const ty = e.y + ny * (minDist - d)
-    if (this.map.solidAtWorld(tx, ty)) return
+    if (!this.separationFree(e,tx,ty)) return
     e.x = tx
     e.y = ty
     const vn = e.vx * nx + e.vy * ny
@@ -1306,20 +1695,32 @@ export class RoomRuntime {
   }
 
   private refreshCollisionProps(): void {
-    this.collisionProps.length = 0
-    this.bulletBlockers.length = 0
-    for (const prop of this.props) this.collisionProps.push(prop)
-    if(this.wrecks)for(const collider of this.wrecks.colliders)this.collisionProps.push(collider)
+    const next=this.collisionNext;next.length=0
+    for (const prop of this.props) next.push(prop)
+    if(this.wrecks)for(const collider of this.wrecks.colliders)next.push(collider)
     if (this.nature) for (const wood of this.nature.wood) {
-      if (wood.hp > 0) this.collisionProps.push(this.resourceCollider(wood, false))
+      if (wood.hp > 0) next.push(this.resourceCollider(wood, false))
     }
     // 已开盖的宝箱仍有实体占地，沿用原有碰撞规则。
     for (const item of this.interactables) {
-      if (item.kind === 'chest') this.collisionProps.push(this.resourceCollider(item, true))
+      if (item.kind === 'chest') next.push(this.resourceCollider(item, true))
     }
+    let changed=next.length!==this.collisionProps.length
+    for(let i=0;i<next.length;i++){
+      const prop=next[i],old=this.collisionRecords.get(prop),definition=propDefs.get(prop.id)
+      if(next[i]!==this.collisionProps[i]||!old||old.x!==prop.x||old.y!==prop.y||old.s!==prop.s||old.id!==prop.id||old.w!==prop.halfWidth||old.h!==prop.halfThick||old.segments!==prop.segments||old.block!==prop.blockBullets||old.definition!==definition){
+        changed=true;this.collisionRecords.set(prop,{x:prop.x,y:prop.y,s:prop.s,id:prop.id,w:prop.halfWidth,h:prop.halfThick,segments:prop.segments,block:prop.blockBullets,definition})
+      }
+    }
+    if(!changed)return
+    this.navigation.invalidate()
+    this.staticDrawKey=''
+    this.collisionProps.length=0;for(const prop of next)this.collisionProps.push(prop)
+    this.bulletBlockers.length=0
     for (const prop of this.collisionProps) {
       if (propBlocksBullets(prop)) for (const band of propBands(prop)) this.bulletBlockers.push(band)
     }
+    rebuildBlockerGrid(this.bulletBlockers)
   }
 
   /**
@@ -1327,11 +1728,42 @@ export class RoomRuntime {
    * @param playerDt 玩家时钟 dt（顿帧期间仍为真实帧时间：攻速、移动、闪避不被冻结）
    */
   update(dt: number, engine: EngineContext, player: Player, input: RoomInput, host: RoomHost, playerDt: number = dt): void {
+    this.updatePlayers(dt, engine, [{player,input,host}], playerDt)
+  }
+
+  /** 世界、敌人、弹幕和掉落只推进一次；每个参与者仅推进自己的角色。 */
+  updatePlayers(dt: number, engine: EngineContext, participants: readonly RoomParticipant[], playerDt: number = dt, searchActions: readonly SearchCommand[] = engine.input.searchActions): void {
+    if (!participants.length) return
+    const started=profiler.start()
+    this.playerScratch.length=0
+    for(const member of participants)this.playerScratch.push(member.player)
+    this.rememberPlayers(this.playerScratch)
+    for(const id of this.ownerDoomsday.keys())if(!this.playerEntities.has(id))this.ownerDoomsday.delete(id)
+    const {player, host} = participants[0]!
+    for (const member of participants) {
+      if (member.player.isChanneling) this.search.cancel(member.player)
+      else this.search.beforeInput(member.player, member.input)
+    }
+    for (const action of searchActions) {
+      const member = participants.find(p => (p.player.playerId ?? p.player.entityId) === action.playerId)
+      if (!member || member.player.isChanneling && action.slot !== -2) continue
+      if (action.slot === -2) {
+        if (this.search.view(member.player, this.time)?.id === action.containerId) this.search.cancel(member.player)
+      } else if (action.slot === -3) {
+        const container = this.search.container(action.containerId)
+        if (container && this.search.view(member.player, this.time)?.id === container.id) {
+          if (!this.beginSearch(member.player, container, member.host)) this.fx.damageText(member.player.x, member.player.y - 24, t('game.search.busy'), '#c9b99b')
+        }
+      } else this.takeSearch(member.player, action.containerId, action.slot, member.host)
+    }
+    const living = this.livingScratch;living.length=0
+    for(const member of participants)if(member.player.alive)living.push(member)
+    for (const member of living) this.deathNotifiedPlayers.delete(member.player.entityId)
     this.time += dt
     for (const effect of this.weaponImpacts) effect.age += dt
     this.weaponImpacts = this.weaponImpacts.filter(effect => effect.age < effect.duration)
     this.wreckSearchAllowed=host.furnaceSearchAllowed?.()??false
-    if(this.def.encounter==='survival'&&!this.survivalComplete&&player.alive)this.updateSurvival(dt,player)
+    if(this.def.encounter==='survival'&&!this.survivalComplete&&living.length)this.updateSurvival(dt,living[0]!.player)
     this.warp.update(dt)
     this.fog.update(dt)
     const map = this.map
@@ -1375,8 +1807,20 @@ export class RoomRuntime {
     const solidProps = this.collisionProps
     // 弹幕掩体仅包含声明挡弹的大件，动态资源点显式保持不挡弹。
     const bulletBlockers = this.bulletBlockers
+    if(this.oldHell)this.navigation.configure(map,solidProps)
+    if(!this.enemiesFrozen){
+      if(!this.cleared&&this.aliveEnemies>0)this.threats.updateLava(dt,map,this.playerScratch,this.enemies,solidProps,(id,x,y)=>{
+        const enemy=new Enemy(x,y,id);enemy.startEncounterSpawn('ceiling');enemy.alert();this.enemies.push(enemy);this.enemyTotal++
+      })
+      this.threats.updateBursts(dt,this.bullets,this.fx)
+    }
+    rebuildEnemyGrid(this.enemies)
+    let phaseStarted=profiler.start()
     // 玩家时钟独立：命中顿帧冻结世界时，玩家的攻速/移动/闪避照常推进
+    for (const {player,input,host} of participants) {
+    withSimulationAppearance(player.appearance ?? simulationAppearance(), () => {
     player.update(playerDt, input, map, solidProps)
+    for(const amount of player.drainStatusDamage())this.fx.combatDamage(player.x,player.y-20,amount,'true')
     for (const effect of player.drainWeaponImpacts()) {
       this.weaponImpacts.push(effect)
       if (effect.shake) engine.shake(effect.shake)
@@ -1387,7 +1831,7 @@ export class RoomRuntime {
       sfx.meleeHit(enemy.hitMaterial)
       if (!enemy.alive) this.onEnemyKilled(enemy, host)
     })
-    player.tarot.updateFlights(playerDt, player, this.enemies, { left: 0, top: 0, right: map.cols * map.tile, bottom: map.rows * map.tile }, (enemy, result) => {
+    player.tarot.updateFlights(playerDt, player, this.enemies, map, bulletBlockers, (enemy, result) => {
       this.fx.burst(enemy.x, enemy.y, player.facing, 5)
       // 混合攻击分别展示分量，合计等于实际扣血，过量伤害不冒出虚高数字。
       const total = result.physical + result.magic + result.trueDamage
@@ -1397,86 +1841,132 @@ export class RoomRuntime {
       sfx.meleeHit(enemy.hitMaterial)
       if (!enemy.alive) this.onEnemyKilled(enemy, host)
     })
-    player.bow.updateFlights(playerDt,map,this.bulletBlockers,this.enemies,(enemy,damage,critical)=>{
-      this.fx.burst(enemy.x,enemy.y,player.facing,5);this.fx.combatDamage(enemy.x,enemy.y-18,damage,'physical',critical);sfx.meleeHit(enemy.hitMaterial)
+    player.bow.updateFlights(playerDt,map,this.bulletBlockers,this.enemies,(enemy,damage,critical,kind)=>{
+      this.fx.burst(enemy.x,enemy.y,player.facing,5);this.fx.combatDamage(enemy.x,enemy.y-18,damage,kind,critical);sfx.meleeHit(enemy.hitMaterial)
       if(!enemy.alive)this.onEnemyKilled(enemy,host)
     })
-    this.doomsday.update(dt, player, input.specialPressed, engine, host)
+    player.scp127.updateFlights(playerDt,map,this.bulletBlockers,this.enemies,(enemy,damage,critical)=>{
+      this.fx.combatDamage(enemy.x,enemy.y-18,damage,'physical',critical)
+      this.fx.burst(enemy.hitX,enemy.hitY,player.facing,3)
+      if(!enemy.alive)this.onEnemyKilled(enemy,host)
+    })
+    this.doomFor(player).update(dt, player, !player.isChanneling && input.specialPressed, engine, host)
+    })
+    }
 
+    profiler.end('playerLogic',phaseStarted);phaseStarted=profiler.start()
     // 敌人 AI + 收集开火请求（毒液史莱姆两种弹幕节拍）
     // 封印聚气/剧情冻结期间全体停止行动（不开火，为灵梦争取那一瞬）
     for (const e of this.enemies) {
       // 剧情冻结（封印对白/连爆演出）期间全体停止行动（不开火）
       if (this.enemiesFrozen && e.alive) continue
-      e.update(dt, map, player, solidProps, this.enemies)
+      const target = this.selectTarget(e, participants)
+      e.targetId = target?.entityId ?? null
+      if (e.alive && !target) continue
+      e.advanceContactTargets(dt)
+      const wasAlive=e.alive
+      const beforeX=e.x,beforeY=e.y,wasCharging=e.pounceState==='lunge'
+      e.update(dt, map, target ?? participants[0]!.player, solidProps, this.enemies,this.oldHell?this.navigation:undefined)
+      this.threats.updateChargeTrail(e,beforeX,beforeY,wasCharging,map,solidProps)
+      for(const amount of e.drainStatusDamage())this.fx.combatDamage(e.hitX,e.hitY-12,amount,'true')
+      if(wasAlive&&!e.alive&&e.statusDamageSource){
+        const owner=participants.find(member=>member.player.entityId===e.statusDamageSource)??participants[0]!
+        this.onEnemyKilled(e,owner.host)
+      }
       if (!e.alive) continue
+      const player = target ?? participants[0]!.player
       for (const shot of e.drainShots()) {
         // 吐弹声像跟随怪相对玩家方位（暗房里能"听声辨位"）
         const shotPan = Math.max(-1, Math.min(1, (e.x - player.x) / 300)) * 0.7
         if (shot.kind === 'straight') {
           // 瞄准玩家当前位置的直线弹（弹种由 AI 请求携带）
           const ang = shot.angle ?? Math.atan2(player.y - e.y, player.x - e.x)
-          this.bullets.push(
-            new Projectile(
-              shot.origin?.x ?? e.x + Math.cos(ang) * (e.r + 4),
-              shot.origin?.y ?? e.y + Math.sin(ang) * (e.r + 4),
-              ang,
-              shot.projectileId
+          const count=shot.volley?.count??1,spread=shot.volley?.spread??0
+          for(let i=0;i<count;i++){
+            const direction=ang+(count>1?(i/(count-1)-.5)*spread:0)
+            this.bullets.push(
+              new Projectile(
+                shot.origin?.x ?? e.x + Math.cos(direction) * (e.r + 4),
+                shot.origin?.y ?? e.y + Math.sin(direction) * (e.r + 4),
+                direction,
+                shot.projectileId
+              )
             )
-          )
-          sfx.enemyShoot('straight', shotPan)
+            this.bullets[this.bullets.length - 1]!.sourceId = e.entityId
+          }
+          if(e.def.tags?.includes('magma'))sfx.fireBurst('shoot',shotPan)
+          else sfx.enemyShoot('straight', shotPan)
         } else {
           // N 向圆形扩散（慢弹墙，数量由该怪 Def 声明）
           const n = e.ringCount
           for (let i = 0; i < n; i++) {
             const ang = (i / n) * Math.PI * 2 + this.time * 0.07
             this.bullets.push(new Projectile(e.x, e.y, ang, shot.projectileId))
+            this.bullets[this.bullets.length - 1]!.sourceId = e.entityId
           }
           sfx.enemyShoot('ring', shotPan)
         }
       }
     }
 
+    profiler.end('enemyLogic',phaseStarted);phaseStarted=profiler.start()
     // 怪 ↔ 玩家圆分离（出土中的怪钉在出生点，坑影不滑动；钻出后才参与推挤）
     // 间隔按玩家精瘦碰撞圆，敌人可以逼得更近（受击判定也同步缩小）
-    if (player.alive) {
+    for (const {player} of participants) if (player.alive) {
       for (const e of this.enemies) {
         if (!e.alive || e.emerging || e.def.tags?.includes('boss') || e.def.chargeCycle&&e.pounceState==='lunge') continue
-        if(e.def.movement==='stationary'){this.pushOutCircle(player,e.x,e.y,e.r+player.collisionR);continue}
+        if(e.def.movement==='stationary'||e.isStoneGuard){this.pushOutCircle(player,e.x,e.y,e.r+player.collisionR);continue}
         this.pushOutCircle(e, player.x, player.y, e.r + player.collisionR)
       }
     }
-    // 怪间分离
+    // 分离仍按原实体顺序结算；每次推挤后刷新网格，后续候选使用修正后的坐标。
+    this.separationGrid.clear()
+    for(const e of this.enemies)if(e.alive&&!e.emerging)this.separationGrid.insert(e,e.x-e.r,e.y-e.r,e.x+e.r,e.y+e.r)
     for (let i = 0; i < this.enemies.length; i++) {
       const a = this.enemies[i]
       if (!a.alive || a.emerging) continue
-      for (let j = i + 1; j < this.enemies.length; j++) {
-        const b = this.enemies[j]
+      this.separationGrid.query(a.x-a.r,a.y-a.r,a.x+a.r,a.y+a.r,this.separationCandidates)
+      let last=i
+      for(let candidate=0;candidate<this.separationCandidates.length;candidate++){
+        const b=this.separationCandidates[candidate],j=this.enemies.indexOf(b)
+        if(j<=last)continue
+        last=j
         if (!b.alive || b.emerging) continue
-        if(a.def.movement==='stationary'){if(b.def.movement!=='flying')this.pushOutCircle(b,a.x,a.y,a.r+b.r);continue}
-        if(b.def.movement==='stationary'){if(a.def.movement!=='flying')this.pushOutCircle(a,b.x,b.y,a.r+b.r);continue}
+        const ax=a.x,ay=a.y,bx=b.x,by=b.y
+        if((a.def.movement==='stationary'||a.isStoneGuard)&&(b.def.movement==='stationary'||b.isStoneGuard))continue
+        if(a.def.movement==='stationary'||a.isStoneGuard){if(b.def.movement!=='flying')this.pushOutCircle(b,a.x,a.y,a.r+b.r)}
+        else if(b.def.movement==='stationary'||b.isStoneGuard){if(a.def.movement!=='flying')this.pushOutCircle(a,b.x,b.y,a.r+b.r)}
+        else {
         if(a.def.movement!==b.def.movement||a.def.chargeCycle&&a.pounceState==='lunge'||b.def.chargeCycle&&b.pounceState==='lunge')continue
-        const d = Math.hypot(a.x - b.x, a.y - b.y)
         const min = a.r + b.r
-        if (d < min && d > 0.0001) {
+        const squared=(a.x-b.x)**2+(a.y-b.y)**2
+        if (squared < min*min && squared > 1e-8) {
+          const d=Math.sqrt(squared)
           const half = (min - d) / 2
           const nx = (a.x - b.x) / d
           const ny = (a.y - b.y) / d
-          if (!map.solidAtWorld(a.x + nx * half, a.y + ny * half)) {
+          if (this.separationFree(a,a.x+nx*half,a.y+ny*half)) {
             a.x += nx * half
             a.y += ny * half
           }
-          if (!map.solidAtWorld(b.x - nx * half, b.y - ny * half)) {
+          if (this.separationFree(b,b.x-nx*half,b.y-ny*half)) {
             b.x -= nx * half
             b.y -= ny * half
           }
         }
+        }
+        if(a.x!==ax||a.y!==ay||b.x!==bx||b.y!==by){
+          this.separationGrid.update(a,a.x-a.r,a.y-a.r,a.x+a.r,a.y+a.r)
+          this.separationGrid.update(b,b.x-b.r,b.y-b.r,b.x+b.r,b.y+b.r)
+          this.separationGrid.query(a.x-a.r,a.y-a.r,a.x+a.r,a.y+a.r,this.separationCandidates);candidate=-1
+        }
       }
     }
 
+    rebuildEnemyGrid(this.enemies)
     // 接触伤害（倒下通知统一在弹幕结算后做边沿检查；冻结/聚气中怪无伤害）
-    if (player.alive && !this.enemiesFrozen) {
-      for (const e of this.enemies) {
+    for (const {player} of participants) if (player.alive && !this.enemiesFrozen) {
+      for (const e of enemyCandidates(this.enemies,player.x-player.hitR,player.y-player.hitR,player.x+player.hitR,player.y+player.hitR)) {
         if (!e.tryHitPlayer(player, player.isInvincible)) continue
         const ang = Math.atan2(player.y - e.y, player.x - e.x)
         const dmg = e.contactDamage
@@ -1490,28 +1980,46 @@ export class RoomRuntime {
       }
     }
 
+    profiler.end('contacts',phaseStarted);phaseStarted=profiler.start()
     // 弹幕：位移/撞墙/撞大件掩体 + 命中玩家（无敌帧可穿弹）
-    const bladeSweep = player.alive ? player.getProjectileErasure() : []
+    const bladeSweep=this.bladeScratch;bladeSweep.length=0
+    for(const member of participants)if(member.player.alive)for(const sweep of member.player.getProjectileErasure())bladeSweep.push(sweep)
     const splitBullets: Projectile[] = []
+    const slowedTime = Math.min(dt, this.bulletSlowRemaining)
+    const bulletSpeed = dt > 0 ? 1 - (1 - this.bulletSlowMultiplier) * slowedTime / dt : 1
+    this.bulletSlowRemaining = Math.max(0, this.bulletSlowRemaining - dt)
     for (const b of this.bullets) {
       const prevBulletX = b.x, prevBulletY = b.y
-      b.update(dt, map, bulletBlockers)
+      b.update(dt, map, bulletBlockers, bulletSpeed)
       if (!b.dead && bladeSweep.length && bladeErasesProjectile(bladeSweep, b.x, b.y, b.r, prevBulletX, prevBulletY)) {
         b.dead = true; this.fx.chips(b.x, b.y, '#ddc5bc', 4, 70); continue
       }
       // 高速弹与曲线弹按整段实际轨迹判定，撞到玩家后方墙壁也不能漏掉途中命中。
       let hitPlayer = false
-      if (player.alive && !player.isInvincible && b.canTouch && b.touchesCircle(player.x, player.y, player.collisionR)) {
+      let hitTarget:Player|null=null,firstDistance=Infinity
+      if(b.canTouch)for(const {player} of living){
+        if(!player.alive||player.isInvincible)continue
+        const distance=b.touchDistance(player.x,player.y,player.collisionR)
+        if(distance!==null&&distance<firstDistance){firstDistance=distance;hitTarget=player}
+      }
+      if (hitTarget) {
+        const player = hitTarget
         hitPlayer = true
-        b.dead = true
+        b.hitPlayerAt(firstDistance)
         const hpBefore = player.hp
         player.takeHit(b.damage, b.angle, 'magic', true)
-        if(player.alive&&player.hp<hpBefore&&b.onHitStatus)player.effects.add(b.onHitStatus,b.onHitStatus.id)
-        this.fx.chips(player.x, player.y, '#8de05f', 10, 160)
-        this.fx.damageText(player.x, player.y - 20, `-${damageLabel(hpBefore-player.hp)}`, '#a8ec78')
+        if(player.alive&&!player.debugGod&&b.onHitStatus&&(player.hp<hpBefore||b.statusOnBlockedHit))player.effects.add(b.onHitStatus,b.onHitStatus.id)
+        this.fx.chips(player.x, player.y, b.hitColor, 10, 160)
+        this.fx.damageText(player.x, player.y - 20, `-${damageLabel(hpBefore-player.hp)}`, b.hitColor)
         engine.shake(0.12)
       }
+      const groundImpact=b.drainGroundImpact()
+      if(groundImpact)this.threats.addImpact(groundImpact,b.angle,map,solidProps,this.fx)
       if (b.dead) {
+        if(b.impactSound==='fire'){
+          if(!groundImpact)sfx.fireBurst('splat',Math.max(-.7,Math.min(.7,(b.x-player.x)/430)))
+          continue
+        }
         if (hitPlayer) continue
         if (b.hitProp) {
           // 撞在掩体上：一小簇锈色火花，不播湿溅声
@@ -1523,48 +2031,89 @@ export class RoomRuntime {
         }
         continue
       }
-      if (b.hasPendingSplit) splitBullets.push(...b.drainSplit())
+      if (b.hasPendingSplit) {
+        const children = b.drainSplit()
+        for (const child of children) child.sourceId = b.sourceId
+        splitBullets.push(...children)
+      }
     }
     compactInPlace(this.bullets, b => !b.removed)
     this.bullets.push(...splitBullets)
+    this.threats.updateGround(dt,this.playerScratch,this.fx)
+    profiler.end('projectiles',phaseStarted);phaseStarted=profiler.start()
 
     // 玩家倒下（接触/弹幕两路都可能造成）→ 先问剧情层是否接管，否则边沿通知一次
-    if (!player.alive && !this.deathNotified) {
-      this.deathNotified = true
+    for (const {player,host} of participants) if (!player.alive && !this.deathNotifiedPlayers.has(player.entityId)) {
+      this.deathNotifiedPlayers.add(player.entityId)
       if (host.onPlayerDowned?.() !== true) {
         host.onPlayerDied()
-        return // 归零当帧也不再拾取或继续结算战斗。
       }
     }
+    if (participants.every(member => !member.player.alive)) {profiler.end('roomUpdate',started);return}
 
     // 尸体清理
     compactInPlace(this.enemies, e => !e.removed)
 
+    // 同一逻辑步按背包与物品种类复用容量查询；入包后失效，不能误判最后一格。
+    for(const member of living){let space=this.inventorySpace.get(member.host.inventory);if(!space){space=new Map();this.inventorySpace.set(member.host.inventory,space)}space.clear()}
     // 掉落物：贴身请求拾取 → 背包确认入包 / 满包弹回
     for (const drop of this.drops) {
+      const definition=findItemDef(drop.itemId)
+      let collector:RoomParticipant|undefined,nearest:RoomParticipant|undefined,previous:RoomParticipant|undefined,best=Infinity,closest=Infinity
+      for(const member of living){
+        if(!member.player.alive)continue
+        const dx=member.player.x-drop.x,dy=member.player.y-drop.y,distance=dx*dx+dy*dy
+        if(distance<closest){nearest=member;closest=distance}
+        const space=this.inventorySpace.get(member.host.inventory)!
+        let available=space.get(drop.itemId)
+        if(available===undefined){available=!!definition&&member.host.inventory.canAdd(drop.itemId);space.set(drop.itemId,available)}
+        if(!available)continue
+        if(member.player.entityId===drop.collectorId&&distance<(CONFIG.drop.magnetRange*1.6)**2)previous=member
+        if(distance<best){collector=member;best=distance}
+      }
+      collector=previous??collector??nearest
+      const player = collector?.player ?? participants[0]!.player
+      const host = collector?.host ?? participants[0]!.host
+      drop.collectorId = collector?.player.entityId ?? null
+      if (!host.inventory.acceptingItems) {
+        this.unavailableCollector.x = player.x; this.unavailableCollector.y = player.y
+        drop.collectorId = null
+        drop.update(dt, map, this.unavailableCollector)
+        continue
+      }
       if (!drop.update(dt, map, player)) continue
-      if (host.inventory.add(drop.itemId, 1) > 0) {
+      if (host.inventory.add(drop.itemId, 1,drop.durability) > 0) {
+        this.inventorySpace.get(host.inventory)?.clear()
         drop.confirm()
+        emitSimulationEvent({type:'pickup',source:drop.entityId,collector:player.entityId,item:drop.itemId,quantity:1})
         host.onItemFound?.(drop.itemId)
         sfx.pickup()
         const def = getItemDef(drop.itemId)
         this.fx.burst(drop.x, drop.y, -Math.PI / 2, 5)
-        this.fx.pickupText(drop.itemId, 1, def.text)
+        this.fx.pickupText(drop.itemId, 1, def.text,player.entityId)
       } else {
         // 背包已满：从玩家身边弹开并给提示
         drop.reject(player.x, player.y)
+        this.inventorySpace.get(host.inventory)?.set(drop.itemId,false)
         this.fx.damageText(player.x, player.y - 26, t('game.notify.bag_full'), '#ff9a7a')
       }
     }
     compactInPlace(this.drops, d => !d.isCollected)
+    profiler.end('pickups',phaseStarted)
 
     // 挥镐双目标判定
-    const swing = player.getSwing()
-    if (swing && player.swingPhase === 'active') {
-      this.resolveSwingHits(engine, player, host)
+    for (const {player,host} of participants) if (player.alive && player.getSwing() && player.swingPhase === 'active') {
+      withSimulationAppearance(player.appearance ?? simulationAppearance(),()=>this.resolveSwingHits(engine, player, host))
     }
+    for(const {player,host} of participants)this.resolveEchoHits(player,host)
+    for(const {player,host} of participants)this.resolveAreaBurstHits(player,host,dt)
 
-    if(this.def.encounter==='survival'&&this.survivalComplete&&this.aliveEnemies===0)this.cleared=true
+    if(!this.cleared&&this.def.encounter==='survival'&&this.survivalComplete&&this.aliveEnemies===0&&!this.threats.blocksClear){
+      this.cleared=true
+      this.threats.clear()
+      this.setDoorsOpen(true)
+      if(this.oldHell)this.fogClearStart=this.time
+    }
     // 清场 → 解封所有门 + 激活裂隙（延迟刷怪未出场不算清场；脚本房可禁止自动开门/点火）
     // startLocked 房（序章醒来黑房）的清场状态只能由脚本流程解除：初始 0 怪也不许在
     // 第一帧自动翻牌，否则光照会误切亮档——亮房里帽灯光圈消失、"好黑"的演出全毁
@@ -1574,31 +2123,27 @@ export class RoomRuntime {
       !this.script?.startLocked &&
       !this.script?.manualClear &&
       this.aliveEnemies === 0 &&
+      !this.threats.blocksClear &&
       this.pendingSpawns.length === 0
     ) {
       this.cleared = true
+      emitSimulationEvent({type:'clear',room:this.def.id})
+      if(this.oldHell)this.fogClearStart=this.time
       // 手动火把房 / 显式抑制的脚本房：火把与门都交给导演
-      if (!this.manualTorch && !this.script?.suppressAutoClear) {
+      if (!this.oldHell && !this.manualTorch && !this.script?.suppressAutoClear) {
         // 批次 E：火把从此刻起逐根错峰点燃（火星在下方统一检测）
         this.litStart = this.time
       }
       // 有怪的房间才播清场音（出生空房/奖励房进门不打扰）
       if (this.enemyTotal > 0) {
         sfx.roomClear()
-        if (!this.manualTorch && !this.script?.suppressAutoClear) sfx.torchIgnite()
+        if (!this.oldHell && !this.manualTorch && !this.script?.suppressAutoClear) sfx.torchIgnite()
       }
-      // 清场净化：场上残余毒液弹全部湮灭（安心捡矿/过门）
-      this.bullets = []
+      // 清场净化普通残弹；已经爆发的死亡弹幕继续飞行，不再阻碍开门。
+      this.bullets = this.bullets.filter(b=>b.surviveRoomClear)
+      this.threats.clear()
       if (!this.script?.suppressAutoClear) {
-        for (const d of this.doors) {
-          if (this.map.openDoor(d.col, d.row)) {
-            sfx.doorOpen()
-            d.open = true
-            const cx = d.col * CONFIG.tile + CONFIG.tile / 2
-            const cy = d.row * CONFIG.tile + CONFIG.tile / 2
-            this.fx.burst(cx, cy, -Math.PI / 2, 10)
-          }
-        }
+        this.setDoorsOpen(true)
       }
       if (this.fissure) {
         this.fissure.active = true
@@ -1618,8 +2163,19 @@ export class RoomRuntime {
       }
     }
 
+    this.search.update(dt, this.time, this.knownPlayers, (player, container, index) => {
+      const item=container.slots?.[index]
+      sfx.searchReveal(searchFeedback(item?.id),!item,item?itemQualityLevel(getItemDef(item.id)):1)
+    }, (player, container) => {
+      const member = participants.find(p => p.player === player)
+      if (!member) return
+      const chest = container.chestId !== undefined ? this.interactables.find(it => it.id === container.chestId) : undefined
+      if (chest) chest.done = true
+      member.host.onInteract?.(chest ?? { id: -3, kind: 'search', x: container.x, y: container.y, range: container.range, hint: null, oneShot: false, done: true, ref: container.ref })
+    },()=>sfx.searchRummage())
     // 踩门 → 切换房间
-    if (player.alive) {
+    this.interactionHints.clear()
+    for (const {player,input,host} of participants) if (player.alive) {
       const pc = map.worldToCol(player.x)
       const pr = map.worldToRow(player.y)
       for (const d of this.doors) {
@@ -1631,7 +2187,8 @@ export class RoomRuntime {
         }
       }
       // 地面交互物：每帧选最近的可交互物给 HUD 提示，F 触发
-      this.updateInteractables(player, input, host)
+      this.fx.withPickupOwner(player.entityId,player.x,player.y,()=>this.updateInteractables(player, input, host))
+      this.interactionHints.set(player.entityId,this.interactHint)
       // 裂隙交互
       if (
         input.interactPressed &&
@@ -1646,26 +2203,105 @@ export class RoomRuntime {
     for (const s of this.spellFx) {
       s.t += dt
       if (s.follow) {
-        s.x = player.x
-        s.y = player.y
+        const owner = participants.find(member => member.player.entityId === s.owner)?.player ?? player
+        s.x = owner.x
+        s.y = owner.y
       }
     }
     this.spellFx = this.spellFx.filter((s) => s.t < s.dur)
-    for (const q of this.pendingSpellPulses) q.delay -= dt
-    const duePulses = this.pendingSpellPulses.filter((q) => q.delay <= 0)
-    this.pendingSpellPulses = this.pendingSpellPulses.filter((q) => q.delay > 0)
+    for (const q of this.pendingSpellPulses) {
+      if (q.channel) {
+        if (participants.find(member => member.player.entityId === q.owner)?.player.isChanneling) continue
+        q.channel = false
+      } else q.delay -= dt
+    }
+    const duePulses = this.pendingSpellPulses.filter((q) => !q.channel && q.delay <= 1e-8)
+    this.pendingSpellPulses = this.pendingSpellPulses.filter((q) => q.channel || q.delay > 1e-8)
     // 第二波也以玩家当前位置为中心——光波始终绕身绽开
-    for (const q of duePulses) this.fireSpellPulse(player.x, player.y, q.spellId, q.def, q.pulse, engine, host,q.damageBonus)
+    for (const q of duePulses) {
+      const owner = q.owner ? participants.find(member => member.player.entityId === q.owner) : participants[0]
+      if(!owner)continue
+      if (owner.player.alive) this.fireSpellPulse(owner.player.x, owner.player.y, q.spellId, q.def, q.pulse, engine, owner.host,q.damageBonus,owner.player.entityId)
+    }
 
     map.update(dt)
     this.fx.setPickupAnchor(player.x, player.y)
+    for(const member of participants)this.fx.setPickupAnchor(member.player.x,member.player.y,member.player.entityId)
     this.fx.update(dt)
+    profiler.count('players',participants.length);profiler.count('enemies',this.enemies.length);profiler.count('bullets',this.bullets.length);profiler.count('drops',this.drops.length)
+    profiler.end('roomUpdate',started)
   }
 
-  /**
-   * 挥击 active 窗口命中结算（数据驱动双形态）：
-   * slash = 扇形扫掠；stab = 沿挥出方向的窄矩形长刺。敌人与矿脉各结算一次。
-   */
+  /** 最近有效目标与轻量保持阈值；已起手的技能不随距离微变而换目标。 */
+  private selectTarget(enemy: Enemy, members: readonly RoomParticipant[]): Player | null {
+    if(members.length===1)return members[0].player.alive?members[0].player:null
+    let nearest:Player|null=null,previous:Player|null=null,best=Infinity
+    let selectable=false
+    for(const member of members)if(member.player.alive&&!member.player.untargetable){selectable=true;break}
+    for(const {player} of members){
+      if(!player.alive||selectable&&player.untargetable)continue
+      const d=(player.x-enemy.x)**2+(player.y-enemy.y)**2;if(d<best){nearest=player;best=d}
+      if(player.entityId===enemy.targetId)previous=player
+    }
+    if(previous&&(enemy.windup!=='none'||enemy.pounceState!=='none'
+      ||enemy instanceof KedamaBoss&&['windup','shoot','move'].includes(enemy.mode)
+      ||enemy instanceof GrimmBoss&&!['retreat','run','recovery'].includes(enemy.state)))return previous
+    // 小幅距离变化保持目标，避免多人交叉走位使前摇方向每帧抖动。
+    return previous && nearest && ((previous.x-enemy.x)**2+(previous.y-enemy.y)**2) <= best*1.44 ? previous : nearest
+  }
+
+  /** 百裂斩按固定矩形逐轮结算，每轮命中范围内所有敌人，无多目标衰减。 */
+  private resolveAreaBurstHits(player:Player,host:RoomHost,dt:number):void {
+    const burst=player.areaBurst
+    if(!burst)return
+    const due=Math.min(burst.count,Math.floor((burst.age+1e-8)/(burst.duration/burst.count))+1)
+    const cos=Math.cos(burst.angle),sin=Math.sin(burst.angle),radius=Math.hypot(burst.range,burst.width/2)+48
+    while(burst.issued<due){
+      const index=burst.issued++
+      // 每轮两道破空声随世界时钟触发，空斩也出声，不受普通命中音的节流限制。
+      getItemDef(burst.weaponId).weapon?.chargeAttack?.areaBurst?.sound?.(index)
+      for(const enemy of enemyCandidates(this.enemies,burst.x-radius,burst.y-radius,burst.x+radius,burst.y+radius)){
+        if(!enemy.canBeHit)continue
+        const dx=enemy.hitX-burst.x,dy=enemy.hitY-burst.y,r=enemy.hitRadius,fwd=dx*cos+dy*sin,side=-dx*sin+dy*cos
+        // 与刀影的局部坐标一致：向前纵深为 range，朝着玩家的近侧边左右各 width/2。
+        const near=Math.max(0,Math.min(burst.range,fwd)),across=Math.max(-burst.width/2,Math.min(burst.width/2,side))
+        if((fwd-near)**2+(side-across)**2>r*r)continue
+        // 同一轮物理与魔法各算一次抗性，再合成一次受击，避免缩石概率和击退重复触发。
+        const damage=enemy.resolveMixedDamage({base:burst.physicalDamage+burst.magicDamage,attackPower:0,coefficient:0,critChance:0,penetration:burst.physicalPenetration},
+          burst.magicDamage/Math.max(.001,burst.physicalDamage+burst.magicDamage),burst.magicPenetration)
+        enemy.takeDamage(damage.damage,burst.angle,0,0,'mixed')
+        if(damage.physical>0)this.fx.combatDamage(enemy.hitX-4,enemy.hitY-19,damage.physical,'physical')
+        if(damage.magic>0)this.fx.combatDamage(enemy.hitX+4,enemy.hitY-30,damage.magic,'magic')
+        if(!enemy.alive)this.onEnemyKilled(enemy,host,burst.weaponId)
+      }
+    }
+    // 空斩与房间刀影使用同一时钟，命中顿帧期间不会伤害先跑完、演出还没开始。
+    burst.age+=dt
+  }
+
+  /** 残影每刀只命中同一目标一次，自己的延迟与刀身计时分开。 */
+  private resolveEchoHits(player:Player,host:RoomHost):void {
+    for(const echo of player.meleeEchoes){
+      const elapsed=echo.age-(echo.delay??0)
+      if(elapsed<0||elapsed>=echo.activeDuration)continue
+      const m=echo.move,cos=Math.cos(echo.angle),sin=Math.sin(echo.angle),reach=m.reach+(m.stabWidth??0)+48
+      for(const enemy of enemyCandidates(this.enemies,echo.x-reach,echo.y-reach,echo.x+reach,echo.y+reach)){
+        if(!enemy.canBeHit||echo.hitIds.has(enemy.entityId))continue
+        const dx=enemy.hitX-echo.x,dy=enemy.hitY-echo.y,r=enemy.hitRadius
+        const angle=Math.atan2(dy,dx),difference=Math.atan2(Math.sin(angle-echo.angle),Math.cos(angle-echo.angle))
+        const hit=m.shape==='slash'?Math.hypot(dx,dy)<=m.reach+r&&Math.abs(difference)<=(m.arc??0)
+          :dx*cos+dy*sin>=-r&&dx*cos+dy*sin<=m.reach+r&&Math.abs(-dx*sin+dy*cos)<=(m.stabWidth??14)/2+r
+        if(!hit)continue
+        echo.hitIds.add(enemy.entityId)
+        const result=enemy.resolveDamage({base:echo.damage,attackPower:0,coefficient:0,critChance:0,penetration:echo.magicPenetration},'magic')
+        enemy.takeDamage(result.damage,angle,0,0,'magic')
+        if(result.damage>0)this.fx.combatDamage(enemy.hitX+5,enemy.hitY-35,result.damage,'magic')
+        if(!enemy.alive)this.onEnemyKilled(enemy,host,echo.weaponId)
+      }
+    }
+  }
+
+  /** 刀身、矿脉和采集物共用玩家本次挥击的命中集合。 */
   private resolveSwingHits(engine: EngineContext, p: Player, host: RoomHost): void {
     const swing = p.getSwing()
     if (!swing) return
@@ -1711,7 +2347,9 @@ export class RoomRuntime {
     // AOE 衰减：先收集本帧新命中的敌人，同帧受伤者按距玩家由近到远排序
     // （跨帧的先后由 p.swingHitCount 记录，天然排在前面）
     const frameHits: Array<{ e: Enemy; ang: number; dist: number }> = []
-    for (const e of this.enemies) {
+    const queryRadius=Math.max(swing.reach,m.reach)+swing.stabWidth+32
+    const candidates=weaponHit?this.enemies:enemyCandidates(this.enemies,p.x-queryRadius,p.y-queryRadius,p.x+queryRadius,p.y+queryRadius)
+    for (const e of candidates) {
       // 埋在地下预警期刀砍不入；钻出中可被先手攻击
       if (!e.canBeHit || p.hitSet.has(e)) continue
       const dx = e.hitX - p.x
@@ -1734,25 +2372,39 @@ export class RoomRuntime {
       // 力量属性乘区先作用于招式基础伤害，再做 AOE 衰减
       const equipment = p.activeToolId ? getItemDef(p.activeToolId).combat : undefined
       const impact = meleeImpact(m, dist, equipment?.penetration ?? 0)
-      const result = calculateDamage({base:impact.damage,attackPower:p.attackPower,damageBonus:p.outgoingDamageBonus+p.swingDamageBonus,
+      const kind=m.damageKind??'physical'
+      const input={base:impact.damage,attackPower:p.attackPower,damageBonus:p.outgoingDamageBonus+p.swingDamageBonus,
         coefficient:m.powerCoefficient ?? (m.windup+m.active+m.recover),
-        resistance:m.damageKind === 'magic' ? e.def.combat.magicResist : e.def.combat.physicalResist,
-        penetration:impact.penetration+p.equipmentCombat.penetration,critChance:(equipment?.critChance??0)+p.equipmentCombat.critChance,
+        penetration:kind==='magic'?(equipment?.magicPenetration??impact.penetration+p.equipmentCombat.penetration):impact.penetration+p.equipmentCombat.penetration,critChance:(equipment?.critChance??0)+p.equipmentCombat.critChance+(p.equipmentCombat.meleeCritChance??0),
         critMultiplier:resource?.criticalPassive?.multiplier,
-        area:m.aoe?.mode!=='none'&&(m.shape==='slash'||!!m.aoe),aoeReduction:e.def.combat.aoeReduction,falloff:dmgMult*p.swingChargeMultiplier})
-      const damage = result.damage
+        area:m.aoe?.mode!=='none'&&(m.shape==='slash'||!!m.aoe),aoeReduction:e.def.combat.aoeReduction,falloff:dmgMult*p.swingChargeMultiplier*p.meleeWeaponDamageMultiplier*(e.def.combat.meleeDamageTakenMultiplier??1)*(kind==='magic'?1:p.physicalDamageMultiplier)}
+      const mixed=kind==='physical'&&resource?.physicalToMagic?e.resolveMixedDamage(input,resource.physicalToMagic,equipment?.magicPenetration??0):null
+      const result=mixed??e.resolveDamage(input,kind)
+      const extraMagicBase=resource?.fixedMagicDamage??0
+      const extraMagic=extraMagicBase>0?e.resolveDamage({base:extraMagicBase,attackPower:0,coefficient:0,critChance:0,penetration:equipment?.magicPenetration??0},'magic').damage:0
+      const damage = result.damage+extraMagic
       p.hitSet.add(e)
       p.swingHitCount++
-      e.takeDamage(damage, ang, (m.knockback ?? e.def.combat.knockback) + p.knockbackBonus, m.stun)
+      // 主伤害与附伤分别扣抗性后合并一次受击，避免死亡、缩石概率与击退重复触发。
+      e.takeDamage(damage, ang, (m.knockback ?? e.def.combat.knockback) + p.knockbackBonus, m.stun,mixed||extraMagic>0?'mixed':kind)
+      if(damage>0)for(const effect of p.meleeAccessoryEffects())if(e.alive)e.addStatus(effect,p.entityId)
       if (e.alive) for (const effect of p.swingHitEffects) e.addStatus(effect, 'weapon:hit')
-      if (e.alive && result.critical) for (const effect of resource?.criticalPassive?.effects ?? []) e.addStatus(effect, 'weapon:critical')
+      if (e.alive && result.critical) for (const effect of resource?.criticalPassive?.effects ?? []) {
+        // 持续伤害可记录实际施加者，死亡结算沿用状态系统的多人击杀归属。
+        e.addStatus(effect, resource?.criticalPassive?.source === 'attacker' ? p.entityId : 'weapon:critical')
+      }
       this.fx.burst(e.x, e.y, ang)
-      this.fx.combatDamage(e.x, e.y - 18, damage, m.damageKind ?? 'physical', result.critical)
+      if(mixed){
+        if(mixed.physical>0)this.fx.combatDamage(e.hitX-5,e.hitY-18,mixed.physical,'physical',result.critical)
+        if(mixed.magic>0)this.fx.combatDamage(e.hitX+5,e.hitY-31,mixed.magic,'magic',result.critical)
+      }else this.fx.combatDamage(e.x,e.y-18,result.damage,kind,result.critical)
+      if(extraMagic>0)this.fx.combatDamage(e.hitX+5,e.hitY-(mixed?43:31),extraMagic,'magic')
+      if(resource?.hitFx)this.weaponImpacts.push({x:e.hitX,y:e.hitY,angle:ang,move:m,age:0,...resource.hitFx})
       // 武器专属冲击仅在首个实际命中上播放，跨帧扫入多个目标也不重复叠音。
       if (resource?.hitSound && p.swingHitCount === 1) resource.hitSound(e.hitMaterial)
       if (!e.alive) {
         engine.shake(0.2)
-        this.onEnemyKilled(e, host)
+        this.onEnemyKilled(e, host, p.activeToolId)
       } else {
         engine.shake(CONFIG.shakeOnHit)
         if (!hitSounded && !(p.activeToolId === DOOMSDAY_ID && p.doomSwingEmpowered)) {
@@ -1780,7 +2432,7 @@ export class RoomRuntime {
       if(!canMine){sfx.pickSpark();continue}
       wood.hp = Math.max(0, wood.hp - efficiency)
       this.fx.chips(wood.x,wood.y,'#a47c50',wood.hp?4:14,150);engine.hitStop(0.025)
-      if(wood.hp===0){for(let i=0,n=1+Math.floor(Math.random()*2);i<n;i++)this.drops.push(new Drop(wood.x,wood.y,WOOD_ID));sfx.pickBreak()}else sfx.pickHit(wood.hp/30)
+      if(wood.hp===0){for(let i=0,n=1+Math.floor(randomLoot()*2);i<n;i++)this.drops.push(new Drop(wood.x,wood.y,WOOD_ID));sfx.pickBreak()}else sfx.pickHit(wood.hp/30)
     }
     const pc = this.map.worldToCol(p.x)
     const pr = this.map.worldToRow(p.y)
@@ -1820,9 +2472,10 @@ export class RoomRuntime {
         if (result.broken) {
           if (result.vein === 'rock') {
             // 岩包崩落：灰石碎粒为主；真藏矿才补几粒矿色 + 矿名揭晓飘字
-            this.fx.chips(cx, cy, '#8b929c', 15, 230)
-            this.fx.chips(cx, cy, '#a6adb7', 6, 170)
-            this.fx.damageText(cx, cy - 10, mineral?.visual.form==='salt'?mineralName(result.kind):t('game.notify.rock'), '#c2c8d0')
+            const specialRock=mineral?.visual.form==='blackstone'
+            this.fx.chips(cx, cy, specialRock?crystalColor:'#8b929c', 15, 230)
+            this.fx.chips(cx, cy, specialRock?hiColor:'#a6adb7', 6, 170)
+            this.fx.damageText(cx, cy - 10, specialRock||mineral?.visual.form==='salt'?mineralName(result.kind):t('game.notify.rock'), specialRock?mineral!.text:'#c2c8d0')
             if (result.hasOre && mineral) {
               this.fx.chips(cx, cy, crystalColor, 7, 200)
               this.fx.chips(cx, cy, hiColor, 3, 150)
@@ -1838,18 +2491,19 @@ export class RoomRuntime {
           if (result.vein !== 'rock' || result.hasOre) host.onMine('ore')
           this.spawnOreDrops(cc, rr, ore)
           // 纯普通石头额外掉一份硝石；不替换石料，藏矿岩包和显矿不参与。
-          if (result.vein === 'rock' && !result.hasOre && mineral?.visual.form!=='salt' && Math.random() < 0.03) {
+          const ordinaryRock=result.vein==='rock'&&!result.hasOre&&!mineral?.drops&&mineral?.visual.form!=='salt'
+          if (ordinaryRock && randomLoot() < 0.03) {
             this.drops.push(new Drop(cx, cy, SALTPETER_ID))
           }
           // 楼层宿主在生成时占用名额，换房重访不释放。
-          const guaranteedChest=result.vein==='rock'&&!result.hasOre&&mineral?.visual.form!=='salt'&&host.claimGuaranteedMiningChest?.()
-          if (guaranteedChest||((this.def.floor??1)>=3&&!this.script?.noChest && Math.random() < CONFIG.mine.chestChance && host.claimMiningChest?.())) {
+          const guaranteedChest=ordinaryRock&&host.claimGuaranteedMiningChest?.()
+          if (guaranteedChest||((this.def.floor??1)>=3&&!this.script?.noChest && randomLoot() < Math.min(1, CONFIG.mine.chestChance * searchDensity(this.searchContext(), 'chest')) && host.claimMiningChest?.())) {
             this.addChestInteractable(cx, cy)
             this.fx.damageText(cx, cy - 26, t('game.notify.chest'), '#ffd76a')
             sfx.doorOpen()
           }
           // 50% 概率从矿里爆出怪（仅未清场房间；落点远离玩家 + 出土预警，不零帧起手；脚本房可禁用）
-          if (!this.script?.noMonsterBurst && !this.cleared && Math.random() < CONFIG.mine.monsterBurstChance) {
+          if (!this.script?.noMonsterBurst && !this.cleared && randomCombat() < CONFIG.mine.monsterBurstChance) {
             this.burstEnemyFromOre(cc, rr, p)
           }
           engine.hitStop(0.05)
@@ -1857,7 +2511,7 @@ export class RoomRuntime {
           sfx.pickBreak()
         } else {
           // 未碎：岩包只崩石灰，显矿态崩矿色
-          this.fx.chips(cx, cy, result.vein === 'rock' ? '#8b929c' : crystalColor, 4, 130)
+          this.fx.chips(cx, cy, result.vein === 'rock' && !mineral?.drops ? '#8b929c' : crystalColor, 4, 130)
           engine.hitStop(0.025)
           engine.shake(0.05)
           sfx.pickHit(result.ratio)
@@ -1867,17 +2521,28 @@ export class RoomRuntime {
   }
 
   /** 击杀公共结算：尸体碎粒、史莱姆凝液与整层统计。 */
-  private onEnemyKilled(e: Enemy, host: RoomHost): void {
+  private onEnemyKilled(e: Enemy, host: RoomHost, weaponId: ItemId | null = null): void {
+    if (this.settledKills.has(e.entityId)) return
+    this.settledKills.add(e.entityId)
+    this.threats.onDeath(e)
     this.doomsday.remove(e)
+    for (const effect of this.ownerDoomsday.values()) effect.remove(e)
     if (e.def.tags?.includes('story_restore')) { host.onKill(0); return }
     this.fx.chips(e.x, e.y, e.deathColor, 14, 200)
     if (e.def.tags?.includes('boss')) { host.onKill(0); return }
     sfx.enemyDie(e.hitMaterial)
+    // 调用方只传实际完成击杀的武器快照；切换手持或用符卡击杀不能借用被动。
+    const chanceMultiplier = weaponId ? findItemDef(weaponId)?.weapon?.killDropPassive?.chanceMultiplier ?? 1 : 1
+    // 必掉池只抽一次，不把互斥项当成多个独立概率，也不因掉率加成再掉一份。
+    if(e.def.dropPool){
+      const drop=weightedPick(e.def.dropPool,entry=>findItemDef(entry.item)?entry.weight:0,randomLoot)
+      if(drop)for(let n=0;n<drop.qty;n++)this.drops.push(new Drop(e.x,e.y,drop.item))
+    }
     if(e.def.drops){
-      for(const drop of e.def.drops)if(Math.random()<drop.chance&&findItemDef(drop.item)){
+      for(const drop of e.def.drops)if(randomLoot()<Math.min(1,drop.chance*chanceMultiplier)&&findItemDef(drop.item)){
         for(let n=0;n<drop.qty;n++)this.drops.push(new Drop(e.x,e.y,drop.item))
       }
-    }else if ((e.hitMaterial === 'slime' || e.hitMaterial === 'venom') && Math.random() < 0.10) {
+    }else if (!e.def.dropPool && (e.hitMaterial === 'slime' || e.hitMaterial === 'venom') && randomLoot() < Math.min(1,0.10*chanceMultiplier)) {
       this.drops.push(new Drop(e.x, e.y, SLIME_BALL_ID))
     }
     host.onKill(e.def.exp ?? CONFIG.exp.kill)
@@ -1892,10 +2557,14 @@ export class RoomRuntime {
     const pulseDef = { ...def, knockback: def.knockback + p.knockbackBonus }
     const waves = Math.max(1, def.waves ?? 1)
     const gap = def.waveInterval ?? 0.4
-    const damageBonus=p.outgoingDamageBonus
-    this.fireSpellPulse(p.x, p.y, spellId, pulseDef, 0, engine, host,damageBonus)
+    const damageBonus=def.damageKind==='physical'?p.physicalOutgoingDamageBonus:p.outgoingDamageBonus
+    if (def.channelTime) {
+      for (let i = 0; i < waves; i++) this.pendingSpellPulses.push({delay:gap*i,spellId,def:pulseDef,pulse:i,damageBonus,owner:p.entityId,channel:true})
+      return
+    }
+    this.fireSpellPulse(p.x, p.y, spellId, pulseDef, 0, engine, host,damageBonus,p.entityId)
     for (let i = 1; i < waves; i++) {
-      this.pendingSpellPulses.push({ delay: gap * i, spellId, def: pulseDef, pulse: i,damageBonus })
+      this.pendingSpellPulses.push({ delay: gap * i, spellId, def: pulseDef, pulse: i,damageBonus,owner:p.entityId })
     }
   }
 
@@ -1908,10 +2577,25 @@ export class RoomRuntime {
     pulse: number,
     engine: EngineContext,
     host: RoomHost,
-    damageBonus=0
+    damageBonus=0,
+    owner?:string
   ): void {
     // 第二声是高五度回响（在 Sfx 内按 pulse 区分音色/音量）
-    sfx.spellCast(pulse)
+    if (def.sound) def.sound()
+    else sfx.spellCast(pulse)
+    if (def.control) {
+      const control = def.control
+      for (const enemy of this.enemies) {
+        if (!enemy.alive || (def.scope !== 'room' && Math.hypot(enemy.hitX-x,enemy.hitY-y)>def.radius+enemy.hitRadius)) continue
+        for (const effect of control.enemyEffects) enemy.addStatus(effect,owner??spellId,control.duration)
+        if (def.targetFx) this.spellFx.push({x:enemy.hitX,y:enemy.hitY,radius:enemy.hitRadius,t:0,dur:def.targetFx.duration,color:def.color,seed:randomVisual()*Math.PI*2,follow:false,owner,render:def.targetFx.render})
+      }
+      this.bulletSlowMultiplier = this.bulletSlowRemaining > 0 ? Math.min(this.bulletSlowMultiplier,control.bulletSpeedMultiplier) : control.bulletSpeedMultiplier
+      this.bulletSlowRemaining = Math.max(this.bulletSlowRemaining,control.duration)
+      host.slowEnemyBullets?.(control.duration,control.bulletSpeedMultiplier)
+      engine.shake(.1)
+      return
+    }
     const ringColor = def.fxColors?.ring ?? def.color
     let killed = 0
     for (const e of this.enemies) {
@@ -1921,8 +2605,8 @@ export class RoomRuntime {
       if (Math.hypot(dx, dy) > def.radius + e.hitRadius) continue
       const ang = Math.atan2(dy, dx)
       const kind = def.damageKind ?? 'magic'
-      const damage=calculateDamage({base:def.damage,damageBonus,resistance:kind === 'magic' ? e.def.combat.magicResist : e.def.combat.physicalResist,area:true,aoeReduction:e.def.combat.aoeReduction}).damage
-      e.takeDamage(damage, ang, def.knockback, def.stun)
+      const damage=e.resolveDamage({base:def.damage,damageBonus,area:true,aoeReduction:e.def.combat.aoeReduction},kind).damage
+      e.takeDamage(damage, ang, def.knockback, def.stun,kind)
       this.fx.burst(e.x, e.y, ang, 8)
       this.fx.combatDamage(e.x, e.y - 18, damage, kind)
       if (!e.alive) {
@@ -1952,8 +2636,9 @@ export class RoomRuntime {
       dur: 0.6,
       color: def.color,
       colors: def.fxColors,
-      seed: Math.random() * Math.PI * 2,
-      follow: true
+      seed: randomVisual() * Math.PI * 2,
+      follow: true,
+      owner
     })
     this.fx.chips(x, y, ringColor, 26, 300)
     // 符卡飘字走物品语言键 item.<id>.flyword（未声明该键的符卡不飘字）
@@ -1971,16 +2656,24 @@ export class RoomRuntime {
   }
 
   /** 背包丢弃：在指定世界坐标生成一个地面掉落物 */
-  spawnGroundDrop(id: ItemId, x: number, y: number): void {
-    this.drops.push(new Drop(x, y, id))
+  spawnGroundDrop(id: ItemId, x: number, y: number,durability?:number): void {
+    this.drops.push(new Drop(x, y, id,durability))
   }
 
   render(ctx: CanvasRenderingContext2D, player: Player): void {
+    this.renderPlayers(ctx,[player],player)
+  }
+  renderPlayers(ctx: CanvasRenderingContext2D, players: readonly Player[], player: Player = players[0]!): void {
+    if (!player) return
+    const started=profiler.start(),view=canvasViewport(ctx),groundStarted=profiler.start()
+    this.ensureRenderTextures()
     // 房间纹理 2x 超采样烘焙，此处缩回世界尺寸（相机 zoom 放大后仍锐利）
-    const roomW = CONFIG.roomCols * CONFIG.tile
-    const roomH = CONFIG.roomRows * CONFIG.tile
-    ctx.drawImage(this.texture, 0, 0, roomW, roomH)
+    const roomW = this.map.cols * this.map.tile
+    const roomH = this.map.rows * this.map.tile
+    this.oldHell?.renderGround(ctx,view,this.time)
+    if(this.texture) drawVisibleLayer(ctx,this.texture,roomW,roomH,view)
     this.nature?.renderGround(ctx,this.time)
+    this.threats.renderGround(ctx,this.map,view)
     if (this.weaponImpacts.length) {
       ctx.save(); ctx.beginPath()
       const inset = CONFIG.wallThickness * CONFIG.tile
@@ -1990,9 +2683,10 @@ export class RoomRuntime {
     }
     this.map.renderOreLayer(ctx)
     this.map.renderOreFx(ctx)
+    profiler.end('ground',groundStarted)
     // 稀疏落尘与墙边水滴，只作气氛，不遮挡矿脉和弹幕。（猩红圣堂无矿洞尘水，主题房跳过）
     ctx.save()
-    if(this.script?.theme!=='grimm'){
+    if(this.script?.theme!=='grimm'&&!this.oldHell){
     for(let i=0;i<12;i++){
       const x=CONFIG.wallThickness*CONFIG.tile+30+(i*137+this.def.id*19)%(roomW-CONFIG.wallThickness*CONFIG.tile*2-60),y=CONFIG.wallThickness*CONFIG.tile+25+(i*89+this.time*4)%(roomH-CONFIG.wallThickness*CONFIG.tile*2-50)
       ctx.fillStyle='#cebea02b';ctx.fillRect(x+Math.sin(this.time*0.3+i)*6,y,1,1)
@@ -2008,45 +2702,23 @@ export class RoomRuntime {
     if (this.fissure) this.renderFissure(ctx)
     // 批次 F⑤：时空乱流浮层（地面上、实体下；后续光照压暗层会统一压暗）
     // 注意传世界逻辑尺寸，不能用 texture.width（E 纹理是 2x 超采样物理画布）
-    this.warp.render(ctx, roomW, roomH)
+    if(!this.oldHell)this.warp.render(ctx, roomW, roomH)
 
     // 全屋 y-sort：掉落/敌人/玩家/立体摆件/地面交互物统一按脚底 y 排序（星露谷式前后遮挡）
-    const sortables: Array<{ y: number; draw: () => void }> = []
-    for (const d of this.drops) sortables.push({ y: d.y, draw: () => d.render(ctx) })
-    for (const e of this.enemies) sortables.push({ y: e.y, draw: () => e.render(ctx) })
-    sortables.push({ y: player.y, draw: () => player.render(ctx) })
-    if (this.plants) { const plants = this.plants; for (const p of plants.ground) sortables.push({ y: p.y, draw: () => plants.renderGround(ctx, p, this.time) }) }
-    if(this.wrecks){const wrecks=this.wrecks;for(const w of wrecks.all)sortables.push({y:w.y,draw:()=>wrecks.render(ctx,w,this.time,this.wreckSearchAllowed)})}
-    for (const pr of this.props) sortables.push({ y: pr.y, draw: () => renderProp(ctx, pr) })
-    if(this.nature){const nature=this.nature;for(const p of nature.gathers)sortables.push({y:p.y,draw:()=>nature.renderGather(ctx,p)});for(const p of nature.wood)if(p.hp>0)sortables.push({y:p.y,draw:()=>nature.renderWood(ctx,p)})}
-    // B2：地面物品/宝箱（站立物，F 交互）；物品拾取后（done）立即消失，
-    // 宝箱开过仍要画开盖外形，故只对 item 过滤 done
-    for (const it of this.interactables) {
-      if (it.kind === 'item' && !it.done) sortables.push({ y: it.y, draw: () => this.renderGroundItem(ctx, it) })
-      else if (it.kind === 'chest') sortables.push({ y: it.y, draw: () => this.renderChest(ctx, it) })
-    }
-    // B2：剧情追加实体（灵梦 NPC 等）
-    for (const ex of this.extraSortables) {
-      sortables.push({ y: ex.y, draw: () => ex.draw(ctx, this.time) })
-    }
-    // 矿脉晶簇：以格底为锚参与排序（高晶尖正确遮挡后方实体）
-    this.map.forEachOre((ore) => {
-      sortables.push({
-        y: (ore.row + 1) * CONFIG.tile - 2 + ore.offsetY,
-        draw: () => drawOreCrystals(ctx, ore, this.time)
-      })
-    })
-    sortables.sort((a, b) => a.y - b.y)
-    for (const it of sortables) it.draw()
+    const actorStarted=profiler.start();this.drawActors(ctx,players,view);profiler.end('actors',actorStarted)
     // 批次 F⑦追加：漂浮雾气轻盖实体（柔遮罩）；弹幕仍在最上层保证战斗可读
     // 同上：传世界逻辑尺寸，与纹理物理像素解耦
-    ctx.save();ctx.globalAlpha*=this.artStyle.scene.fogStrength
-    this.fog.render(ctx, roomW, roomH);ctx.restore()
+    if(this.oldHell)this.oldHell.renderAtmosphere(ctx,view,this.time,players,this.fogClearStart)
+    else {ctx.save();ctx.globalAlpha*=this.artStyle.scene.fogStrength
+      this.fog.render(ctx, roomW, roomH);ctx.restore()}
     // 弹幕画在最上层（东方弹幕必须醒目，不参与遮挡）
-    const flight = player.rangedFlight
-    if (flight) {
+    this.threats.renderWarnings(ctx,view,this.time)
+    for(const owner of players){
+    const flight = owner.rangedFlight
+    if (flight&&visible(view,flight.x,flight.y,80)) {
       ctx.save(); ctx.translate(flight.x, flight.y); ctx.rotate(flight.rotation)
-      getItemDef(flight.item).weapon?.drawHeld?.(ctx, { time: this.time }); ctx.restore()
+      withSimulationAppearance(owner.appearance??simulationAppearance(),()=>getItemDef(flight.item).weapon?.drawHeld?.(ctx, { time: this.time })); ctx.restore()
+    }
     }
     // 读取一次当前世界变换，含相机缩放、震动和设备像素比；仅剔除绘制，不剔除逻辑。
     const transform = ctx.getTransform()
@@ -2055,7 +2727,7 @@ export class RoomRuntime {
     const y0 = -transform.f / transform.d, y1 = (ctx.canvas.height - transform.f) / transform.d
     const left = Math.min(x0, x1), right = Math.max(x0, x1), top = Math.min(y0, y1), bottom = Math.max(y0, y1)
     for (const b of this.bullets) if (!canCull || b.visibleIn(left, top, right, bottom)) b.render(ctx)
-    player.bow.render(ctx)
+    for (const player of players) { player.bow.render(ctx); player.scp127.renderFlights(ctx) }
     this.fx.render(ctx)
     this.renderSpellFx(ctx)
     this.renderPrismaBlasts(ctx)
@@ -2064,10 +2736,12 @@ export class RoomRuntime {
     this.renderNorthFace(ctx, player)
     this.plants?.renderWall(ctx, this.time, player)
     this.plants?.renderCeiling(ctx, this.time, player)
+    this.oldHell?.renderCeiling(ctx,view,players)
     // 火苗贴在墙面上，必须在立面遮挡层之后画（火光是发光体，盖最上也不穿帮）
     this.renderTorchFlames(ctx)
     // 塔罗牌穿过障碍，牌背与抽牌提示也绘制在地图遮挡层之上。
-    player.tarot.render(ctx, player)
+    for (const player of players) player.tarot.render(ctx, player)
+    this.touchRenderBudget();profiler.end('roomRender',started)
   }
 
   /** 梦想封印全屏白闪强度（0~1；CaveModule 在屏幕空间盖白） */
@@ -2077,6 +2751,9 @@ export class RoomRuntime {
 
   /** 地面剧情物品：金色光柱 + 上下浮动的物件简形（镐/剑可辨识，其余走通用菱形） */
   private renderGroundItem(ctx: CanvasRenderingContext2D, it: Interactable): void {
+    renderCollectible(ctx,it,{x:it.x-48,y:it.y-76,width:96,height:112},g=>this.renderGroundItemCurrent(g,it))
+  }
+  private renderGroundItemCurrent(ctx: CanvasRenderingContext2D, it: Interactable): void {
     const data = it.data as ItemInteractData
     const bob = Math.sin(this.time * 2.4 + it.id) * 2.6
     const y = it.y + bob
@@ -2295,13 +2972,7 @@ export class RoomRuntime {
     // k=0 贴墙（最透）→ k=1 离墙（全不透明）
     const k = Math.max(0, Math.min(1, (d - f.near) / (f.far - f.near)))
     ctx.globalAlpha = f.alpha + (1 - f.alpha) * k
-    ctx.drawImage(
-      face,
-      0,
-      0,
-      CONFIG.roomCols * CONFIG.tile,
-      CONFIG.roomRows * CONFIG.tile
-    )
+    drawVisibleLayer(ctx,face,CONFIG.roomCols*CONFIG.tile,face.height/2,canvasViewport(ctx))
     ctx.globalAlpha = 1
   }
 
@@ -2314,6 +2985,7 @@ export class RoomRuntime {
    */
   private renderSpellFx(ctx: CanvasRenderingContext2D): void {
     for (const s of this.spellFx) {
+      if (s.render) { s.render(ctx,{x:s.x,y:s.y,age:s.t,duration:s.dur,seed:s.seed}); continue }
       if (s.t < 0) continue // 错峰排期未启动
       const k = Math.min(1, s.t / s.dur)
       const ease = 1 - Math.pow(1 - k, 3)
@@ -2552,6 +3224,8 @@ export class RoomRuntime {
 
   /** 门实时层：封印红印脉动 / 解封绿色旋涡 + 方向箭头 */
   private renderDoors(ctx: CanvasRenderingContext2D): void {
+    // 旧地狱的矿道入口已参与实体排序，不能再叠加旧版旋涡符印。
+    if(this.oldHell)return
     const t = CONFIG.tile
     for (const d of this.doors) {
       const cx = d.col * t + t / 2
@@ -2730,40 +3404,6 @@ export class RoomRuntime {
     ctx.strokeText(hint, f.x, f.y - r - 10)
     ctx.fillText(hint, f.x, f.y - r - 10)
   }
-}
-
-/** 由 RoomDef 的门朝向推导每扇门在墙内缘的格位（纯函数） */
-function layoutDoors(def: RoomDef): RuntimeDoor[] {
-  const { roomCols: C, roomRows: R, wallThickness: W } = CONFIG
-  const groups = new Map<Dir, number[]>()
-  for (const ref of def.doors) {
-    const list = groups.get(ref.dir) ?? []
-    list.push(ref.doorId)
-    groups.set(ref.dir, list)
-  }
-  const out: RuntimeDoor[] = []
-  for (const dir of ['N', 'S', 'W', 'E'] as Dir[]) {
-    const ids = groups.get(dir) ?? []
-    ids.forEach((doorId, i) => {
-      let col = 0
-      let row = 0
-      if (dir === 'W') {
-        col = W - 1
-        row = slotOnWall(R, ids.length, i)
-      } else if (dir === 'E') {
-        col = C - W
-        row = slotOnWall(R, ids.length, i)
-      } else if (dir === 'N') {
-        col = slotOnWall(C, ids.length, i)
-        row = W - 1
-      } else {
-        col = slotOnWall(C, ids.length, i)
-        row = R - W
-      }
-      out.push({ doorId, dir, col, row, open: false })
-    })
-  }
-  return out
 }
 
 /** 门箭头朝向（从门格指向房间内部） */

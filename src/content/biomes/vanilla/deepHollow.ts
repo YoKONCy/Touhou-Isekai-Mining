@@ -9,6 +9,6 @@ export const biomeDeepHollow: BiomeDef = {
   sceneStyle: { wallTint: '#66888c', tintStrength: .19, dampness: .5, vegetation: .36, deposits: .65, fungi: .46, boneFragments: 3, fogStrength: .7, deepHollow: true },
   enemyBudget: { ...biomeCave.enemyBudget, normalAverage: 5, exit: [6, 8] },
   floorEnemyAverages: { 4: 5 },
-  oreRange: { start: [5, 7], normal: [10, 14], reward: [18, 22], exit: [4, 6] },
+  oreRange: { start: [2, 4], normal: [5, 7], reward: [9, 11], exit: [2, 3] },
   tags: ['vanilla', 'underground', 'deep_hollow']
 }

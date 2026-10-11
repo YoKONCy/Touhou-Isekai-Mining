@@ -7,7 +7,7 @@ import { drawBatWarning } from './batSprites'
 export const CAVE_BAT_ID=vanilla('cave_bat')
 const def:EnemyDef={
   id:CAVE_BAT_ID,ai:'charge_cycle',movement:'flying',hp:60,radius:12,exp:6,
-  combat:{physicalResist:5,magicResist:5,contactDamage:10,attackCd:1,contactPad:5,knockback:170,recoil:100,stunResist:0},
+  combat:{physicalResist:1,magicResist:1,contactDamage:10,attackCd:1,contactPad:5,knockback:170,recoil:100,stunResist:0},
   palette:{body:'#777080',edge:'#383141',death:'#a795a8',hpBar:'#b5a4bc'},hitMaterial:'bat',
   chargeCycle:{chaseSpeed:140.7,retreatSpeed:140.7,sight:340,triggerRange:260,windup:.4,dashSpeed:492.45,dashDistance:330,dashDamage:10,retreatDuration:[2,3]},
   spawn: { maxFloor: 3,weight:.5,rooms:['normal','exit'],minFloor:2},

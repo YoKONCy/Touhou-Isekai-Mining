@@ -1,10 +1,11 @@
+import { randomAudio } from '../../../../../core/simulation/random'
 import type { AudioEngine } from '../../../../../game/audio/Sfx'
 import type { HitMaterial } from '../../../../enemies/types'
 
 /** 宽刃压风以低频气流为主体，金属只留下短尾；反手稍降音高。 */
 export function broadswordSound(audio: AudioEngine, phase: 'windup' | 'active' | 'recover', segment: number, empowered: boolean): void {
   audio.ensure()
-  const tone = (segment % 2 === 0 ? 1 : .92) * (.98 + Math.random() * .04), pan = segment % 2 === 0 ? -.12 : .12
+  const tone = (segment % 2 === 0 ? 1 : .92) * (.98 + randomAudio() * .04), pan = segment % 2 === 0 ? -.12 : .12
   if (phase === 'windup') {
     audio.noise({ dur: .12, buf: audio.brownNoise, type: 'bandpass', curve: [140, 380, 190], q: .5, vol: .05, env: 'swell', pan, rev: .025 })
   } else if (phase === 'active') {

@@ -1,3 +1,4 @@
+import { randomGeneration } from '../../core/simulation/random'
 import type { TileMap } from '../tilemap'
 import { circleHitsProp, type Prop } from './props'
 import { drawCraftMarker } from './workshopScene'
@@ -58,7 +59,7 @@ export class FurnaceWrecks{
     for(const spec of specs){
       const valid=spots.filter(p=>Math.hypot(p.x-spawn.x,p.y-spawn.y)>110&&this.all.every(w=>Math.hypot(w.x-p.x,w.y-p.y)>110)&&occupied.every(w=>Math.hypot(w.x-p.x,w.y-p.y)>55)&&[[-35,0],[35,0],[0,-36],[0,18]].every(([dx,dy])=>!map.solidAtWorld(p.x+dx!,p.y+dy!))&&!props.some(w=>circleHitsProp(p.x,p.y,42,w)))
       const fallback=spots.filter(p=>this.all.every(w=>Math.hypot(w.x-p.x,w.y-p.y)>65))
-      const pool=valid.length?valid:fallback,position=pool[Math.floor(Math.random()*pool.length)]??spawn
+      const pool=valid.length?valid:fallback,position=pool[Math.floor(randomGeneration()*pool.length)]??spawn
       this.all.push({...position,...spec,done:false})
       this.colliders.push({id:'touhou:furnace_wreck',x:position.x,y:position.y,s:1,seed:spec.variant,halfWidth:30,halfThick:7,blockBullets:false})
     }

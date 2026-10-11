@@ -1,3 +1,4 @@
+import { randomVisual } from '../core/simulation/random'
 import { CONFIG } from './config'
 import type { DoorSlot } from './tilemap'
 
@@ -21,28 +22,28 @@ export function createRoomTexture(doors: readonly DoorSlot[] = []): HTMLCanvasEl
     for (let row = 0; row < roomRows; row++) {
       const x = col * tile
       const y = row * tile
-      const shade = 34 + ((Math.random() * 8) | 0)
+      const shade = 34 + ((randomVisual() * 8) | 0)
       ctx.fillStyle = `rgb(${shade},${shade + 3},${shade + 8})`
       ctx.fillRect(x, y, tile, tile)
 
       // 细噪点
-      const dots = 2 + ((Math.random() * 3) | 0)
+      const dots = 2 + ((randomVisual() * 3) | 0)
       for (let i = 0; i < dots; i++) {
-        const v = shade + 8 + ((Math.random() * 10) | 0)
+        const v = shade + 8 + ((randomVisual() * 10) | 0)
         ctx.fillStyle = `rgba(${v},${v + 4},${v + 10},0.5)`
-        ctx.fillRect(x + ((Math.random() * tile) | 0), y + ((Math.random() * tile) | 0), 2, 2)
+        ctx.fillRect(x + ((randomVisual() * tile) | 0), y + ((randomVisual() * tile) | 0), 2, 2)
       }
 
       // 偶尔一块碎石 / 裂纹
-      if (Math.random() < 0.18) {
+      if (randomVisual() < 0.18) {
         ctx.strokeStyle = 'rgba(0,0,0,0.28)'
         ctx.lineWidth = 1
         ctx.beginPath()
-        const sx = x + 8 + Math.random() * (tile - 16)
-        const sy = y + 8 + Math.random() * (tile - 16)
+        const sx = x + 8 + randomVisual() * (tile - 16)
+        const sy = y + 8 + randomVisual() * (tile - 16)
         ctx.moveTo(sx, sy)
-        ctx.lineTo(sx + 6 * (Math.random() - 0.5), sy + 5)
-        ctx.lineTo(sx + 10 * (Math.random() - 0.5), sy + 9)
+        ctx.lineTo(sx + 6 * (randomVisual() - 0.5), sy + 5)
+        ctx.lineTo(sx + 10 * (randomVisual() - 0.5), sy + 9)
         ctx.stroke()
       }
     }

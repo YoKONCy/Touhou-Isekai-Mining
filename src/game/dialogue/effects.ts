@@ -43,7 +43,7 @@ export function applyEffect(effect: DialogueEffect, profile: CharacterProfile): 
       profile.setFlag(effect.key, effect.value ?? true)
       break
     case 'giveItem':
-      profile.inventory.add(effect.item, effect.qty ?? 1)
+      if(profile.inventory.add(effect.item, effect.qty ?? 1)>0&&profile.location.scene==='base')profile.discovery.unlock(effect.item)
       break
     case 'equipSlot': {
       const qty = effect.qty ?? 1
@@ -56,6 +56,7 @@ export function applyEffect(effect: DialogueEffect, profile: CharacterProfile): 
         // 非 quick* 前缀即装备槽（类型联合在运行时已排除快捷槽）
         profile.equipment.set(effect.slot as EquipSlot, effect.item)
       }
+      if(profile.location.scene==='base')profile.discovery.unlock(effect.item)
       break
     }
     case 'heal':

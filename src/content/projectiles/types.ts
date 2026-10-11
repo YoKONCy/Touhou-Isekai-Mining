@@ -41,12 +41,23 @@ export interface ProjectileDef {
   damage: number
   /** 成功命中后施加的状态，来源按状态 id 合并。 */
   onHitStatus?: StatusDefinition
+  /** 命中但直接伤害被抗性完全抵消时，仍允许施加附着状态。 */
+  statusOnBlockedHit?: boolean
   /** 穿过房内瓦片与摆件障碍，仍在飞出地图或寿命耗尽时消失；缺省为 false。 */
   pierceObstacles?: boolean
   /** 穿过房内矿石和摆件，但仍由墙体及封闭门回收。 */
   ignoreRoomObstacles?: boolean
   /** 特殊弹种可声明最长存活秒数；缺省持续飞行，由墙体、障碍或战斗命中回收。 */
   life?: number
+  /** 实际飞行距离上限，不受减速对时间的影响。 */
+  maxDistance?: number
+  /** 撞墙、达到射程或命中后留下地面危险区；消弹不触发。 */
+  groundImpact?: { radius:number; duration:number; damage:number; interval:number }
+  /** 命中反馈由弹种声明，火焰弹不沿用毒液的绿色湿溅。 */
+  hitColor?: string
+  impactSound?: 'fire'
+  /** 延迟死亡弹幕已经发出后允许开门，但不能被自动清场净化吞掉。 */
+  surviveRoomClear?: boolean
   /** 螺旋弹围绕出生点旋转并持续外扩，速度为径向速度。 */
   spiral?: { angularSpeed: number; initialRadius: number; angularDecay?: number }
   /** 滞留毛团升起时不造成伤害，升起后等待触发；命中一次即消失。 */

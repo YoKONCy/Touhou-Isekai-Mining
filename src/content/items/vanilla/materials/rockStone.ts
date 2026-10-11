@@ -16,7 +16,6 @@ const ICON = svgIcon(`<svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg
 const def: ItemDef = {
   id: ROCK_STONE_ID,
   kind: 'material',
-  tier: 1,
   color: '#7d838c',
   hi: '#aeb4bc',
   text: '#b8bec6',

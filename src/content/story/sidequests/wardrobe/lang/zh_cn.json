@@ -1,0 +1,14 @@
+{
+  "story.wardrobe.s1": "这件还能穿，总算有衣服换了。",
+  "story.wardrobe.s2": "别往床上堆。把那几根旧木杆递给我。",
+  "story.wardrobe.s3": "你是要做衣架吗？",
+  "story.wardrobe.s4": "绑根横杆而已，总比让你把这里堆成旧衣摊强。",
+  "story.wardrobe.s5": "灵梦用旧木杆和绳子扎起一副简陋衣架，摆在床铺旁。",
+  "story.wardrobe.completed": "基地添置了简陋衣架。",
+  "base.wardrobe.name": "简陋衣架",
+  "base.wardrobe.text": "挑一身今天想穿的衣服。",
+  "ui.wardrobe.eyebrow": "旧营 · 换衣处",
+  "ui.wardrobe.hint": "时装不改变装备属性。",
+  "ui.wardrobe.selected": "正在穿着",
+  "ui.wardrobe.wear": "换上这套"
+}

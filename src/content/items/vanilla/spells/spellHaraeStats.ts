@@ -2,8 +2,7 @@ import type { ItemDef } from '../../types'
 
 /** 符卡时间统一为秒，半径为像素。 */
 export const stats = {
-  rarity: 2,
-  tier: 2,
+  grade: 2,
   maxStack: 1,
   equipSlot: 'spellA',
   spell: {

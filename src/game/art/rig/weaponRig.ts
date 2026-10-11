@@ -13,6 +13,9 @@ import { items } from '../../../content/items/registry'
 import type { WeaponMotionView } from '../../../content/items/types'
 
 export interface RigWeaponOpts {
+  mirrored?: boolean
+  flipVertical?: boolean
+  recoil?: number
   drawProgress?: number
   bowPull?: number
   bowReleaseProgress?: number

@@ -2,27 +2,32 @@ import { getItemDef } from '../shared/itemDefs'
 import type { Slot } from '../shared/inventory'
 import type { InventorySlotAccess, ItemSlotKey } from './inventorySlots'
 import type { ItemId } from '../shared/itemDefs'
+import { ref, shallowRef } from 'vue'
 
 type Stack=NonNullable<Slot>
 interface Gesture {id:number;button:0|2;mode:'gather'|'right'|'distribute'|'transfer';startX:number;startY:number;last:ItemSlotKey|null;origin:ItemSlotKey;filter:ItemId|null;visited:Map<ItemSlotKey,HTMLElement>;moved:boolean}
 interface Options {slots:InventorySlotAccess;containers:string;enabled?:()=>boolean;changed:()=>void;begin:()=>void;notify?:(key:string)=>void;moved?:(from:ItemSlotKey,to:ItemSlotKey,stack:Stack,start?:{x:number;y:number})=>void}
-let active:{enabled:()=>boolean}|null=null
+let active:{enabled:()=>boolean;cancel:()=>void}|null=null
 export const isInventoryMouseOpen=()=>active?.enabled()??false
+export const cancelInventoryMouse=():void=>{active?.cancel()}
 
 /** MC 拿放与 Mouse Tweaks 扫格由同一个状态机处理，仓库和背包不再各自拆堆。 */
 export function inventoryMouse(o:Options){
+  const selection=shallowRef<ItemSlotKey|null>(null),touchMoving=ref(false),amount=ref(1)
+  let touchPending:{id:number;key:ItemSlotKey;el:HTMLElement;x:number;y:number;moved:boolean}|null=null
   let cursor:Stack|null=null,source:ItemSlotKey|null=null,snapshot:Map<ItemSlotKey,Slot>|null=null
   let gesture:Gesture|null=null,ghost:HTMLElement|null=null,hovered:ItemSlotKey|null=null
   let pointerPoint={x:0,y:0}
   let lastDown:{key:ItemSlotKey;id:ItemId|null;shift:boolean;time:number}|null=null,ignoreClickUntil=0
-  const enabled=()=>o.enabled?.()??true,session={enabled}
+  const enabled=()=>o.enabled?.()??true,session={enabled,cancel}
   const keyOf=(el:HTMLElement|null):ItemSlotKey|null=>{const key=el?.dataset.drop as ItemSlotKey|undefined;return key&&o.slots.keys(true).includes(key)?key:null}
   const under=(x:number,y:number)=>document.elementFromPoint(x,y) as HTMLElement|null
   const element=(el:HTMLElement|null)=>el?.closest<HTMLElement>('[data-drop]')??null
   const inPanel=(el:HTMLElement|null)=>!!el?.closest(o.containers)
-  const capacity=(key:ItemSlotKey,id:ItemId)=>key.startsWith('eq:')?1:getItemDef(id).maxStack
-  const same=(a:Slot,b:Slot)=>a?.id===b?.id&&a?.qty===b?.qty
+  const capacity=(key:ItemSlotKey,id:ItemId)=>o.slots.capacity(key,id)
+  const same=(a:Slot,b:Slot)=>a?.id===b?.id&&a?.qty===b?.qty&&a?.durability===b?.durability
   function redraw(){
+    o.slots.interaction?.(cursor !== null)
     if(cursor){
       if(!ghost){ghost=document.createElement('div');ghost.className='drag-ghost hold-ghost mouse-cursor';document.body.appendChild(ghost);document.body.classList.add('holding-item')}
       if(ghost.dataset.item!==cursor.id){
@@ -41,13 +46,13 @@ export function inventoryMouse(o:Options){
   function take(key:ItemSlotKey,n:number):Stack|null{
     const s=o.slots.get(key);if(!s||!o.slots.canTake(key))return null
     const qty=Math.min(n,s.qty);if(qty<=0)return null
-    if(!o.slots.set(key,s.qty>qty?{id:s.id,qty:s.qty-qty}:null))return null
-    return {id:s.id,qty}
+    if(!o.slots.set(key,s.qty>qty?{...s,qty:s.qty-qty}:null))return null
+    return {...s,qty}
   }
   function deposit(key:ItemSlotKey,s:Stack,n:number):number{
     const dst=o.slots.get(key);if(!o.slots.accepts(key,s.id)||dst&&dst.id!==s.id)return 0
     const qty=Math.min(n,s.qty,capacity(key,s.id)-(dst?.qty??0));if(qty<=0)return 0
-    return o.slots.set(key,{id:s.id,qty:(dst?.qty??0)+qty})?qty:0
+    return o.slots.set(key,{...s,qty:(dst?.qty??0)+qty})?qty:0
   }
   function pick(key:ItemSlotKey,n:number){
     const before=new Map(o.slots.keys(true).map(k=>[k,o.slots.get(k)?{...o.slots.get(k)!}:null]))
@@ -65,7 +70,7 @@ export function inventoryMouse(o:Options){
       cursor={...dst};source=key;redraw();return true
     }
     const put=deposit(key,cursor,n);if(!put)return false
-    if(source)o.moved?.(source,key,{id:cursor.id,qty:put},pointerPoint)
+    if(source)o.moved?.(source,key,{...cursor,qty:put},pointerPoint)
     cursor.qty-=put;if(!cursor.qty)cursor=null
     redraw();return true
   }
@@ -76,18 +81,18 @@ export function inventoryMouse(o:Options){
     for(const filled of [true,false])for(const target of targets){
       if(!remain)break
       const dst=o.slots.get(target);if(filled?dst?.id!==s.id:!!dst)continue
-      const put=deposit(target,{id:s.id,qty:remain},remain)
-      if(put)o.moved?.(key,target,{id:s.id,qty:put})
+      const put=deposit(target,{...s,qty:remain},remain)
+      if(put)o.moved?.(key,target,{...s,qty:put})
       remain-=put
     }
     const moved=before-remain
-    if(moved){o.slots.set(key,s.qty>moved?{id:s.id,qty:s.qty-moved}:null);redraw()}
+    if(moved){o.slots.set(key,s.qty>moved?{...s,qty:s.qty-moved}:null);redraw()}
     return moved
   }
   function collect(key?:ItemSlotKey){
     if(!cursor&&key){const s=o.slots.get(key);if(s)pick(key,s.qty)}
     if(!cursor)return
-    const id=cursor.id,cap=getItemDef(id).maxStack
+    const id=cursor.id,cap=source?capacity(source,id):getItemDef(id).maxStack
     // 双击先收未满堆，再收满堆；已穿戴装备不参与材料归并。
     for(const partial of [true,false])for(const k of o.slots.keys()){
       const s=o.slots.get(k);if(!s||s.id!==id||(s.qty<cap)!==partial||!cursor||cursor.qty>=cap)continue
@@ -96,6 +101,8 @@ export function inventoryMouse(o:Options){
     redraw()
   }
   function cancel(){
+    touchPending=null;touchMoving.value=false;selection.value=null
+    document.querySelectorAll('.touch-selected').forEach(el=>el.classList.remove('touch-selected'))
     gesture=null;lastDown=null;clearPreview()
     if(!cursor)return
     const original={...cursor},targets=[...(source?[source]:[]),...o.slots.keys()]
@@ -106,16 +113,39 @@ export function inventoryMouse(o:Options){
     }
     if(cursor.qty>0&&snapshot){
       // 交换后的剩余物品无处归还时撤回整个拿放事务，保证满包换装也不吞物。
-      for(const [key,s] of snapshot)if(!same(o.slots.get(key),s))o.slots.set(key,s)
+      for(const [key,s] of snapshot){
+        const current=o.slots.get(key)
+        // 背包不暂停世界，归还光标时不能回滚同一装备在此期间消耗的耐久。
+        const restore=current&&s&&current.id===s.id&&current.qty===s.qty&&current.durability!==undefined&&s.durability!==undefined
+          ?{...s,durability:Math.min(current.durability,s.durability)}:s
+        if(!same(current,restore))o.slots.set(key,restore)
+      }
       o.notify?.('ui.mouse.rollback')
     }else if(cursor.qty>0){cursor=original;redraw();return}
     cursor=null;redraw()
   }
+  /** 落地或销毁的数量同步扣除快照，撤回拿放事务时不会复活这些物品。 */
+  function deductSnapshot(id:ItemId,qty:number,preferred?:ItemSlotKey){
+    if(!snapshot)return
+    let left=qty
+    const keys=[...(preferred?[preferred]:[]),...snapshot.keys()]
+    for(const key of new Set(keys)){
+      if(!left)break
+      const stack=snapshot.get(key);if(stack?.id!==id)continue
+      const count=Math.min(left,stack.qty)
+      snapshot.set(key,stack.qty>count?{...stack,qty:stack.qty-count}:null);left-=count
+    }
+  }
+  function destroy(key:ItemSlotKey){
+    const stack=o.slots.get(key)
+    if(!enabled()||!stack||!o.slots.canTake(key)||!o.slots.set(key,null))return false
+    deductSnapshot(stack.id,stack.qty,key)
+    gesture=null;lastDown=null;clearPreview();redraw();return true
+  }
   function drop(n:number){
     if(!cursor)return false
-    const id=cursor.id,qty=Math.min(n,cursor.qty);if(!o.slots.drop({id,qty}))return false
-    // 从归还快照中扣除已经落地的数量，后续撤回交换也不会复制已丢出的物品。
-    if(snapshot){let left=qty;for(const [key,s] of snapshot){if(!left)break;if(s?.id!==id)continue;const count=Math.min(left,s.qty);snapshot.set(key,s.qty>count?{id,qty:s.qty-count}:null);left-=count}}
+    const id=cursor.id,qty=Math.min(n,cursor.qty);if(!o.slots.drop({...cursor,qty}))return false
+    deductSnapshot(id,qty)
     cursor.qty-=qty;if(!cursor.qty)cursor=null
     redraw();return true
   }
@@ -126,7 +156,13 @@ export function inventoryMouse(o:Options){
   }
   function onDown(e:PointerEvent){
     if(!enabled()||e.button!==0&&e.button!==2||!(e.target instanceof Element)||e.target.closest('.item-hover-card'))return
+    if(e.target.closest('[data-inventory-action]')&&inPanel(e.target as HTMLElement))return
     const el=element(e.target as HTMLElement),key=keyOf(el)
+    // 触屏在松手时选中，滑动由滚动容器接管，绝不按下即拿走物品。
+    if(e.pointerType==='touch'){
+      if(key&&inPanel(el)&&!touchPending)touchPending={id:e.pointerId,key,el:el!,x:e.clientX,y:e.clientY,moved:false}
+      return
+    }
     if(!key&&!cursor)return
     if(key&&!inPanel(el))return
     pointerPoint={x:e.clientX,y:e.clientY}
@@ -153,6 +189,10 @@ export function inventoryMouse(o:Options){
   }
   function onMove(e:PointerEvent){
     if(!enabled())return
+    if(e.pointerType==='touch'){
+      if(touchPending?.id===e.pointerId&&Math.hypot(e.clientX-touchPending.x,e.clientY-touchPending.y)>10)touchPending.moved=true
+      return
+    }
     // 空手划过时只记录快捷键目标，不查询整页高亮，也不强制读取命中布局。
     if(!cursor&&!gesture){hovered=keyOf(element(e.target instanceof Element?e.target as HTMLElement:null));return}
     position(e.clientX,e.clientY);const el=element(under(e.clientX,e.clientY)),key=keyOf(el)
@@ -171,10 +211,22 @@ export function inventoryMouse(o:Options){
     else if(g.mode==='gather'){
       const s=o.slots.get(key);if(!s||s.id!==g.filter)return
       if(e.shiftKey)transfer(key)
-      else if(cursor){const got=take(key,getItemDef(cursor.id).maxStack-cursor.qty);if(got){cursor.qty+=got.qty;redraw()}}
+      else if(cursor){const cap=source?capacity(source,cursor.id):getItemDef(cursor.id).maxStack;const got=take(key,cap-cursor.qty);if(got){cursor.qty+=got.qty;redraw()}}
     }else if(cursor)place(key,1,false)
   }
   function onUp(e:PointerEvent){
+    if(e.pointerType==='touch'){
+      const pending=touchPending;if(!pending||pending.id!==e.pointerId)return
+      touchPending=null
+      if(pending.moved||!enabled()||Math.hypot(e.clientX-pending.x,e.clientY-pending.y)>10)return
+      e.preventDefault();e.stopImmediatePropagation();ignoreClickUntil=performance.now()+400
+      pointerPoint={x:e.clientX,y:e.clientY}
+      if(cursor){if(!place(pending.key,cursor.qty))reject(pending.el);touchMoving.value=!!cursor}
+      else {o.begin();selection.value=pending.key;amount.value=o.slots.get(pending.key)?.qty??1}
+      document.querySelectorAll('.touch-selected').forEach(el=>el.classList.remove('touch-selected'))
+      if(selection.value)pending.el.classList.add('touch-selected')
+      o.changed();return
+    }
     const g=gesture;if(!g||g.id!==e.pointerId)return
     e.preventDefault();e.stopImmediatePropagation();gesture=null;clearPreview();ignoreClickUntil=performance.now()+300
     if(g.moved)lastDown=null
@@ -189,12 +241,12 @@ export function inventoryMouse(o:Options){
       if(!cursor&&!hovered)return
       e.preventDefault();e.stopImmediatePropagation();o.begin()
       if(cursor)drop(e.ctrlKey?Infinity:1)
-      else if(hovered){const s=o.slots.get(hovered),qty=s?(e.ctrlKey?s.qty:1):0;if(s&&o.slots.canTake(hovered)&&o.slots.drop({id:s.id,qty})){take(hovered,qty);redraw()}}
+      else if(hovered){const s=o.slots.get(hovered),qty=s?(e.ctrlKey?s.qty:1):0;if(s&&o.slots.canTake(hovered)&&o.slots.drop({...s,qty})){take(hovered,qty);redraw()}}
     }else if(!e.ctrlKey&&!cursor&&hovered&&/^Digit[1-6]$/.test(e.code)){
       const digit=Number(e.code.slice(-1)),target=(digit<=3?`eq:${['weaponA','weaponB','pick'][digit-1]}`:`quick:${digit-4}`) as ItemSlotKey
       if(target===hovered)return
       const a=o.slots.get(hovered),b=o.slots.get(target)
-      if(!a||!o.slots.canTake(hovered)||!o.slots.accepts(target,a.id)||a.qty>capacity(target,a.id)||b&&!o.slots.accepts(hovered,b.id)||!b&&!o.slots.canTake(hovered))return
+      if(!a||!o.slots.canTake(hovered)||!o.slots.accepts(target,a.id)||a.qty>capacity(target,a.id)||b&&(!o.slots.accepts(hovered,b.id)||b.qty>capacity(hovered,b.id))||!b&&!o.slots.canTake(hovered))return
       e.preventDefault();e.stopImmediatePropagation();o.begin()
       if(o.slots.set(target,a)){o.slots.set(hovered,b);redraw()}
     }
@@ -203,7 +255,13 @@ export function inventoryMouse(o:Options){
   const onCancel=()=>{lastDown=null;cancel()}
   const onContext=(e:MouseEvent)=>{if(enabled()&&e.target instanceof Element&&(cursor||e.target.closest(o.containers)))e.preventDefault()}
   return {
+    selection,amount,touchMoving,
+    selectedStack:()=>cursor??(selection.value?o.slots.get(selection.value):null),
+    touchTake:()=>{const key=selection.value;if(!enabled()||cursor||!key)return false;const ok=pick(key,Math.max(1,Math.floor(amount.value)));touchMoving.value=ok;if(ok)position(pointerPoint.x,pointerPoint.y);return ok},
+    touchTransfer:()=>{const key=selection.value;if(!enabled()||cursor||!key)return false;return transfer(key,Math.max(1,Math.floor(amount.value)))>0},
+    touchDrop:()=>{const key=selection.value,s=key?o.slots.get(key):null;if(!enabled()||cursor||!key||!s||!o.slots.canTake(key))return false;const qty=Math.max(1,Math.min(s.qty,Math.floor(amount.value)));if(!o.slots.drop({...s,qty}))return false;take(key,qty);redraw();return true},
     holding:()=>!!cursor,
+    destroy,
     cancel,
     act:(key:ItemSlotKey)=>{if(cursor||gesture)return false;lastDown=null;const ok=o.slots.perform(key);if(ok)redraw();return ok},
     mount(){

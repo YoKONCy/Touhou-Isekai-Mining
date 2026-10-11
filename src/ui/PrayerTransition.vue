@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { randomVisual } from '../core/simulation/random'
 import { drawReimuPrayer, loadReimuPrayerAssets } from '../game/art/rig/reimuCelRig'
 
 const props = defineProps<{ destination: string; failed: boolean }>()
@@ -15,7 +16,7 @@ const tips = props.failed ? [
   '矿营里的设施可以靠近后按 F 调查。',
   '空装备槽也能切换：空手和矿镐不是同一种招式。'
 ]
-const tip = tips[Math.floor(Math.random() * tips.length)]
+const tip = tips[Math.floor(randomVisual() * tips.length)]
 let frame = 0
 let disposed = false
 let motionPreference: MediaQueryList | undefined

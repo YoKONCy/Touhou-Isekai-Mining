@@ -10,13 +10,17 @@
  */
 import { computed } from 'vue'
 import { findItemDef, type ItemId } from '../shared/itemDefs'
+import { t } from '../i18n'
 
-const props = defineProps<{ id: ItemId | null | undefined; size?: number }>()
+const props = defineProps<{ id: ItemId | null | undefined; size?: number;durability?:number;showDurability?:boolean }>()
 
 const def = computed(() => (props.id ? findItemDef(props.id) : null))
 const px = computed(() => `${props.size ?? 36}px`)
 const svgMarkup = computed(() => (def.value?.icon.type === 'svg' ? def.value.icon.svg : ''))
 const imgSrc = computed(() => (def.value?.icon.type === 'image' ? def.value.icon.src : null))
+const maxDurability=computed(()=>def.value?.durability)
+const remaining=computed(()=>Math.max(0,Math.min(maxDurability.value??0,props.durability??maxDurability.value??0)))
+const durabilityRatio=computed(()=>remaining.value/Math.max(1,maxDurability.value??1))
 </script>
 
 <template>
@@ -27,15 +31,21 @@ const imgSrc = computed(() => (def.value?.icon.type === 'image' ? def.value.icon
     <img v-else-if="imgSrc" class="icon-host icon-img" :src="imgSrc" draggable="false" alt="" />
     <!-- 未知物品占位（已卸载 MOD 的容错） -->
     <span v-else class="icon-host icon-unknown">?</span>
+    <span v-if="showDurability&&maxDurability!==undefined" class="durability-track" :class="{low:durabilityRatio<=.2,empty:remaining===0}" role="progressbar" :aria-label="t('ui.stats.durability')" :aria-valuemin="0" :aria-valuemax="maxDurability" :aria-valuenow="remaining"><i :style="{width:`${durabilityRatio*100}%`}"></i></span>
   </div>
 </template>
 
 <style scoped>
 .item-icon {
+  position:relative;
   display: flex;
   align-items: center;
   justify-content: center;
 }
+.durability-track{position:absolute;left:14%;right:14%;bottom:-3px;height:3px;border:1px solid #787158;background:#14171d;box-shadow:0 1px 2px #0009;pointer-events:none;box-sizing:content-box;line-height:0}
+.durability-track>i{display:block;height:100%;background:#9caf73;box-shadow:inset 0 1px #dbe3b766}
+.durability-track.low>i{background:#c18b58}
+.durability-track.empty{border-color:#6f5145;background:#211918}
 .icon-host {
   display: block;
   width: 100%;

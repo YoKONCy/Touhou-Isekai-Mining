@@ -55,6 +55,10 @@ export interface CaveArtVariation {
 }
 
 export interface BiomeDef {
+  /** 独立环境管线仍按群系分派，不把楼层判断散落到绘制代码。 */
+  environment?: 'old_hell'
+  /** 内容尚待设计的环境层不继承旧矿洞的怪物和奖励房宝箱；可单独声明自然采集物。 */
+  emptyContent?: boolean
   /** 静态地表材质，未来群系可独立配置色板与细节密度。 */
   floorStyle?: BiomeFloorStyle
   /** 普通矿洞群系复用同一渲染底板，差异由材质和装饰组合表达。 */
@@ -65,12 +69,24 @@ export interface BiomeDef {
   id: BiomeId
   /** 敌人投放预算 */
   enemyBudget: BiomeEnemyBudget
+  /** 群系独立怪池，避免楼层门槛重叠时混入其他生态。 */
+  enemyIds?: readonly ContentId[]
+  /** 未清场、有岩浆的房间按模拟时间定时补充敌人。 */
+  lavaEncounter?: { enemyId:ContentId; interval:readonly [number,number] }
+  /** 整层规划额外精英，预留必出房间名额；重访与续战不重新摇号。 */
+  eliteEncounter?:{enemyId:ContentId;guaranteedRoom:RoomKind;roomChance:number;maxPerFloor:number}
   /** 不同楼层仅配置普通房平均预算，刷新机制与距离曲线共用。 */
   floorEnemyAverages?: Readonly<Record<number, number>>
   /** 指定楼层末间预算，仍复用同一个刷怪流程。 */
   floorExitBudgets?: Readonly<Record<number, readonly [number, number]>>
   /** 各房型矿脉格数量区间 [min,max] */
   oreRange: Record<RoomKind, readonly [number, number]>
+  /** 限定自然矿池，缺省使用所有满足楼层门槛的矿种。 */
+  mineralIds?: readonly ContentId[]
+  /** 整个房间只判定一次；命中后在可接近的岩浆岸边投放少量矿，不设保底。 */
+  lavaBankMinerals?: { roomChance:number; count:readonly [number,number] }
+  /** 干燥特殊环境的自然采集配置；不会顺带继承水坑、菌类或旧植被。 */
+  gatherSpawns?: readonly { item:ContentId; chance:number; count:readonly [number,number]; placement?:'lava_bank' }[]
   /** 自由标签（筛选/事件条件用） */
   tags?: string[]
 }

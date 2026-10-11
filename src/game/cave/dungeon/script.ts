@@ -32,6 +32,8 @@ export interface ScriptedAmbient {
 }
 
 export interface ScriptedRoomSpec {
+  /** 教学搜索摆件的固定落点，仍使用正式摆件的碰撞与绘制定义。 */
+  searchProps?: Array<{ id: string; x: number; y: number; s?: number; ref?: string }>
   /** 不生成任何矿脉/岩石（纯战斗/剧情房） */
   noOre?: boolean
   /**

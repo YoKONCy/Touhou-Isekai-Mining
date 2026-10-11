@@ -19,8 +19,8 @@ const def: EnemyDef = {
   radius: 14,
   exp: 5,
   combat: {
-    physicalResist: 12,
-    magicResist: 5,
+    physicalResist: 0,
+    magicResist: 1,
     contactDamage: 10,
     attackCd: 1.0,
     contactPad: 6,

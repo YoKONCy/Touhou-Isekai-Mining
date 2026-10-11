@@ -10,3 +10,11 @@ export const PROP_CART_WRECK_ID = 'touhou:prop_cart_wreck' as const
 export const PROP_TIMBER_COLLAPSE_ID = 'touhou:prop_timber_collapse' as const
 export const PROP_BROKEN_RAILS_ID = 'touhou:prop_broken_rails' as const
 export const PROP_ROCK_COLLAPSE_ID = 'touhou:prop_rock_collapse' as const
+/** 旧地狱建筑内的独立搜索容器，不参与前四层自然摆件投放。 */
+export const PROP_MINER_TOOLBOX_ID = 'touhou:prop_miner_toolbox' as const
+export const PROP_STORAGE_JAR_ID = 'touhou:prop_storage_jar' as const
+export const PROP_WORN_SATCHEL_ID = 'touhou:prop_worn_satchel' as const
+export const PROP_DESK_DRAWER_ID = 'touhou:prop_desk_drawer' as const
+export const PROP_OLD_WARDROBE_ID = 'touhou:prop_old_wardrobe' as const
+export const PROP_COLLAPSED_SHELF_ID = 'touhou:prop_collapsed_shelf' as const
+export const PROP_SEALED_CABINET_ID = 'touhou:prop_sealed_cabinet' as const

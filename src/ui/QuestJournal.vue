@@ -4,11 +4,12 @@ import type { QuestJournalData, QuestMaterial } from '../shared/quests'
 import { t, itemName } from '../i18n'
 import ItemIcon from './ItemIcon.vue'
 
-const props = defineProps<{ journals: readonly QuestJournalData[] }>()
-const emit = defineEmits<{ action: [id: string] }>()
-const tab = ref<'active' | 'history'>('active'), selectedId = ref<string | null>(null)
-const active = computed(() => props.journals.filter(quest => !quest.completed))
-const history = computed(() => props.journals.filter(quest => quest.completed).reverse())
+const props = withDefaults(defineProps<{ journals: readonly QuestJournalData[]; tracked?:string; actionable?:boolean }>(),{tracked:'',actionable:true})
+const emit = defineEmits<{ action: [id: string]; track:[id:string] }>()
+const category=ref<'mainline'|'side'>(props.journals.find(quest=>quest.id===props.tracked)?.category??'mainline')
+const tab = ref<'active' | 'history'>('active'), selectedId = ref<string | null>(props.tracked||null)
+const active = computed(() => props.journals.filter(quest => (quest.category??'mainline')===category.value&&!quest.completed))
+const history = computed(() => props.journals.filter(quest => (quest.category??'mainline')===category.value&&quest.completed).reverse())
 const entries = computed(() => tab.value === 'history' ? history.value : active.value)
 // 任务完成后自动选择下一项；历史详情只读，不依赖当前背包里的任务物品。
 const journal = computed(() => entries.value.find(quest => quest.id === selectedId.value) ?? entries.value[0])
@@ -19,6 +20,7 @@ const ready = (material: QuestMaterial): boolean => material.available >= materi
 <template>
   <div class="quest-layout">
     <aside class="quest-index">
+      <nav class="quest-tabs category-tabs"><button v-for="kind in (['mainline','side'] as const)" :key="kind" :class="{selected:category===kind}" @click="category=kind;selectedId=null">{{t(`ui.quests.${kind}`)}}</button></nav>
       <nav class="quest-tabs" :aria-label="t('ui.camp.quest_lists')">
         <button type="button" :class="{ selected: tab === 'active' }" :aria-pressed="tab === 'active'" @click="tab = 'active'; selectedId = null">{{ t('ui.camp.active_quests') }}<span>{{ active.length }}</span></button>
         <button type="button" :class="{ selected: tab === 'history' }" :aria-pressed="tab === 'history'" @click="tab = 'history'; selectedId = null">{{ t('ui.camp.history_quests') }}<span>{{ history.length }}</span></button>
@@ -33,6 +35,7 @@ const ready = (material: QuestMaterial): boolean => material.available >= materi
       <div class="quest-heading"><span>{{ journal.giver }}</span><span class="quest-status">{{ journal.status }}</span></div>
       <h2>{{ journal.title }}</h2>
       <p class="quest-summary">{{ journal.summary }}</p>
+      <button v-if="!journal.completed" class="quest-track" @click="emit('track',tracked===journal.id?'':journal.id)">{{t(tracked===journal.id?'ui.quests.untrack':'ui.quests.track')}}</button>
       <div class="objectives">
         <section v-for="(step, index) in journal.objectives" :key="step.id" class="objective" :class="{ complete: step.complete, locked: step.locked, current: step.current }">
           <span class="step-number">{{ step.complete ? '✓' : String(index + 1).padStart(2, '0') }}</span>
@@ -51,13 +54,15 @@ const ready = (material: QuestMaterial): boolean => material.available >= materi
           </div>
         </section>
       </div>
-      <footer class="quest-footer"><span>{{ journal.goal }}</span><button v-if="journal.action && !journal.completed" class="quest-action" :disabled="journal.action.disabled" @click="emit('action', journal.id)">{{ journal.action.label }}</button></footer>
+      <section v-if="journal.rewards?.length" class="quest-rewards"><h3>{{t('ui.quests.rewards')}}</h3><div v-for="(reward,index) in journal.rewards" :key="index"><ItemIcon v-if="reward.id" :id="reward.id" :size="28"/><span v-else class="reward-seal">◇</span><span>{{reward.label??(reward.id?itemName(reward.id):'')}}<small>{{t(`ui.quests.reward.${reward.kind}`)}}<template v-if="reward.quantity"> ×{{reward.quantity}}</template></small></span><i v-if="journal.completed">✓</i></div></section>
+      <footer class="quest-footer"><span>{{ journal.goal }}</span><button v-if="actionable && journal.action && !journal.completed" class="quest-action" :disabled="journal.action.disabled" @click="emit('action', journal.id)">{{ journal.action.label }}</button></footer>
     </article>
     <article v-else class="quest-sheet quest-empty"><span class="empty-bookmark" aria-hidden="true">◇</span><h2>{{ t(tab === 'history' ? 'ui.camp.history_empty' : 'ui.camp.active_empty') }}</h2><p class="quest-summary">{{ t(tab === 'history' ? 'ui.camp.history_empty_note' : 'ui.camp.active_empty_note') }}</p></article>
   </div>
 </template>
 
 <style scoped>
+.category-tabs{border-bottom:0!important;margin-bottom:4px!important;padding-bottom:0!important}.quest-track{padding:5px 10px;font:inherit;font-size:10px;color:#80633f;background:#a58a5320;border:1px solid #9f805c66;cursor:pointer;margin-bottom:12px}.quest-rewards{margin:20px 0;padding:15px 0;border-top:1px solid #9c805744}.quest-rewards h3{font-size:12px;letter-spacing:2px;color:#806b4e;font-weight:normal}.quest-rewards>div{display:flex;align-items:center;gap:9px;padding:5px 0;font-size:12px;color:#6f5b40}.quest-rewards small{display:block;font-size:9px;color:#9d855e;margin-top:4px}.quest-rewards i{font-style:normal;margin-left:auto;color:#768659}.reward-seal{display:grid;place-items:center;width:28px;color:#9e8050}
 .quest-tabs{display:flex;gap:5px;margin:0 0 19px;border-bottom:1px solid #a0875840;padding-bottom:13px}
 .quest-tabs button{flex:1;display:flex;align-items:center;justify-content:center;gap:5px;padding:7px 4px;background:#19171e55;border:1px solid #9d80553b;color:#ad9b7f;font:inherit;font-size:10px;cursor:pointer;white-space:nowrap}
 .quest-tabs button.selected{background:#a486492b;border-color:#b899655f;color:#e6c896;box-shadow:inset 0 -2px #b89965}

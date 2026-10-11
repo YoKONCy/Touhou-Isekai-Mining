@@ -8,7 +8,7 @@ import { drawSlimeWarning, drawSlimeMotion } from './slimeSignals'
 export const TRICOLOR_SLIME_ID=vanilla('slime_tricolor')
 const def:EnemyDef={
   id:TRICOLOR_SLIME_ID,ai:'charge_cycle',hp:200,radius:22,exp:20,
-  combat:{physicalResist:10,magicResist:5,contactDamage:10,attackCd:1,contactPad:6,knockback:230,recoil:140,knockbackResist:40,stunResist:0},
+  combat:{physicalResist:2,magicResist:1,contactDamage:10,attackCd:1,contactPad:6,knockback:230,recoil:140,knockbackResist:40,stunResist:0},
   palette:{body:'#7396a4',edge:'#354a55',death:'#a8aaa5',hpBar:'#c2b685'},hitMaterial:'slime',
   chargeCycle:{chaseSpeed:134,retreatSpeed:147.4,sight:420,triggerRange:180,chaseTimeout:3,windup:.5,dashSpeed:430,dashDistance:135,dashDamage:15,retreatDuration:[3,4],volley:{interval:.9,gap:.1,projectileId:VENOM_STRAIGHT_ID}},
   // 二层仅一个撤离房，固定初始化一只；权重零，所有随机刷怪路径均不会抽到。

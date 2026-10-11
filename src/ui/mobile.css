@@ -1,0 +1,154 @@
+/* 视口、安全区与触控尺寸集中定义，界面只消费规则，不判断设备型号。 */
+:root{--safe-top:env(safe-area-inset-top,0px);--safe-right:env(safe-area-inset-right,0px);--safe-bottom:env(safe-area-inset-bottom,0px);--safe-left:env(safe-area-inset-left,0px);--touch-scale:1;--touch-opacity:.82;--view-height:100dvh;--view-width:100vw}
+html,body,#app{height:var(--view-height);width:100%;overscroll-behavior:none}
+.game-root,.title-screen{height:100%!important;width:100%!important}
+input,textarea{user-select:text;-webkit-user-select:text}
+button,a,input,select,[role=button]{touch-action:manipulation}
+.orientation-notice{position:fixed;inset:0;z-index:5000;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;padding:30px;background:radial-gradient(ellipse at center,#332837,#10101b);color:#dfc99f;text-align:center}
+.orientation-notice>span{font-size:76px;color:#bda16f}.orientation-notice strong{font-size:21px;letter-spacing:3px}.orientation-notice small{font-size:12px;line-height:1.8;color:#ac9b87}
+.touch-selected{outline:2px solid #ead19a!important;outline-offset:1px;box-shadow:inset 0 0 12px #c4a67433!important}
+.touch-controls ~ .hud-modal{touch-action:pan-y}
+.mobile-console-button{display:none}
+html[data-layout=compact] .mobile-console-button{display:block;margin-bottom:12px}
+html[data-layout=compact] .display-settings input[type=checkbox]{width:22px;height:22px}
+.touch-item-detail header small{display:block;font-size:11px;font-weight:normal;margin-top:4px}
+
+/* 共用面板基线，同时覆盖横屏手机的矮视口与平板的安全区。 */
+html[data-layout=compact] .hud-modal,html[data-layout=compact] .title-hud-mask,html[data-layout=compact] .settings-mask,html[data-layout=compact] .map-mask,html[data-layout=compact] .result-mask{
+  height:var(--view-height)!important;max-height:var(--view-height)!important;
+  padding:calc(var(--safe-top) + 8px) calc(var(--safe-right) + 8px) calc(var(--safe-bottom) + 8px) calc(var(--safe-left) + 8px)!important;
+}
+html[data-layout=compact] .hud-modal button,html[data-layout=compact] .title-hud-mask button,html[data-layout=compact] .settings-mask button{min-height:40px}
+html[data-controls=touch] .game-root{cursor:auto!important}
+html[data-controls=touch] .game-canvas{touch-action:none}
+html[data-layout=compact][data-controls=desktop] .hotbar{width:max-content;max-width:calc(100% - var(--safe-left) - var(--safe-right) - 20px);min-width:0}
+html[data-layout=compact] .hud-topleft{left:calc(var(--safe-left) + 8px)!important;top:calc(var(--safe-top) + 8px)!important;transform:scale(.8);transform-origin:top left;max-height:60%}
+html[data-layout=compact] .hud-topleft .floor-frame{display:none}
+html[data-layout=compact] .hud-topleft .now-playing{display:none}
+html[data-layout=compact] .nmap{max-height:120px}
+html[data-layout=compact] .player-status{right:calc(var(--safe-right) + 8px)!important;top:calc(var(--safe-top) + 58px)!important;font-size:10px;max-width:200px;pointer-events:none}
+html[data-layout=compact] .room-toast{top:calc(var(--safe-top) + 56px)!important;font-size:12px!important;padding:7px 12px!important;max-width:55%;white-space:normal;text-align:center}
+html[data-layout=compact] .hotbar{bottom:calc(var(--safe-bottom) + 8px)!important;gap:3px!important;padding:4px!important;flex-wrap:wrap;justify-content:center;width:calc(100% - var(--safe-left) - var(--safe-right) - 480px*var(--touch-scale));max-width:440px;min-width:176px}
+html[data-layout=compact] .hotbar .cell{width:44px!important;height:44px!important;flex:none;transform:none!important}
+html[data-layout=compact] .hotbar .cell .item-icon{width:30px!important;height:30px!important}
+html[data-layout=compact] .hotbar .sep{width:3px!important;margin:0!important}
+html[data-controls=touch] .hotbar .keyhint,html[data-controls=touch] .hotbar .gtooltip,html[data-layout=compact] .hotbar .quest-hud{display:none!important}
+html[data-layout=compact] .hotbar .qty{font-size:11px}
+
+/* 搜索时留出左侧移动与中断入口，右侧的完整网格保留物品形状。 */
+html[data-layout=compact] .search-panel{top:calc(var(--safe-top) + 56px)!important;right:calc(var(--safe-right) + 10px)!important;transform:none!important;max-height:calc(var(--view-height) - var(--safe-top) - var(--safe-bottom) - 66px)!important;width:max(260px,calc(var(--search-cols)*var(--cell) + 24px))!important;max-width:calc(100% - var(--safe-left) - var(--safe-right) - 190px)!important;padding:10px!important;--cell:clamp(44px,12vh,62px)}
+html[data-layout=compact] .search-header{margin-bottom:7px!important;min-height:32px!important;gap:7px!important}
+html[data-layout=compact] .search-heading small,html[data-layout=compact] .search-legend,html[data-layout=compact] .search-help{display:none!important}
+html[data-layout=compact] .search-heading h2{font-size:15px!important;letter-spacing:1px!important}
+html[data-layout=compact] .search-close{width:40px!important;height:40px!important}
+html[data-layout=compact] .search-inspect{margin-bottom:5px!important;font-size:11px!important}
+html[data-layout=compact] .search-status{margin-top:6px!important;font-size:11px!important}
+html[data-layout=compact] .search-panel footer{gap:6px!important}
+html[data-layout=compact] .search-take,html[data-layout=compact] .search-resume{min-height:40px!important;padding:6px!important;font-size:12px!important}
+
+/* 背包、仓库只重排展示，共用格子、装备和物品事务。 */
+html[data-layout=compact] .inv-panel{width:min(960px,100%)!important;height:100%!important;max-height:100%!important;padding:10px 12px!important;overflow:auto!important}
+html[data-layout=compact] .inv-panel.ability-mode{height:100%!important;max-height:100%!important}
+html[data-layout=compact] .inv-head{flex:none;gap:8px!important;margin-bottom:8px!important;padding-bottom:5px!important}
+html[data-layout=compact] .inv-body{flex:1!important;min-height:110px;gap:12px!important;flex-direction:row!important;overflow:hidden}
+html[data-layout=compact] .rack-col{flex:none;width:200px!important;padding-right:10px!important;overflow-y:auto!important;min-height:0}
+html[data-layout=compact] .doll-stage.board{width:180px!important;min-height:160px!important;height:160px!important;max-height:160px!important}
+html[data-layout=compact] .doll-grid{grid-template-columns:repeat(3,48px)!important;grid-template-rows:repeat(4,36px)!important;padding:6px!important}
+html[data-layout=compact] .eqcell.peg{width:48px!important;height:40px!important}
+html[data-layout=compact] .bag-side{min-height:0!important;min-width:0;flex:1}
+html[data-layout=compact] .bag-viewport{height:auto!important;min-height:90px!important;flex:1!important;touch-action:pan-y}
+html[data-layout=compact] .grid{padding:8px!important}
+html[data-layout=compact] .inv-foot{flex:none;margin-top:6px!important;padding-top:5px!important;gap:6px!important}
+html[data-layout=compact] .inventory-controls,html[data-layout=compact] .trash-caption small,html[data-layout=compact] .storage-foot{display:none!important}
+html[data-layout=compact] .trash-dock{padding-left:0!important;border:0!important}
+html[data-layout=compact] .costume-options{gap:5px!important;margin-bottom:6px!important;flex:none}
+html[data-layout=compact] .costume-options .gbtn{padding:5px 9px!important;font-size:11px!important}
+html[data-layout=compact] .ability-sheet{overflow:auto!important;padding:10px!important}
+html[data-layout=compact] .ability-columns{grid-template-columns:180px minmax(0,1fr)!important;gap:12px!important;overflow:visible!important}
+html[data-layout=compact] .ability-row{grid-template-columns:minmax(0,1fr) 42px 40px 40px!important;gap:5px!important;padding:6px!important}
+html[data-layout=compact] .ability-row button{width:40px!important;height:40px!important}
+html[data-layout=compact] .storage-panel{width:min(960px,100%)!important;max-height:100%!important;padding:12px!important;border-width:4px!important}
+html[data-layout=compact] .storage-head{padding-bottom:6px!important;margin-bottom:6px!important}
+html[data-layout=compact] .storage-head h2{font-size:19px!important}
+html[data-layout=compact] .container-shelves{display:grid;grid-template-columns:1fr 1fr;gap:12px;min-height:80px;overflow:auto}
+html[data-layout=compact] .container-shelf{margin:0!important;min-width:0}
+html[data-layout=compact] .shelf-grid{grid-template-columns:repeat(auto-fit,minmax(44px,1fr))!important;gap:5px!important}
+html[data-layout=compact] .shelf-viewport{max-height:190px!important;padding:6px!important;touch-action:pan-y}
+html[data-layout=compact] .storage-slot{min-height:44px!important}
+html[data-layout=compact] .storage-bar{margin-top:8px!important;padding:5px 0!important}
+html[data-layout=compact] .bar-grid{grid-template-columns:repeat(8,minmax(40px,1fr))!important;gap:4px!important}
+html[data-layout=compact] .storage-slot kbd{display:none}
+html[data-layout=compact] .mouse-cursor{pointer-events:none;opacity:.65;transform:translateY(-30px)}
+
+/* 基地、存档、地图与剧情共用矮屏规则，保留内容滚动空间。 */
+html[data-layout=compact] .camp-panel,html[data-layout=compact] .pause-panel,html[data-layout=compact] .settings-panel,html[data-layout=compact] .save-panel,html[data-layout=compact] .map-panel,html[data-layout=compact] .result-panel,html[data-layout=compact] .wardrobe-panel,html[data-layout=compact] .floor-board{max-height:100%!important;max-width:100%!important;overflow:auto!important;touch-action:pan-y}
+html[data-layout=compact] .camp-panel{width:min(960px,100%)!important;padding:12px!important}
+html[data-layout=compact] .camp-panel>header{margin-bottom:8px!important;padding-bottom:6px!important;font-size:16px!important}
+html[data-layout=compact] .npc-layer .compact{left:50%!important;top:50%!important;transform:translate(-50%,-50%)!important;width:190px!important;max-height:90%!important}
+html[data-layout=compact] .npc-layer .compact::before{display:none}
+html[data-layout=compact] .cook-layout{grid-template-columns:minmax(220px,.8fr) minmax(260px,1fr)!important;gap:12px!important}
+html[data-layout=compact] .recipe-book{padding:14px!important;min-height:0!important}
+html[data-layout=compact] .recipe-illustration{height:90px!important;min-height:0!important}
+html[data-layout=compact] .cook-workbench{padding:12px!important;min-width:0}
+html[data-layout=compact] .production-layout{grid-template-columns:190px minmax(0,1fr)!important;gap:12px!important}
+html[data-layout=compact] .plans{max-height:240px!important;overflow:auto;min-width:0}
+html[data-layout=compact] .production-work{min-width:0!important;padding:10px!important}
+html[data-layout=compact] .work-preview{min-height:0!important}
+html[data-layout=compact] .work-preview canvas,html[data-layout=compact] .work-preview>svg{max-height:110px!important}
+html[data-layout=compact] .ingredient-tray,html[data-layout=compact] .material-tray{touch-action:pan-y}
+html[data-layout=compact] .pause-panel{padding:16px!important}
+html[data-layout=compact] .pause-panel .audio-settings{gap:10px;margin:14px 0}
+html[data-layout=compact] .pause-hint,html[data-layout=compact] .return-hint,html[data-layout=compact] .title-hint{display:none!important}
+html[data-layout=compact] .map-panel{padding:10px!important;border-width:4px!important}
+html[data-layout=compact] .records-mask{height:var(--view-height)!important;padding:calc(var(--safe-top) + 8px) calc(var(--safe-right) + 8px) calc(var(--safe-bottom) + 8px) calc(var(--safe-left) + 8px)!important}
+html[data-layout=compact] .records-panel{max-height:100%!important;padding:12px!important}
+html[data-layout=compact] .records-panel header{padding-bottom:8px!important}
+html[data-layout=compact] .records-list{padding:10px 4px!important;gap:10px!important}
+html[data-layout=compact] .record-sheet{min-height:100px!important;padding:12px!important}
+html[data-layout=compact] .records-panel footer{padding-top:8px!important}
+html[data-layout=compact] .floor-board{width:min(100%,940px)!important;max-height:100%!important;padding:12px!important;overflow:auto}
+html[data-layout=compact] .floor-cards{display:flex!important;gap:10px!important;overflow-x:auto;scroll-snap-type:x proximity;padding:8px 3px!important}
+html[data-layout=compact] .floor-card{flex:0 0 180px;min-width:0!important;scroll-snap-align:center;padding:12px!important}
+html[data-layout=compact] .floor-card .mine-sketch{height:65px!important}
+html[data-layout=compact] .floor-board footer>span{display:none}
+html[data-layout=compact] .outfit-art{height:100px!important}
+html[data-layout=compact] .outfit-card{padding:12px!important}
+html[data-layout=compact] .quest-layout{grid-template-columns:190px minmax(0,1fr)!important;min-height:0!important}
+html[data-layout=compact] .quest-index,html[data-layout=compact] .quest-sheet{padding:12px!important;min-width:0;overflow:auto}
+html[data-layout=compact] .quest-entry{padding:8px!important;min-height:48px}
+html[data-layout=compact] .quest-sheet h2{font-size:20px!important}
+html[data-layout=compact] .grill-plan{grid-template-columns:minmax(160px,.8fr) minmax(220px,1fr)!important;gap:12px!important}
+html[data-layout=compact] .grill-drawing{max-height:180px!important;overflow:hidden}
+html[data-layout=compact] .grill-cost{margin:10px 0!important}
+html[data-layout=compact] .map-head{padding-bottom:7px!important;margin-bottom:8px!important}
+html[data-layout=compact] .map-head h2{font-size:18px!important;margin-top:3px!important}
+html[data-layout=compact] .survey-record{padding:10px!important}
+html[data-layout=compact] .chart-hint,html[data-layout=compact] .map-legend .close-hint{display:none}
+html[data-layout=compact] .map-layout{grid-template-columns:minmax(0,1fr) 180px!important;gap:10px!important}
+html[data-layout=compact] .map-stage{min-height:180px!important;height:52vh!important;touch-action:none}
+html[data-layout=compact] .chart-toolbar button{min-width:44px;min-height:40px}
+html[data-layout=compact] .dlg-box{bottom:calc(var(--safe-bottom) + 8px)!important;max-height:65%;overflow:auto}
+html[data-layout=compact] .dlg-stage{padding:0 calc(var(--safe-right) + 12px) calc(var(--safe-bottom) + 8px) calc(var(--safe-left) + 12px)!important}
+html[data-layout=compact] .dlg-box{width:min(760px,94%)!important;padding:18px 20px!important;min-height:90px!important}
+html[data-layout=compact] .dlg-text{font-size:14px!important;line-height:1.7!important;letter-spacing:1px!important}
+html[data-layout=compact] .dlg-portrait{max-height:85%!important}
+html[data-layout=compact] .narration-text{font-size:16px!important;line-height:1.8!important;max-height:65vh;overflow:auto}
+html[data-layout=compact] .dlg-choice{min-height:42px;padding:9px 14px!important;font-size:13px!important}
+html[data-layout=compact] .tut-root{bottom:calc(var(--safe-bottom) + 110px)!important;max-width:65%!important;max-height:55%;overflow:auto;padding:8px 12px!important;font-size:12px!important;letter-spacing:1px!important}
+html[data-layout=compact] .tut-confirm{font-size:10px!important}
+html[data-layout=compact] .dev-console{max-height:calc(var(--view-height) - var(--safe-top) - var(--safe-bottom) - 16px)!important;overflow:auto}
+html[data-layout=compact] .dc-mask{height:var(--view-height)!important;padding:calc(var(--safe-top) + 8px) calc(var(--safe-right) + 8px) calc(var(--safe-bottom) + 8px) calc(var(--safe-left) + 8px)!important}
+html[data-layout=compact] .dc-panel{max-height:100%!important;max-width:100%!important;padding:12px!important}
+html[data-layout=compact] .dc-scroll{touch-action:pan-y}
+html[data-layout=compact] .dc-panel button{min-height:40px}
+html[data-layout=compact] .confirm-mask{height:var(--view-height)!important;padding:calc(var(--safe-top) + 8px) calc(var(--safe-right) + 8px) calc(var(--safe-bottom) + 8px) calc(var(--safe-left) + 8px)!important}
+html[data-layout=compact] .confirm-panel{max-height:100%!important;overflow:auto!important;padding:16px!important}
+html[data-controls=touch] .item-hover-card{left:calc(var(--safe-left) + 10px)!important;top:auto!important;bottom:calc(var(--safe-bottom) + 10px)!important;transform:none!important;width:min(440px,calc(100% - var(--safe-left) - var(--safe-right) - 20px))!important;max-height:calc(var(--view-height) - var(--safe-top) - var(--safe-bottom) - 20px)!important;z-index:2500;touch-action:pan-y;pointer-events:auto}html[data-controls=touch] .item-hover-card footer>span{display:none}.touch-tip-close{float:right;min-width:40px;min-height:40px;border:1px solid #9c805244;background:#d2bf9d;color:#675940;font:inherit;font-size:22px;margin-left:10px}
+html[data-layout=compact] input[type=text],html[data-layout=compact] input[type=number],html[data-layout=compact] input:not([type]),html[data-layout=compact] textarea{font-size:16px!important}
+html[data-layout=compact] .github-link{right:calc(var(--safe-right) + 10px)!important;bottom:calc(var(--safe-bottom) + 10px)!important;min-height:40px!important;padding:6px 9px!important}
+html[data-layout=compact] .github-copy small{display:none}
+html[data-layout=compact] .new-game{padding-top:calc(var(--safe-top) + 10px)!important;padding-bottom:calc(var(--safe-bottom) + 8px)!important}
+html[data-layout=compact] .title-menu{left:max(calc(var(--safe-left) + 20px),12%)!important;gap:4px!important;top:44%!important}
+html[data-layout=compact] .title-option{min-height:42px;font-size:clamp(20px,4vh,30px)!important;padding:5px!important}
+@media(max-height:480px){html[data-layout=compact] .new-game header small{display:none}html[data-layout=compact] .new-game h1{font-size:22px!important;margin-top:0!important}html[data-layout=compact] .hero-choices{min-height:100px!important;max-height:45vh!important;margin:0!important}html[data-layout=compact] .hero-label{font-size:18px!important}html[data-layout=compact] .journey-form label{margin:4px 0!important}html[data-layout=compact] .journey-actions{margin:5px 0!important}html[data-layout=compact] .hud-topleft{transform:scale(.66)}html[data-layout=compact] .search-inspect{display:none}html[data-layout=compact] .search-panel{--cell:44px}}
+@media(max-width:650px){html[data-layout=compact] .rack-col{width:165px!important}html[data-layout=compact] .doll-stage.board{width:150px!important}html[data-layout=compact] .doll-grid{grid-template-columns:repeat(3,42px)!important}html[data-layout=compact] .container-shelves{grid-template-columns:1fr}html[data-layout=compact] .cook-layout,html[data-layout=compact] .production-layout,html[data-layout=compact] .ability-columns{grid-template-columns:1fr!important}html[data-layout=compact] .bar-grid{grid-template-columns:repeat(4,minmax(40px,1fr))!important}html[data-layout=compact] .inv-head{flex-wrap:wrap}}

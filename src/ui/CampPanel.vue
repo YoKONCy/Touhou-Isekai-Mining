@@ -13,19 +13,21 @@ import QuestJournal from './QuestJournal.vue'
 import CookingPanel from './CookingPanel.vue'
 import StoragePanel from './StoragePanel.vue'
 import ProductionPanel from './ProductionPanel.vue'
+import GrillPanel from './GrillPanel.vue'
 import type { ModuleActions } from '../shared/moduleActions'
+import type { CookingMethod } from '../shared/cookingRecipes'
 
-const props=defineProps<{profile:CharacterProfile;actions:ModuleActions;kind:UIPanelKind;tick:number;anchor:{x:number;y:number}}>()
+const props=withDefaults(defineProps<{profile:CharacterProfile;actions:ModuleActions;kind:UIPanelKind;tick:number;anchor:{x:number;y:number};allowQuestActions?:boolean}>(),{allowQuestActions:true})
 const emit=defineEmits<{close:[];panel:[kind:UIPanelKind];talk:[]}>()
 const message=ref(''),selection=ref(0),revision=ref(0)
 const done=computed(()=>{void props.tick;void revision.value;return props.profile.flagBool('quest.reimu.cooking.done')})
 const repaired=computed(()=>{void props.tick;void revision.value;return props.profile.flagBool('base.pot.repaired')})
-const title=computed(()=>t(props.kind==='cooking'&&!repaired.value?'ui.cooking.maintenance_title':{npc:'story.speaker.reimu',quests:'ui.camp.journal',storage:'ui.camp.storage',cooking:'ui.cooking.title',crafting:'ui.production.crafting',furnace:'ui.production.furnace'}[props.kind as 'npc'|'quests'|'storage'|'cooking'|'crafting'|'furnace']))
+const title=computed(()=>t(props.kind==='cooking'&&!repaired.value?'ui.cooking.maintenance_title':{npc:'story.speaker.reimu',quests:'ui.camp.journal',storage:'ui.camp.storage',cooking:'ui.cooking.title',grill:'ui.cooking.grill_title',crafting:'ui.production.crafting',furnace:'ui.production.furnace'}[props.kind as 'npc'|'quests'|'storage'|'cooking'|'grill'|'crafting'|'furnace']))
 const questJournals=computed(()=>{void props.tick;void revision.value;return listQuestJournals(props.profile)})
-function act(which:'repair'|'cook',id?:string,quantity=1,complete?:(success:boolean)=>void){
+function act(which:'repair'|'cook',id?:string,quantity=1,complete?:(success:boolean)=>void,method?:CookingMethod){
   if(dialogue.isActive){complete?.(false);return}
   if(which==='cook'){
-    const result=cookSoupBatch(props.profile,id,quantity)
+    const result=cookSoupBatch(props.profile,id,quantity,props.kind==='grill'?method==='smoke'?'smoke':'grill':'pot')
     message.value=result.message;revision.value++
     if(result.ok)void saveService.autosave()
     complete?.(result.ok);return
@@ -38,7 +40,7 @@ function act(which:'repair'|'cook',id?:string,quantity=1,complete?:(success:bool
   }
 }
 function questAction(id:string):void{
-  if(dialogue.isActive)return
+  if(dialogue.isActive||!props.allowQuestActions)return
   const result=performQuestAction(props.profile,id)
   if(!result)return
   message.value=result.message;revision.value++
@@ -58,6 +60,8 @@ function furnaceClaimed(){
   const context={profile:props.profile}
   if(hasAvailableStory('furnace.claimed',context)){emit('close');playNextStory('furnace.claimed',context)}
 }
+function grillBuilt(){revision.value++;message.value=t('ui.cooking.grill_built');emit('close');playNextStory('camp.fire',{profile:props.profile})}
+function track(id:string){props.profile.setFlag('quest.tracked',id);revision.value++;if(props.allowQuestActions)void saveService.autosave();else void saveService.persistStoryFlag('quest.tracked')}
 function choose(){if(selection.value===0)emit('talk');else emit('panel','quests')}
 function key(e:KeyboardEvent){if(props.kind!=='npc')return;if(['ArrowUp','ArrowDown','KeyW','KeyS','Enter','KeyF'].includes(e.code)){e.preventDefault();e.stopImmediatePropagation();if(e.repeat)return;if(e.code==='Enter'||e.code==='KeyF')choose();else selection.value=1-selection.value}}
 onMounted(()=>window.addEventListener('keydown',key,true));onBeforeUnmount(()=>window.removeEventListener('keydown',key,true))
@@ -65,17 +69,18 @@ onMounted(()=>window.addEventListener('keydown',key,true));onBeforeUnmount(()=>w
 <template>
   <div class="camp-mask hud-modal" :class="{'npc-layer':kind==='npc'}" @click="emit('close')">
     <StoragePanel v-if="kind==='storage'" :profile="profile" :actions="actions" :tick="tick" @close="emit('close')"/>
-    <section v-else :key="kind" class="camp-panel gpanel-pop hud-panel" :class="{compact:kind==='npc','quest-panel':kind==='quests','cooking-panel':kind==='cooking','production-panel':kind==='crafting'||kind==='furnace'}" :style="kind==='npc'?{left:`${anchor.x}px`,top:`${anchor.y}px`}:undefined" @click.stop>
+    <section v-else :key="kind" class="camp-panel gpanel-pop hud-panel" :class="{compact:kind==='npc','quest-panel':kind==='quests','cooking-panel':kind==='cooking'||kind==='grill','production-panel':kind==='crafting'||kind==='furnace'}" :style="kind==='npc'?{left:`${anchor.x}px`,top:`${anchor.y}px`}:undefined" @click.stop>
       <header v-if="kind!=='npc'"><span>{{title}}</span><button class="close-btn" @click="emit('close')" :aria-label="t('ui.camp.close')">×</button></header>
       <template v-if="kind==='npc'">
         <button class="gbtn" :class="{primary:selection===0}" @mouseenter="selection=0" @click="emit('talk')">{{t('ui.camp.talk')}}</button>
         <button class="gbtn" :class="{primary:selection===1}" @mouseenter="selection=1" @click="emit('panel','quests')">{{t('ui.camp.quests')}}</button>
       </template>
-      <QuestJournal v-else-if="kind==='quests'" :journals="questJournals" @action="questAction"/>
+      <QuestJournal v-else-if="kind==='quests'" :journals="questJournals" :tracked="String(profile.flag('quest.tracked')??'')" :actionable="allowQuestActions" @action="questAction" @track="track"/>
       <template v-else-if="kind==='cooking'">
         <CookingPanel :profile="profile" :tick="tick" :revision="revision" :repaired="repaired" :done="done" :message="message" @action="act"/>
       </template>
       <ProductionPanel v-else-if="kind==='crafting'||kind==='furnace'" :profile="profile" :tick="tick+revision" :mode="kind" @repaired="furnaceRepaired" @claimed="furnaceClaimed"/>
+      <GrillPanel v-else-if="kind==='grill'" :profile="profile" :tick="tick" :revision="revision" :message="message" @built="grillBuilt" @action="act"/>
 
       <p v-if="message&&kind!=='cooking'" class="feedback" role="status">{{message}}</p>
     </section>

@@ -1,3 +1,4 @@
+import { randomVisual } from '../../core/simulation/random'
 /**
  * 批次 F⑤ · 时空乱流氛围浮层
  *
@@ -55,19 +56,19 @@ export class WarpField {
 
   /** 生成一条光带：归一化漂移，寿命 9~15s，淡入淡出 */
   private makeBand(delay: number, seed: number): WarpBand {
-    const a = Math.random() * Math.PI * 2
-    const sp = 0.008 + Math.random() * 0.012
+    const a = randomVisual() * Math.PI * 2
+    const sp = 0.008 + randomVisual() * 0.012
     return {
-      nx: 0.15 + Math.random() * 0.7,
-      ny: 0.15 + Math.random() * 0.7,
+      nx: 0.15 + randomVisual() * 0.7,
+      ny: 0.15 + randomVisual() * 0.7,
       vx: Math.cos(a) * sp,
       vy: Math.sin(a) * sp,
-      len: 180 + Math.random() * 220,
-      angle: -0.5 + Math.random() * 1.0,
+      len: 180 + randomVisual() * 220,
+      angle: -0.5 + randomVisual() * 1.0,
       life: 0,
-      maxLife: 9 + Math.random() * 6,
+      maxLife: 9 + randomVisual() * 6,
       delay,
-      alpha: 0.08 + Math.random() * 0.06,
+      alpha: 0.08 + randomVisual() * 0.06,
       seed
     }
   }
@@ -87,7 +88,7 @@ export class WarpField {
       if (b.nx > 1.2) b.nx = -0.2
       if (b.ny < -0.2) b.ny = 1.2
       if (b.ny > 1.2) b.ny = -0.2
-      if (b.life >= b.maxLife) Object.assign(b, this.makeBand(2 + Math.random() * 5, Math.random() * 100))
+      if (b.life >= b.maxLife) Object.assign(b, this.makeBand(2 + randomVisual() * 5, randomVisual() * 100))
     }
   }
 

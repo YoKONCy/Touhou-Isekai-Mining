@@ -1,4 +1,7 @@
+import { randomGeneration, randomVisual,withVisualSeed } from '../../core/simulation/random'
+import { canvasViewport,drawVisibleLayer } from '../../core/rendering/Viewport'
 import type { BackgroundRock } from './floorDecorations'
+import type { HangingFruitAnchor } from './cavePlants'
 import type { TileMap } from '../tilemap'
 import type { Prop } from './props'
 import { circleHitsProp } from './props'
@@ -9,65 +12,61 @@ import { drawForgetMeNot } from '../../content/items/vanilla/materials/fourthFlo
 import { drawMineSprite, type MineSprite } from './mineAssets'
 import { drawMineDetail } from './mineDetails'
 import { canGatherResource } from '../../shared/mineResources'
+import { TILE_FLOOR,TILE_LAVA } from '../tilemap'
+import type { BiomeDef } from '../../content/biomes/types'
+import type { RoomTerrain } from '../cave/dungeon/types'
+import { drawOldHellGather } from './oldHellResourceArt'
+import { renderCollectible } from './collectibleHighlight'
 
-export interface NatureGather { x:number; y:number; item:string; qty:number; done:boolean }
+export interface NatureGather { x:number; y:number; item:string; qty:number; done:boolean; hanging?:{topY:number;seed:number} }
 export interface WoodRemnant { x:number; y:number; kind:number; hp:number }
-interface Puddle { x:number; y:number; rx:number; ry:number; path:Path2D }
+interface Puddle { x:number; y:number; rx:number; ry:number; points:Array<[number,number]>; path?:Path2D }
 /** 每房创建一次，所有随机几何固定；采集点与废木不占用承重支架。 */
 export class CaveNature {
   readonly gathers:NatureGather[]=[]
   readonly wood:WoodRemnant[]=[]
   private puddles:Puddle[]=[]
   get waterBanks(): readonly { x: number; y: number; rx: number; ry: number }[] { return this.puddles }
-  private floor:HTMLCanvasElement
-  constructor(map:TileMap,props:readonly Prop[],spawnX:number,spawnY:number,floor=1,backgroundRocks:readonly BackgroundRock[]=[]){
+  private floor:HTMLCanvasElement|null=null
+  private width=0
+  private height=0
+  private map:TileMap
+  private props:readonly Prop[]
+  private spawnX:number
+  private spawnY:number
+  private floorSeed=0
+  private floorTiles:number[]=[]
+  private dryFloor=false
+  constructor(map:TileMap,props:readonly Prop[],spawnX:number,spawnY:number,floor=1,backgroundRocks:readonly BackgroundRock[]=[],gatherConfig?:{spawns:NonNullable<BiomeDef['gatherSpawns']>;terrain?:RoomTerrain}){
     const width=map.cols*map.tile,height=map.rows*map.tile
-    this.floor=document.createElement('canvas');this.floor.width=width*2;this.floor.height=height*2
-    const g=this.floor.getContext('2d')!
-    g.scale(2,2)
+    this.map=map;this.props=props;this.spawnX=spawnX;this.spawnY=spawnY;this.width=width;this.height=height
+    this.floorSeed=Math.floor(randomVisual()*0x100000000);this.floorTiles=map.captureSimulation().tiles
+    if(gatherConfig){
+      this.dryFloor=true
+      this.generateDryGathers(gatherConfig.spawns,gatherConfig.terrain)
+      return
+    }
     const valid=(x:number,y:number,r=22)=>Math.hypot(x-spawnX,y-spawnY)>110&&[[0,0],[r,0],[-r,0],[0,r],[0,-r]].every(([dx,dy])=>!map.solidAtWorld(x+dx,y+dy))&&!props.some(p=>circleHitsProp(x,y,r,p))
-    const spot=()=>{for(let i=0;i<80;i++){const x=150+Math.random()*(width-300),y=160+Math.random()*(height-320);if(valid(x,y))return {x,y}}return null}
+    const spot=()=>{for(let i=0;i<80;i++){const x=150+randomGeneration()*(width-300),y=160+randomGeneration()*(height-320);if(valid(x,y))return {x,y}}return null}
     // 每块背景岩石独立摇号一次；成功后在它附近找一处可达空位，只生成一株。
     if(canGatherResource(FLAX_ID,floor))for(const rock of backgroundRocks){
-      if(Math.random()>=.15)continue
+      if(randomGeneration()>=.15)continue
       for(let k=0;k<12;k++){
         const a=k/12*Math.PI*2,radius=rock.radius??26,x=rock.x+Math.cos(a)*radius,y=rock.y+Math.sin(a)*radius*.65
         if(!valid(x,y,10)||this.gathers.some(p=>Math.hypot(p.x-x,p.y-y)<24))continue
         this.gathers.push({x,y,item:FLAX_ID,qty:1,done:false});break
       }
     }
-    if(canGatherResource(DROOP_FRUIT_ID,floor))for(const rock of backgroundRocks){
-      if(!rock.fruitAnchor||Math.random()>=.25)continue
-      const x=rock.fruitAnchor.x+3,y=rock.fruitAnchor.y+21
-      if(valid(x,y,9)&&!this.gathers.some(p=>Math.hypot(p.x-x,p.y-y)<22))this.gathers.push({x,y,item:DROOP_FRUIT_ID,qty:1,done:false})
-    }
-    for(let i=0,n=1+Math.floor(Math.random()*3);i<n;i++){
+    for(let i=0,n=1+Math.floor(randomGeneration()*3);i<n;i++){
       const p=spot();if(!p||this.puddles.some(q=>Math.hypot(q.x-p.x,q.y-p.y)<180))continue
-      const rx=40+Math.random()*34,ry=15+Math.random()*15
+      const rx=40+randomGeneration()*34,ry=15+randomGeneration()*15
       if(!valid(p.x,p.y,rx+10))continue
       const points:Array<[number,number]>=[]
-      for(let k=0;k<16;k++){const a=k/16*Math.PI*2,r=0.86+Math.random()*0.22;points.push([p.x+Math.cos(a)*rx*r,p.y+Math.sin(a)*ry*r])}
-      const path=new Path2D();path.moveTo((points[15][0]+points[0][0])/2,(points[15][1]+points[0][1])/2)
-      points.forEach((v,k)=>{const b=points[(k+1)%16];path.quadraticCurveTo(v[0],v[1],(v[0]+b[0])/2,(v[1]+b[1])/2)});path.closePath()
-      this.puddles.push({...p,rx,ry,path})
-      // 湿泥外岸、凹入岩唇、透出砂底的浅滩与暗水深处逐层叠加。
-      g.strokeStyle='#29292135';g.lineWidth=13;g.stroke(path)
-      g.save();g.translate(0,2);g.strokeStyle='#aba08042';g.lineWidth=3;g.stroke(path);g.restore()
-      g.strokeStyle='#35425199';g.lineWidth=1.5;g.stroke(path)
-      g.save();g.clip(path)
-      const gradient=g.createRadialGradient(p.x-rx*.15,p.y-ry*.2,3,p.x,p.y,rx)
-      gradient.addColorStop(0,'#293843');gradient.addColorStop(.5,'#394951');gradient.addColorStop(.85,'#535a59');gradient.addColorStop(1,'#70665c')
-      g.fillStyle=gradient;g.fillRect(p.x-rx*1.2,p.y-ry*1.2,rx*2.4,ry*2.4)
-      for(let k=0;k<38;k++){
-        const a=Math.random()*Math.PI*2,rr=.68+Math.random()*.35,x=p.x+Math.cos(a)*rx*rr,y=p.y+Math.sin(a)*ry*rr
-        g.fillStyle=k%3?'#a2936c3b':'#162c304f';g.beginPath();g.ellipse(x,y,.7+Math.random()*2.1,.5+Math.random(),a,0,Math.PI*2);g.fill()
-      }
-      g.strokeStyle='#b0bba42b';g.lineWidth=.7;g.beginPath();g.moveTo(p.x-rx*.6,p.y+ry*.45);g.bezierCurveTo(p.x-rx*.2,p.y+ry*.7,p.x+rx*.15,p.y+ry*.3,p.x+rx*.5,p.y+ry*.42);g.stroke();g.restore()
-      // 苔藓贴岸成片但留缺口，避免给每个水坑套上同样的绿圈。
-      for(let k=0;k<10;k++){const a=k*0.58,x=p.x+Math.cos(a)*(rx+8),y=p.y+Math.sin(a)*(ry+6);if(!valid(x,y,8))continue;g.save();g.globalAlpha=.65;drawMineSprite(g,'moss-patch',x-12,y-4,24+k%4*3,9);g.restore()}
-      if(canGatherResource(MUSHROOM_ID,floor)&&Math.random()<0.33){for(let k=0,n=1+Math.floor(Math.random()*2);k<n;k++){const x=p.x-rx+15+k*26,y=p.y+ry+12;if(valid(x,y,9))this.gathers.push({x,y,item:MUSHROOM_ID,qty:1,done:false})}}
+      for(let k=0;k<16;k++){const a=k/16*Math.PI*2,r=0.86+randomGeneration()*0.22;points.push([p.x+Math.cos(a)*rx*r,p.y+Math.sin(a)*ry*r])}
+      this.puddles.push({...p,rx,ry,points})
+      if(canGatherResource(MUSHROOM_ID,floor)&&randomGeneration()<0.33){for(let k=0,n=1+Math.floor(randomGeneration()*2);k<n;k++){const x=p.x-rx+15+k*26,y=p.y+ry+12;if(valid(x,y,9))this.gathers.push({x,y,item:MUSHROOM_ID,qty:1,done:false})}}
       // 每个已生成水坑独立摇号一次；成功后只找一个岸边位置，不叠在其他采集点上。
-      if(canGatherResource(FRAGRANT_MUSHROOM_ID,floor)&&Math.random()<0.08){
+      if(canGatherResource(FRAGRANT_MUSHROOM_ID,floor)&&randomGeneration()<0.08){
         for(let k=0;k<12;k++){
           const a=k/12*Math.PI*2,x=p.x+Math.cos(a)*(rx+16),y=p.y+Math.sin(a)*(ry+14)
           if(!valid(x,y,12)||this.gathers.some(q=>Math.hypot(q.x-x,q.y-y)<25))continue
@@ -76,7 +75,7 @@ export class CaveNature {
       }
     }
     if(canGatherResource(CLOVER_ID,floor))for(const puddle of this.puddles){
-      if(Math.random()>=.01)continue
+      if(randomGeneration()>=.01)continue
       for(let k=0;k<12;k++){
         const a=k/12*Math.PI*2,x=puddle.x+Math.cos(a)*(puddle.rx+14),y=puddle.y+Math.sin(a)*(puddle.ry+12)
         if(!valid(x,y,9)||this.gathers.some(p=>Math.hypot(p.x-x,p.y-y)<22))continue
@@ -87,7 +86,7 @@ export class CaveNature {
     if (canGatherResource(FORGET_ME_NOT_ID,floor)) {
       // 勿忘我偏向湿润岸边，概率暂定每个水坑百分之四十五；一次只生成一簇。
       for (const puddle of this.puddles) {
-        if (Math.random() >= .45) continue
+        if (randomGeneration() >= .45) continue
         for (let k = 0; k < 12; k++) {
           const a = k / 12 * Math.PI * 2, x = puddle.x + Math.cos(a) * (puddle.rx + 20), y = puddle.y + Math.sin(a) * (puddle.ry + 20)
           if (!valid(x, y, 10) || this.gathers.some(p => Math.hypot(p.x - x, p.y - y) < 26)) continue
@@ -95,25 +94,106 @@ export class CaveNature {
         }
       }
     }
-    for(let patch=0,n=2+Math.floor(Math.random()*3);patch<n;patch++){
+    if(canGatherResource(HERB_ID,floor)&&randomGeneration()<0.09){const p=spot();if(p)this.gathers.push({...p,item:HERB_ID,qty:1+Math.floor(randomGeneration()*2),done:false})}
+    if(canGatherResource(WOOD_ID,floor))for(let k=0,n=Math.floor(randomGeneration()*4);k<n;k++){const p=spot();if(p&&!this.wood.some(w=>Math.hypot(w.x-p.x,w.y-p.y)<70)&&!this.gathers.some(w=>Math.hypot(w.x-p.x,w.y-p.y)<45)&&!this.puddles.some(q=>Math.hypot(q.x-p.x,q.y-p.y)<q.rx+35))this.wood.push({...p,kind:k%3,hp:30})}
+  }
+  /** 干燥环境只生成自己声明的资源；矿格、门路、残屋与已生成采集点均避让。 */
+  private generateDryGathers(spawns:NonNullable<BiomeDef['gatherSpawns']>,terrain?:RoomTerrain):void {
+    const map=this.map,blocked=new Set(terrain?.reserved??[]),spots:Array<{x:number;y:number;bank:boolean}>=[]
+    for(const b of terrain?.buildings??[])for(let r=b.row;r<=b.row+b.height;r++)for(let c=b.col;c<b.col+b.width;c++)blocked.add(r*map.cols+c)
+    const neighbors=[[1,0],[-1,0],[0,1],[0,-1]] as const
+    for(let row=1;row<map.rows-1;row++)for(let col=1;col<map.cols-1;col++){
+      if(map.tileAt(col,row)!==TILE_FLOOR||blocked.has(row*map.cols+col))continue
+      const x=(col+.5)*map.tile,y=(row+.5)*map.tile
+      if(Math.hypot(x-this.spawnX,y-this.spawnY)<=110||this.props.some(p=>circleHitsProp(x,y,14,p)))continue
+      spots.push({x,y,bank:neighbors.some(([dc,dr])=>map.tileAt(col+dc,row+dr)===TILE_LAVA)})
+    }
+    for(const entry of spawns){
+      if(randomGeneration()>=entry.chance)continue
+      const pool=spots.filter(p=>!entry.placement||p.bank),count=entry.count[0]+Math.floor(randomGeneration()*(entry.count[1]-entry.count[0]+1))
+      for(let i=0;i<count&&pool.length;){
+        const p=pool.splice(Math.floor(randomGeneration()*pool.length),1)[0]!
+        if(this.gathers.some(g=>Math.hypot(g.x-p.x,g.y-p.y)<65))continue
+        this.gathers.push({x:p.x+(randomGeneration()-.5)*5,y:p.y+(randomGeneration()-.5)*5,item:entry.item,qty:1,done:false});i++
+      }
+    }
+  }
+
+  /** 垂藤多于旧结实岩块，每条藤独立以6%概率结果，并保证采摘位置可达。 */
+  attachHangingFruit(anchors:readonly HangingFruitAnchor[],floor:number):void {
+    if(!canGatherResource(DROOP_FRUIT_ID,floor))return
+    for(const anchor of anchors){
+      if(randomGeneration()>=.06)continue
+      // 果柄上端接藤尾；采摘判定沿用果实本身的位置，不把果实落到地上。
+      const x=anchor.x+3,y=anchor.y+21,r=9
+      if(Math.hypot(x-this.spawnX,y-this.spawnY)<=110||[[0,0],[r,0],[-r,0],[0,r],[0,-r]].some(([dx,dy])=>this.map.solidAtWorld(x+dx,y+dy)))continue
+      if(this.props.some(p=>circleHitsProp(x,y,r,p))||this.gathers.some(p=>Math.hypot(p.x-x,p.y-y)<22))continue
+      this.gathers.push({x,y,item:DROOP_FRUIT_ID,qty:1,done:false,hanging:{topY:anchor.topY,seed:anchor.seed}})
+    }
+  }
+  captureSimulation():{gathers:NatureGather[];wood:WoodRemnant[];puddles:Array<Omit<Puddle,'path'>>;floorSeed?:number;floorTiles?:number[];spawnX?:number;spawnY?:number;dryFloor?:boolean}{
+    return {gathers:this.gathers.map(p=>({...p})),wood:this.wood.map(p=>({...p})),puddles:this.puddles.map(({path,...p})=>structuredClone(p)),floorSeed:this.floorSeed,floorTiles:this.floorTiles.slice(),spawnX:this.spawnX,spawnY:this.spawnY,dryFloor:this.dryFloor}
+  }
+  restoreSimulation(state:ReturnType<CaveNature['captureSimulation']>):void{
+    this.gathers.splice(0,this.gathers.length,...state.gathers.map(p=>({...p})))
+    this.wood.splice(0,this.wood.length,...state.wood.map(p=>({...p})))
+    this.puddles=structuredClone(state.puddles);this.floor=null
+    this.floorSeed=state.floorSeed??0;this.floorTiles=state.floorTiles?.slice()??this.map.captureSimulation().tiles
+    this.spawnX=state.spawnX??this.spawnX;this.spawnY=state.spawnY??this.spawnY
+    this.dryFloor=state.dryFloor??false
+  }
+  get rasterBytes():number{return (this.floor?.width??0)*(this.floor?.height??0)*4}
+  releaseRenderResources():void {if(this.floor)this.floor.width=this.floor.height=1;this.floor=null}
+  private bakeFloor():void{
+    if(this.floor)return
+    withVisualSeed(this.floorSeed,()=>this.bakeFloorCurrent())
+  }
+  private bakeFloorCurrent():void {
+    const {map,props,spawnX,spawnY,width,height}=this
+    this.floor=document.createElement('canvas');this.floor.width=width*2;this.floor.height=height*2
+    const g=this.floor.getContext('2d')!;g.scale(2,2)
+    const originalSolid=(x:number,y:number)=>{const col=Math.floor(x/map.tile),row=Math.floor(y/map.tile);if(col<0||row<0||col>=map.cols||row>=map.rows)return true;const tile=this.floorTiles[row*map.cols+col];return tile!==0&&tile!==4}
+    const valid=(x:number,y:number,r=22)=>Math.hypot(x-spawnX,y-spawnY)>110&&[[0,0],[r,0],[-r,0],[0,r],[0,-r]].every(([dx,dy])=>!originalSolid(x+dx!,y+dy!))&&!props.some(p=>circleHitsProp(x,y,r,p))
+    const spot=()=>{for(let i=0;i<80;i++){const x=150+randomVisual()*(width-300),y=160+randomVisual()*(height-320);if(valid(x,y))return{x,y}}return null}
+    for(const p of this.puddles){const {rx,ry,points}=p
+      const path=new Path2D();path.moveTo((points[15][0]+points[0][0])/2,(points[15][1]+points[0][1])/2)
+      points.forEach((v,k)=>{const b=points[(k+1)%16];path.quadraticCurveTo(v[0],v[1],(v[0]+b[0])/2,(v[1]+b[1])/2)});path.closePath()
+      p.path=path
+      // 湿泥外岸、凹入岩唇、透出砂底的浅滩与暗水深处逐层叠加。
+      g.strokeStyle='#29292135';g.lineWidth=13;g.stroke(path)
+      g.save();g.translate(0,2);g.strokeStyle='#aba08042';g.lineWidth=3;g.stroke(path);g.restore()
+      g.strokeStyle='#35425199';g.lineWidth=1.5;g.stroke(path)
+      g.save();g.clip(path)
+      const gradient=g.createRadialGradient(p.x-rx*.15,p.y-ry*.2,3,p.x,p.y,rx)
+      gradient.addColorStop(0,'#293843');gradient.addColorStop(.5,'#394951');gradient.addColorStop(.85,'#535a59');gradient.addColorStop(1,'#70665c')
+      g.fillStyle=gradient;g.fillRect(p.x-rx*1.2,p.y-ry*1.2,rx*2.4,ry*2.4)
+      for(let k=0;k<38;k++){
+        const a=randomVisual()*Math.PI*2,rr=.68+randomVisual()*.35,x=p.x+Math.cos(a)*rx*rr,y=p.y+Math.sin(a)*ry*rr
+        g.fillStyle=k%3?'#a2936c3b':'#162c304f';g.beginPath();g.ellipse(x,y,.7+randomVisual()*2.1,.5+randomVisual(),a,0,Math.PI*2);g.fill()
+      }
+      g.strokeStyle='#b0bba42b';g.lineWidth=.7;g.beginPath();g.moveTo(p.x-rx*.6,p.y+ry*.45);g.bezierCurveTo(p.x-rx*.2,p.y+ry*.7,p.x+rx*.15,p.y+ry*.3,p.x+rx*.5,p.y+ry*.42);g.stroke();g.restore()
+      // 苔藓贴岸成片但留缺口，避免给每个水坑套上同样的绿圈。
+      for(let k=0;k<10;k++){const a=k*0.58,x=p.x+Math.cos(a)*(rx+8),y=p.y+Math.sin(a)*(ry+6);if(!valid(x,y,8))continue;g.save();g.globalAlpha=.65;drawMineSprite(g,'moss-patch',x-12,y-4,24+k%4*3,9);g.restore()}
+    }
+    for(let patch=0,n=2+Math.floor(randomVisual()*3);patch<n;patch++){
       const center=spot();if(!center)continue
-      const rx=65+Math.random()*65,ry=25+Math.random()*28
+      const rx=65+randomVisual()*65,ry=25+randomVisual()*28
       for(let k=0;k<260;k++){
-        const a=Math.random()*Math.PI*2,r=Math.sqrt(Math.random()),x=center.x+Math.cos(a)*rx*r,y=center.y+Math.sin(a)*ry*r
+        const a=randomVisual()*Math.PI*2,r=Math.sqrt(randomVisual()),x=center.x+Math.cos(a)*rx*r,y=center.y+Math.sin(a)*ry*r
         if(!valid(x,y,4)||this.puddles.some(p=>Math.pow((x-p.x)/(p.rx+8),2)+Math.pow((y-p.y)/(p.ry+5),2)<1))continue
-        if(Math.random()<r*.4||Math.sin(x*.09+y*.06)> .8)continue
-        const size=1.3+Math.random()*4
-        const angle=Math.random()
+        if(randomVisual()<r*.4||Math.sin(x*.09+y*.06)> .8)continue
+        const size=1.3+randomVisual()*4
+        const angle=randomVisual()
         if(k%6===0){g.save();g.translate(x,y);g.rotate(angle*.3);g.globalAlpha=.72;drawMineSprite(g,'moss-patch',-size*3,-size, size*6,size*2.5);g.restore()}
       }
     }
-    if(canGatherResource(HERB_ID,floor)&&Math.random()<0.09){const p=spot();if(p)this.gathers.push({...p,item:HERB_ID,qty:1+Math.floor(Math.random()*2),done:false})}
-    if(canGatherResource(WOOD_ID,floor))for(let k=0,n=Math.floor(Math.random()*4);k<n;k++){const p=spot();if(p&&!this.wood.some(w=>Math.hypot(w.x-p.x,w.y-p.y)<70)&&!this.gathers.some(w=>Math.hypot(w.x-p.x,w.y-p.y)<45)&&!this.puddles.some(q=>Math.hypot(q.x-p.x,q.y-p.y)<q.rx+35))this.wood.push({...p,kind:k%3,hp:30})}
   }
   renderGround(g:CanvasRenderingContext2D,time:number):void{
-    g.drawImage(this.floor,0,0,this.floor.width/2,this.floor.height/2)
+    if(this.dryFloor)return
+    this.bakeFloor()
+    drawVisibleLayer(g,this.floor!,this.width,this.height,canvasViewport(g))
     for(const p of this.puddles){
-      g.save();g.clip(p.path)
+      g.save();g.clip(p.path!)
       // 两组错峰滴水波纹由岸边向外扩散，避免所有水坑同心同步。
       for(let i=0;i<2;i++){
         const phase=(time*.32+p.x*.017+i*.53)%1,alpha=Math.sin(phase*Math.PI)*.19
@@ -130,9 +210,27 @@ export class CaveNature {
       g.restore()
     }
   }
-  renderGather(g:CanvasRenderingContext2D,p:NatureGather):void{
+  /** 果实悬在藤尾，沿用垂藤的摆动相位；不绘制地面土堆和贴地阴影。 */
+  private renderHangingFruit(g:CanvasRenderingContext2D,p:NatureGather,time:number):void {
+    if(p.done)return
+    const sway=p.hanging?Math.sin(time*.6+p.hanging.seed)*.018*(p.y-21-p.hanging.topY):0
+    g.save();g.translate(sway,0)
+    if(drawMineSprite(g,'plant-droop-fruit',p.x-16,p.y-28,32,32,undefined,0,true)){g.restore();return}
+    g.translate(p.x,p.y);g.lineJoin='round'
+    g.strokeStyle='#6d7951';g.lineWidth=1.4;g.beginPath();g.moveTo(-3,-21);g.bezierCurveTo(0,-19,-5,-13,0,-9);g.stroke()
+    g.fillStyle='#5a7faa';g.strokeStyle='#303d4c';g.lineWidth=.9;g.beginPath();g.moveTo(0,-10);g.bezierCurveTo(10,-13,10,0,0,6);g.bezierCurveTo(-10,-1,-8,-12,0,-10);g.fill();g.stroke()
+    g.fillStyle='#99b8d1';g.beginPath();g.ellipse(-3,-6,2,4,-.2,0,Math.PI*2);g.fill();g.strokeStyle='#c0ced780';g.lineWidth=.7;g.beginPath();g.moveTo(-1,-3);g.lineTo(3,-4);g.moveTo(1,0);g.lineTo(4,-1);g.stroke()
+    g.fillStyle='#80945b';g.beginPath();g.moveTo(-2,-16);g.quadraticCurveTo(4,-21,7,-15);g.quadraticCurveTo(2,-12,-2,-16);g.fill();g.restore()
+  }
+  renderGather(g:CanvasRenderingContext2D,p:NatureGather,time=0):void{
+    if(p.done){this.renderGatherCurrent(g,p,time);return}
+    renderCollectible(g,p,{x:p.x-44,y:p.y-66,width:88,height:84},c=>this.renderGatherCurrent(c,p,time))
+  }
+  private renderGatherCurrent(g:CanvasRenderingContext2D,p:NatureGather,time:number):void{
+    if(!p.done&&drawOldHellGather(g,p.item,p.x,p.y,time))return
+    if(p.item===DROOP_FRUIT_ID){this.renderHangingFruit(g,p,time);return}
     if(!p.done){
-      const name:MineSprite=p.item===DROOP_FRUIT_ID?'plant-droop-fruit':p.item===MUSHROOM_ID?'plant-mushroom-0':p.item===FRAGRANT_MUSHROOM_ID?'plant-mushroom-1':p.item===FORGET_ME_NOT_ID?'plant-forget-me-not':p.item===CLOVER_ID?'plant-clover':p.item===FLAX_ID?'plant-flax':'plant-herb'
+      const name:MineSprite=p.item===MUSHROOM_ID?'plant-mushroom-0':p.item===FRAGRANT_MUSHROOM_ID?'plant-mushroom-1':p.item===FORGET_ME_NOT_ID?'plant-forget-me-not':p.item===CLOVER_ID?'plant-clover':p.item===FLAX_ID?'plant-flax':'plant-herb'
       const width=p.item===MUSHROOM_ID||p.item===FRAGRANT_MUSHROOM_ID?30:32,height=width*(name.startsWith('plant-mushroom')?.75:1)
       if(drawMineDetail(g,name,p.x,p.y+4,width,height,true))return
     }
@@ -141,15 +239,6 @@ export class CaveNature {
     // 共同基座：松土暗托＋椭圆贴地影（ink 细描边，与摆件同一光照语言）
     g.fillStyle='rgba(10,7,6,0.3)';g.beginPath();g.ellipse(0,2,11,3.4,0,0,Math.PI*2);g.fill()
     g.fillStyle='#3a2f26';g.beginPath();g.ellipse(0,1,8.5,2.6,0,0,Math.PI*2);g.fill()
-    if(p.item===DROOP_FRUIT_ID){
-      g.strokeStyle='#6d7951';g.lineWidth=1.4;g.beginPath();g.moveTo(-3,-21);g.bezierCurveTo(0,-19,-5,-13,0,-9);g.stroke()
-      if(!p.done){
-        g.fillStyle='#5a7faa';g.strokeStyle='#303d4c';g.lineWidth=.9;g.beginPath();g.moveTo(0,-10);g.bezierCurveTo(10,-13,10,0,0,6);g.bezierCurveTo(-10,-1,-8,-12,0,-10);g.fill();g.stroke()
-        g.fillStyle='#99b8d1';g.beginPath();g.ellipse(-3,-6,2,4,-.2,0,Math.PI*2);g.fill();g.strokeStyle='#c0ced780';g.lineWidth=.7;g.beginPath();g.moveTo(-1,-3);g.lineTo(3,-4);g.moveTo(1,0);g.lineTo(4,-1);g.stroke()
-        g.fillStyle='#80945b';g.beginPath();g.moveTo(-2,-16);g.quadraticCurveTo(4,-21,7,-15);g.quadraticCurveTo(2,-12,-2,-16);g.fill()
-      }
-      g.restore();return
-    }
     if(p.done){
       // 采集后：一小截残茬＋暗坑
       g.strokeStyle='#282735';g.lineWidth=1
@@ -235,6 +324,10 @@ export class CaveNature {
     g.restore()
   }
   renderWood(g:CanvasRenderingContext2D,p:WoodRemnant):void{
+    if(p.hp<=0){this.renderWoodCurrent(g,p);return}
+    renderCollectible(g,p,{x:p.x-42,y:p.y-54,width:84,height:72},c=>this.renderWoodCurrent(c,p))
+  }
+  private renderWoodCurrent(g:CanvasRenderingContext2D,p:WoodRemnant):void{
     if(drawMineDetail(g,(['wood-remnant-0','wood-remnant-1','wood-remnant-2'] as const)[p.kind%3]!,p.x,p.y+4,60,42,p.hp>0))return
     g.save();g.translate(p.x,p.y);g.fillStyle='#15152244';g.beginPath();g.ellipse(0,2,27,7,0,0,Math.PI*2);g.fill()
     g.strokeStyle='#302735';g.lineWidth=1.5;g.lineJoin='round'

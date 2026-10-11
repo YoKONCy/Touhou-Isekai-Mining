@@ -1,11 +1,17 @@
+import { SnapshotCodec, type StateFields } from '../core/simulation/snapshot'
+import { MotionHistory } from '../core/simulation/interpolation'
+import { nextEntityId, emitSimulationEvent } from '../core/simulation/events'
+import { randomCombat, randomVisual } from '../core/simulation/random'
 import { CONFIG } from './config'
 import type { Collider, TileMap } from './tilemap'
 import { sfx } from './audio/Sfx'
+import type { RoomNavigation } from './cave/RoomNavigation'
 import { circleHitsProp, resolveCircleProps, type Prop } from './art/props'
 import { enemies } from '../content/enemies/registry'
 import type { EnemyDef } from '../content/enemies/types'
 import { SLIME_BLUE_ID } from '../content/enemies/vanilla/ids'
 import { StatusEffects, type StatusDefinition } from '../shared/statusEffects'
+import { applyFlatResistance,calculateDamage,calculateRangedDamage,type DamageInput,type DamageKind } from '../shared/combat'
 import {
   getBrain,
   type AIState,
@@ -16,6 +22,7 @@ import {
   type ShotRequest,
   type WindupKind
 } from './enemyAi'
+const NO_STATUS_DAMAGE:readonly number[]=[]
 
 /**
  * 敌人实体（工程化 L2 后：实体是壳，内容在注册表）。
@@ -34,14 +41,17 @@ export type { ShotRequest } from './enemyAi'
 export type { PlayerLike } from './enemyAi'
 
 export class Enemy implements Collider, EnemyAiHost {
+  readonly entityId = nextEntityId('enemy')
+  protected readonly motionHistory = new MotionHistory()
+
   readonly effects = new StatusEffects(this)
   heal(amount: number): number {
     if (!this.alive) return 0
-    const before = this.hp; this.hp = Math.min(this.maxHp, this.hp + Math.max(0, amount)); return this.hp - before
+    const before = this.hp; this.hp = Math.min(this.maxHp, this.hp + Math.max(0, amount)); const healed = this.hp - before; if(healed>0)emitSimulationEvent({type:'heal',target:this.entityId,amount:healed});return healed
   }
-  addStatus(definition: StatusDefinition, source: string): void {
+  addStatus(definition: StatusDefinition, source: string,duration=definition.duration): void {
     if (!this.alive) return
-    this.effects.add(definition, source)
+    this.effects.add(definition, source,duration)
     if (definition.incapacitated || definition.skillsDisabled) {
       this.pendingShots.length = 0; this.volleyLeft = 0; this.burstPending = false
       this.windup = 'none'
@@ -54,6 +64,10 @@ export class Enemy implements Collider, EnemyAiHost {
   /** 本怪选用的 AI 模板（构造时按 def.ai 取定） */
   private readonly brain: EnemyBrain
   allies: readonly Enemy[] = []
+  aiMemory: Record<string, unknown> = {}
+  /** 房间负责多目标选择；技能自身锁定的角度仍由原 AI 保存。 */
+  targetId: string | null = null
+  private readonly contactTargetTimers = new Map<string, number>()
   x: number
   y: number
   vx = 0
@@ -62,11 +76,18 @@ export class Enemy implements Collider, EnemyAiHost {
   get hitX():number { return this.x+(this.def.hurtbox?.offsetX??0) }
   get hitY():number { return this.y+(this.def.hurtbox?.offsetY??0) }
   get hitRadius():number { return this.def.hurtbox?.radius??this.r }
+  get renderPosition():{x:number;y:number} {
+    const offset=this.motionHistory.offset(this.x,this.y)
+    return {x:this.x+offset.x,y:this.y+offset.y}
+  }
   containsHit(x:number,y:number,padding=0):boolean { return Math.hypot(this.hitX-x,this.hitY-y)<=this.hitRadius+padding }
   hp: number
   /** 最大生命值（调试刷怪可覆盖，正常内容构造时按 Def 定死） */
   maxHp: number
   alive = true
+  private stoneGuardRemaining = 0
+  private stoneGuardCooldown = 0
+  get isStoneGuard():boolean { return this.stoneGuardRemaining > 0 }
   /** 死亡压扁动画计时（>0 表示尸体还在播动画） */
   dying = 0
 
@@ -82,7 +103,7 @@ export class Enemy implements Collider, EnemyAiHost {
 
   // 以下 AI 节拍字段对 AI 模板公开（EnemyAiHost 接口）
   ai: AIState = 'idle'
-  aiTimer = 0.5 + Math.random()
+  aiTimer = 0.5 + randomCombat()
   wanderX = 0
   wanderY = 0
   /** 房间进场或剧情刷怪后的强制警戒，无视视野距离。 */
@@ -112,12 +133,12 @@ export class Enemy implements Collider, EnemyAiHost {
   /** 受击独立击退冲量（不被目标速度立刻拉回） */
   private kickX = 0
   private kickY = 0
-  private phase = Math.random() * Math.PI * 2
+  private phase = randomVisual() * Math.PI * 2
   private spriteFacing:'left'|'right'|'down'='down'
 
   // —— kite_shooter 模板专属：放风筝横移方向 + 两种开火节拍 ——
   strafeDir = 1
-  strafeTimer = 1 + Math.random() * 1.5
+  strafeTimer = 1 + randomCombat() * 1.5
   straightCd: number
   ringCd: number
   /** 本帧产生的开火请求（RoomRuntime 每帧 drain） */
@@ -168,11 +189,12 @@ export class Enemy implements Collider, EnemyAiHost {
   private prevY: number
   /** 本房立体摆件表（每帧 update 开头刷新；供导航采样与移动推挤，J 批次） */
   private nearProps: readonly Prop[] = []
+  private navigation:RoomNavigation|null=null
 
   // —— 批次 F④：hop 视觉状态机（压→弹→滞→砸，纯表现层） ——
   // AI/vx/vy/moveEntity/碰撞完全不读写本组字段；由 moveEntity 后的实测速度驱动。
   private hopState: 'rest' | 'squash' | 'air' | 'land' = 'rest'
-  private hopT = 0.2 + Math.random() * 0.3
+  private hopT = 0.2 + randomVisual() * 0.3
   /** 当前身体离地高度（render 读） */
   private hopH = 0
   /** 当前横向/纵向挤压系数（1=不变形） */
@@ -181,6 +203,10 @@ export class Enemy implements Collider, EnemyAiHost {
   /** 触角弹簧滞后（起跳下沉、落地反弹），update 积分 / render 读取 */
   private antLag = 0
   private antLagV = 0
+
+  get simulationKind():string{return 'enemy'}
+  captureSimulation(codec: SnapshotCodec): StateFields { return codec.capture(this, ['def', 'brain', 'allies', 'nearProps', 'navigation', 'motionHistory', 'dashGhost', 'rigMotion', 'phase', 'spriteFacing', 'trail', 'hopState', 'hopT', 'hopH', 'hopSx', 'hopSy', 'antLag', 'antLagV', 'dashTrail', 'animator', 'lean', 'teleportFx', 'haloProgress', 'haloAlpha']) }
+  restoreSimulation(state: StateFields, codec: SnapshotCodec): void { codec.restore(this, state); this.motionHistory.reset() }
 
   constructor(x: number, y: number, id: string = SLIME_BLUE_ID, definition?: EnemyDef) {
     this.x = x
@@ -195,18 +221,18 @@ export class Enemy implements Collider, EnemyAiHost {
     this.prevY = y
     // 远程怪首次开火错峰，避免一屋子毒液史莱姆同帧齐射
     const kite = this.def.kite
-    this.straightCd = kite ? 0.4 + Math.random() * kite.firstFireJitter : 0
-    if(this.def.turret)this.straightCd=.4+Math.random()*.4
-    this.ringCd = kite ? 2.6 + Math.random() * 2 : 0
+    this.straightCd = kite ? 0.4 + randomCombat() * kite.firstFireJitter : 0
+    if(this.def.turret)this.straightCd=.4+randomCombat()*.4
+    this.ringCd = kite ? 2.6 + randomCombat() * 2 : 0
     // 猛扑怪首次攻击错峰，避免进房零反应时间就吃扑
     if (this.def.ai === 'pouncer' || this.def.guardian) {
-      this.contactCd = 1.2 + Math.random() * 1.4
+      this.contactCd = 1.2 + randomCombat() * 1.4
       if (this.def.guardian) this.guardianDashCd = this.contactCd
     }
     // 升速怪首次爆发错峰（间隔随机化在配置区间内）
     const surge = this.def.chaser?.surge
     if (surge) {
-      this.surgeCd = surge.minInterval + Math.random() * (surge.maxInterval - surge.minInterval)
+      this.surgeCd = surge.minInterval + randomCombat() * (surge.maxInterval - surge.minInterval)
     }
   }
 
@@ -275,7 +301,16 @@ export class Enemy implements Collider, EnemyAiHost {
     return out
   }
 
-  update(dt: number, map: TileMap, player: PlayerLike, props: readonly Prop[] = [], allies: readonly Enemy[] = []): void {
+  advanceContactTargets(dt: number): void {
+    if(this.stunT>0)return
+    for (const [id, time] of this.contactTargetTimers) {
+      if (time <= dt) this.contactTargetTimers.delete(id)
+      else this.contactTargetTimers.set(id, time - dt)
+    }
+  }
+  update(dt: number, map: TileMap, player: PlayerLike, props: readonly Prop[] = [], allies: readonly Enemy[] = [], navigation?:RoomNavigation): void {
+    this.navigation=navigation??null
+    this.motionHistory.capture(this.x, this.y)
     this.allies = allies
     this.effects.update(dt)
     // J 批次：本房立体摆件（横线碰撞箱）——导航采样与移动推挤都要认识它
@@ -296,6 +331,16 @@ export class Enemy implements Collider, EnemyAiHost {
       this.dying -= dt
       return
     }
+
+    // 缩石期间固定在受击点，退出后才开始完整冷却；状态伤害照常推进。
+    if (this.isStoneGuard) {
+      this.stoneGuardRemaining=Math.max(0,this.stoneGuardRemaining-dt)
+      if(!this.isStoneGuard)this.stoneGuardCooldown=this.def.stoneGuard?.cooldown??0
+      this.vx=this.vy=this.kickX=this.kickY=0
+      this.pendingShots.length=0;this.prevX=this.x;this.prevY=this.y
+      return
+    }
+    this.stoneGuardCooldown=Math.max(0,this.stoneGuardCooldown-dt)
 
     // 挖矿爆怪出土中：钉在出生点（AI/击退/位移/hop 全冻结），只推进预警动画时钟
     if (this.emergeT > 0) {
@@ -342,11 +387,13 @@ export class Enemy implements Collider, EnemyAiHost {
     // 远程怪贴到直角墙或障碍夹角时边移动边完成射击，不清除攻击前摇。
     this.escapeRangedCorner(map, player, dt)
     if(this.def.movement==='stationary'){this.vx=this.vy=this.kickX=this.kickY=0;return}
-    if(this.def.movement==='flying'){
+    if(this.def.movement==='flying'||this.def.visual.gait==='walk'){
       const vx=this.pounceState==='windup'?Math.cos(this.pounceAng)*20:this.vx
       const vy=this.pounceState==='windup'?Math.sin(this.pounceAng)*20:this.vy
       // 方向切换留出缓冲区，避免斜飞或贴墙时在两套帧间抖动。
-      if(Math.hypot(vx,vy)>8){
+      if(this.def.visual.gait==='walk'){
+        if(Math.abs(vx)>8)this.spriteFacing=vx<0?'left':'right'
+      }else if(Math.hypot(vx,vy)>8){
         if(Math.abs(vy)>Math.abs(vx)*1.25)this.spriteFacing='down'
         else if(Math.abs(vx)>Math.abs(vy)*.85)this.spriteFacing=vx<0?'left':'right'
       }
@@ -388,7 +435,7 @@ export class Enemy implements Collider, EnemyAiHost {
     }
 
     // 批次 F④：hop 视觉时钟（moveEntity 后的实测速度驱动，绝不回写 AI/速度）
-    if (this.def.guardian && (this.pounceState !== 'none' || this.guardianReboundProgress >= 0)) {
+    if (this.def.visual.gait==='walk'||this.def.guardian && (this.pounceState !== 'none' || this.guardianReboundProgress >= 0)) {
       this.hopH = 0; this.hopSx = this.hopSy = 1; this.hopState = 'rest'; this.hopT = .2
     } else if(this.def.movement!=='flying')this.updateHop(dt, actualSpeed)
 
@@ -462,7 +509,7 @@ export class Enemy implements Collider, EnemyAiHost {
       case 'land': {
         if (this.hopT <= 0) {
           this.hopState = 'rest'
-          this.hopT = fast ? 0.12 + Math.random() * 0.22 : 0.35 + Math.random() * 0.4
+          this.hopT = fast ? 0.12 + randomVisual() * 0.22 : 0.35 + randomVisual() * 0.4
           break
         }
         const k = 1 - this.hopT / landDur
@@ -531,12 +578,35 @@ export class Enemy implements Collider, EnemyAiHost {
     return { x: Math.cos(fixed) * speed, y: Math.sin(fixed) * speed }
   }
 
+  navigateTo(map:TileMap,x:number,y:number,speed:number):{x:number;y:number} {
+    if(!this.navigation)return this.wantVelocity(map,Math.atan2(y-this.y,x-this.x),speed)
+    this.wantSpeed=speed
+    const point=this.navigation.waypoint(this.x,this.y,x,y,this.r,this.def.movement==='flying')
+    if(!point)return {x:0,y:0}
+    const dx=point.x-this.x,dy=point.y-this.y,distance=Math.hypot(dx,dy)
+    if(distance<1)return {x:0,y:0}
+    const velocity=Math.min(speed,distance*8)
+    return {x:dx/distance*velocity,y:dy/distance*velocity}
+  }
+
+  hasLineOfSight(map:TileMap,x:number,y:number):boolean {
+    const steps=Math.max(1,Math.ceil(Math.hypot(x-this.x,y-this.y)/(map.tile*.35)))
+    for(let i=1;i<=steps;i++){
+      const px=this.x+(x-this.x)*i/steps,py=this.y+(y-this.y)*i/steps
+      if(map.blocksProjectiles(map.worldToCol(px),map.worldToRow(py),this.def.movement==='flying'))return false
+      if(this.nearProps.some(prop=>circleHitsProp(px,py,1,prop)))return false
+    }
+    return true
+  }
+
   private get rangedMoveSpeed(): number {
     return this.def.kedama?.speed ?? this.def.kite?.kiteSpeed ?? (this.def.chargeCycle?.volley ? this.def.chargeCycle.retreatSpeed : 0)
   }
 
   /** 允许短暂接近玩家，优先离开双轴受阻的位置；脱身方向保持一段时间，避免反复横跳。 */
   private escapeRangedCorner(map: TileMap, player: PlayerLike, dt: number): void {
+    // 建筑导航已给出完整绕路方向，不能被短距离随机脱困覆盖。
+    if(this.navigation)return
     const speed = this.rangedMoveSpeed
     if (!speed || !player.alive || player.untargetable || (this.ai !== 'kite' && this.ai !== 'chase') || this.pounceState !== 'none') return
     const probe = Math.max(12, this.r * .8)
@@ -584,8 +654,8 @@ export class Enemy implements Collider, EnemyAiHost {
       angToPlayer - (Math.PI / 2) * this.strafeDir,
       angToPlayer + 2.35 * this.strafeDir,
       angToPlayer - 2.35 * this.strafeDir,
-      Math.random() * Math.PI * 2,
-      Math.random() * Math.PI * 2
+      randomCombat() * Math.PI * 2,
+      randomCombat() * Math.PI * 2
     ]
     for (const a of cands) {
       if (this.canPass(map, a)) {
@@ -612,17 +682,20 @@ export class Enemy implements Collider, EnemyAiHost {
    * @returns 是否成功造成伤害（由场景结算扣血/特效）
    */
   tryHitPlayer(player: PlayerLike, invincible: boolean): boolean {
+    if (this.isStoneGuard) return false
     if (this.effects.incapacitated) return false
     if (!this.alive || player.alive === false || player.untargetable) return false
     // 出土流程中绝不造成接触伤害（保证不是"零帧起手"）
     if (this.emerging) return false
     if((this.def.chargeCycle||this.def.guardian)&&this.pounceState==='lunge'&&this.chargeHit)return false
     // 猛扑期间只结算技能命中；其他阶段按内容配置结算普通身体接触。
-    const bodyContact = (this.def.ai === 'pouncer' || !!this.def.guardian) && this.pounceState !== 'lunge'
+    const bodyContact = (this.def.ai === 'pouncer' || !!this.def.guardian || !!this.def.chargeCycle) && this.pounceState !== 'lunge'
     if (bodyContact && this.contactDamage <= 0) return false
     // 护卫突刺只受本次冲刺的单次命中标记约束，旧接触冷却不能让新突刺失效。
-    const cooldown = bodyContact ? this.bodyContactCd : this.def.guardian && this.pounceState === 'lunge' ? 0 : this.contactCd
-    if (cooldown > 0 || invincible) return false
+    const cooldown = bodyContact ? this.bodyContactCd : (this.def.guardian||this.def.chargeCycle) && this.pounceState === 'lunge' ? 0 : this.contactCd
+    const contactKey = player.entityId ? `${bodyContact ? 'body' : 'attack'}:${player.entityId}` : null
+    const targetCooldown = contactKey ? this.contactTargetTimers.get(contactKey) ?? 0 : cooldown
+    if (targetCooldown > 0 || invincible) return false
     const pad = this.def.combat.contactPad
     // 受击距离按玩家精瘦碰撞圆（视觉半径 half 仅作旧形状兜底）
     const hitR = player.hitR ?? player.half
@@ -634,6 +707,7 @@ export class Enemy implements Collider, EnemyAiHost {
     const dist = Math.hypot(player.x - this.x, player.y - this.y)
     // 圆分离把怪维持在半径和边缘，加容差容忍一帧抖动
     if (dist > reach) return false
+    if (contactKey) this.contactTargetTimers.set(contactKey, this.def.combat.attackCd)
     if (bodyContact) this.bodyContactCd = this.def.combat.attackCd
     else this.contactCd = this.def.combat.attackCd
     // 自身后撤，防止黏在玩家身上等 CD
@@ -643,20 +717,53 @@ export class Enemy implements Collider, EnemyAiHost {
     return true
   }
 
+  statusDamageSource:string|null=null
+  private statusDamageNumbers:number[]=[]
+  drainStatusDamage():readonly number[] {return this.statusDamageNumbers.length?this.statusDamageNumbers.splice(0):NO_STATUS_DAMAGE}
+  /** 中毒、流血等持续状态造成真实伤害，不经过双抗、易伤与减伤；仍保留Boss阶段门控。 */
+  takeStatusDamage(amount:number,source:string):void {
+    if(!this.alive)return
+    const before=this.hp
+    this.takeDamage(Math.max(0,amount),0,0,0,'true',false)
+    const dealt=Math.max(0,before-this.hp)
+    if(dealt>0)this.statusDamageNumbers.push(dealt)
+    if(!this.alive)this.statusDamageSource=source
+  }
+  /** 先算暴击、衰减和状态倍率，再扣双抗；远程命中额外扣固定远程抗性。 */
+  resolveDamage(input:DamageInput,kind:DamageKind,ranged=false):{damage:number;critical:boolean} {
+    if(this.isStoneGuard&&kind==='physical')return {damage:0,critical:false}
+    const result=(ranged?calculateRangedDamage:calculateDamage)({...input,resistance:0})
+    const modified=this.effects.modify('damageTaken',this.effects.modify(kind==='magic'?'magicDamageTaken':'physicalDamageTaken',result.damage))
+    const resistance=kind==='magic'?this.def.combat.magicResist??0:this.effects.modify('physicalResist',this.def.combat.physicalResist??0)
+    return {damage:applyFlatResistance(modified,resistance,input.penetration,input.resistanceReduction,ranged?this.def.combat.rangedReduction??0:0),critical:result.critical}
+  }
+  /** 转化伤害先共享一次暴击，再分别吃对应承伤倍率、双抗与破甲；缩石只挡物理部分。 */
+  resolveMixedDamage(input:DamageInput,magicFraction:number,magicPenetration:number):{damage:number;physical:number;magic:number;critical:boolean} {
+    const result=calculateDamage({...input,resistance:0,penetration:0,resistanceReduction:0})
+    const fraction=Math.max(0,Math.min(1,magicFraction))
+    const physicalBase=this.effects.modify('damageTaken',this.effects.modify('physicalDamageTaken',result.damage*(1-fraction)))
+    const magicBase=this.effects.modify('damageTaken',this.effects.modify('magicDamageTaken',result.damage*fraction))
+    const physical=this.isStoneGuard?0:applyFlatResistance(physicalBase,this.effects.modify('physicalResist',this.def.combat.physicalResist??0),input.penetration,input.resistanceReduction)
+    const magic=applyFlatResistance(magicBase,this.def.combat.magicResist??0,magicPenetration)
+    return {damage:physical+magic,physical,magic,critical:result.critical}
+  }
   /**
    * 受击统一入口（所有伤害来源只走这里）。
-   * @param knockback 命中来源自带的击退力（武器 MeleeMove.knockback / 符卡 knockback；缺省走全局兜底）
-   * @param stun 武器/符卡给予的弹幕僵直秒数；与击退完全解耦——
-   *             生锈铁镐击退为 0 也能打出僵直，所以绝不能把打断挂进击退分支
+   * @param knockback 来源击退力；缺省使用敌人受击配置。
+   * @param stun 来源弹幕僵直秒数；与击退独立结算。
    */
-  takeDamage(amount: number, dirAngle: number, knockback?: number, stun?: number): void {
+  takeDamage(amount: number, dirAngle: number, knockback?: number, stun?: number,kind='unknown',direct=true): void {
     if (!this.alive) return
+    if(this.isStoneGuard&&kind==='physical')return
+    if(amount<=0)return
     // 还埋在地下预警期：刀剑穿土而过，不可被攻击（钻出后才吃伤害）
     if (!this.canBeHit) return
+    const beforeHp = this.hp
     this.hp -= amount
+    emitSimulationEvent({ type: 'damage', target: this.entityId, amount: Math.min(beforeHp, Math.max(0, amount)), kind })
     this.flash = 0.12
     // 击退减法抗性：max(0, 来源击退力 - 抗性)；抗性高于击退力时原地硬扛
-    const kb = this.def.tags?.includes('boss') || this.def.movement==='stationary' ? 0 : Math.max(0, (knockback ?? this.def.combat.knockback) - (this.def.combat.knockbackResist ?? 0))
+    const kb = this.def.tags?.includes('boss') || this.def.movement==='stationary' || this.isStoneGuard ? 0 : Math.max(0, (knockback ?? this.def.combat.knockback) - (this.def.combat.knockbackResist ?? 0))
     this.kickX += Math.cos(dirAngle) * kb
     this.kickY += Math.sin(dirAngle) * kb
 
@@ -682,11 +789,18 @@ export class Enemy implements Collider, EnemyAiHost {
     if (this.hp <= 0) {
       this.hp = 0
       this.alive = false
+      emitSimulationEvent({ type: 'death', target: this.entityId })
       this.effects.clear('death')
       this.dying = 0.35
       this.vx = this.vy = 0
       this.windup = 'none'
       this.pounceState = 'none'
+    } else if(direct&&this.def.stoneGuard&&!this.isStoneGuard&&this.stoneGuardCooldown<=0&&randomCombat()<this.def.stoneGuard.chance){
+      this.stoneGuardRemaining=this.def.stoneGuard.duration
+      this.vx=this.vy=this.kickX=this.kickY=0
+      this.windup='none';this.pounceState='none';this.guardianReboundProgress=-1
+      this.pendingShots.length=0;delete this.aiMemory.guardian
+      this.hopH=0;this.hopSx=this.hopSy=1;this.hopState='rest'
     }
   }
 
@@ -715,6 +829,12 @@ export class Enemy implements Collider, EnemyAiHost {
   }
 
   render(ctx: CanvasRenderingContext2D): void {
+    const offset = this.motionHistory.offset(this.x, this.y)
+    ctx.save(); ctx.translate(offset.x, offset.y)
+    try { this.renderCurrent(ctx) } finally { ctx.restore() }
+  }
+
+  private renderCurrent(ctx: CanvasRenderingContext2D): void {
     // 还埋在地下：只画地面裂土预警，不画身体
     if (this.alive && this.buried) {
       this.renderBurrowWarning(ctx)
@@ -812,7 +932,7 @@ export class Enemy implements Collider, EnemyAiHost {
       // 猛扑中：沿扑向水平拉长、纵向收窄（爆发速度感）
       if (this.def.movement!=='flying' && this.emergeT <= 0 && this.pounceState === 'windup') {
         ctx.translate(-Math.cos(this.pounceAng) * 5 * pk, -Math.sin(this.pounceAng) * 5 * pk)
-      } else if (this.def.movement!=='flying' && this.emergeT <= 0 && this.pounceState === 'lunge') {
+      } else if (this.def.movement!=='flying' && this.def.visual.gait!=='walk' && this.emergeT <= 0 && this.pounceState === 'lunge') {
         ctx.translate(this.x, this.y)
         ctx.rotate(this.pounceAng)
         ctx.scale(this.def.guardian ? 1.42 : 1.2, this.def.guardian ? .72 : .86)
@@ -827,7 +947,7 @@ export class Enemy implements Collider, EnemyAiHost {
       engaged: this.ai === 'chase' || this.ai === 'kite',
       phase: this.phase, windup: this.windup, windupProgress: wk,
       pounceProgress: pk, pounceState: this.pounceState, pounceAngle: this.pounceAng, reboundProgress: this.guardianReboundProgress, ringCount: this.ringCount, antennaLag: this.antLag, alpha: deathAlpha,
-      flash: this.flash, palette: pal, visual: this.def.visual
+      flash: this.flash, palette: pal, visual: this.def.visual, stoneGuard:this.isStoneGuard
     })
     else {
       ctx.beginPath(); ctx.ellipse(this.x, this.y, rx, ry, 0, 0, Math.PI * 2)
@@ -857,15 +977,16 @@ export class Enemy implements Collider, EnemyAiHost {
 
       // 血条（钻出中随身体藏在土里，不悬浮剧透）
       const elite=this.def.tags?.includes('elite')===true
+      const hudLift=hopLift+(this.def.visual.healthBarOffsetY??0)
       const w = elite?44:34
       const ratio = this.hp / this.maxHp
       if (this.emergeT <= 0) {
-        if(elite){ctx.fillStyle='#dbc383';ctx.beginPath();ctx.moveTo(this.x,this.y-this.r-22+hopLift);ctx.lineTo(this.x+3,this.y-this.r-18+hopLift);ctx.lineTo(this.x,this.y-this.r-14+hopLift);ctx.lineTo(this.x-3,this.y-this.r-18+hopLift);ctx.closePath();ctx.fill()}
+        if(elite){ctx.fillStyle='#dbc383';ctx.beginPath();ctx.moveTo(this.x,this.y-this.r-22+hudLift);ctx.lineTo(this.x+3,this.y-this.r-18+hudLift);ctx.lineTo(this.x,this.y-this.r-14+hudLift);ctx.lineTo(this.x-3,this.y-this.r-18+hudLift);ctx.closePath();ctx.fill()}
         ctx.fillStyle = 'rgba(0,0,0,0.55)'
-        ctx.fillRect(this.x - w / 2, this.y - this.r - 12 + hopLift, w, 5)
+        ctx.fillRect(this.x - w / 2, this.y - this.r - 12 + hudLift, w, 5)
         // 血条常规段取 Def 调色板（蓝怪天蓝/绿怪嫩绿），危险段统一红告警
         ctx.fillStyle = ratio > 0.35 ? pal.hpBar : '#ff6b5e'
-        ctx.fillRect(this.x - w / 2 + 1, this.y - this.r - 11 + hopLift, (w - 2) * ratio, 3)
+        ctx.fillRect(this.x - w / 2 + 1, this.y - this.r - 11 + hudLift, (w - 2) * ratio, 3)
       }
 
       // 弹幕僵直：头顶三颗绕转小金星（"被打懵、吐不出弹"的通用眩晕语言）
@@ -873,7 +994,7 @@ export class Enemy implements Collider, EnemyAiHost {
         for (let i = 0; i < 3; i++) {
           const a = this.phase * 2.2 + (i * Math.PI * 2) / 3
           const sx = this.x + Math.cos(a) * 9
-          const sy = this.y - this.r - 16 + Math.sin(a) * 3 + hopLift
+          const sy = this.y - this.r - 16 + Math.sin(a) * 3 + hudLift
           this.drawStar(ctx, sx, sy, 2.6)
         }
       }

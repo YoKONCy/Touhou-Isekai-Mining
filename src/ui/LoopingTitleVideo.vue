@@ -2,7 +2,7 @@
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 
 /** 两个解码器交替接力，完整保留首尾帧，不叠加不同时间的运动画面。 */
-defineProps<{ src: string; poster: string }>()
+const props = defineProps<{ src: string; poster: string; single?: boolean }>()
 const first = ref<HTMLVideoElement | null>(null), second = ref<HTMLVideoElement | null>(null)
 const videos = (): Array<HTMLVideoElement | null> => [first.value, second.value]
 let active = 0, mounted = false, switching = false, epoch = 0
@@ -24,6 +24,7 @@ function prepareStandby(): void {
 }
 function monitorFrames(): void {
   clearBoundary()
+  if (props.single) return
   const current = videos()[active]
   if (!mounted || document.hidden || !current || current.paused || typeof current.requestVideoFrameCallback !== 'function') return
   const ticket = epoch
@@ -95,11 +96,11 @@ defineExpose({ resume })
 
 <template>
   <div class="looping-video" aria-hidden="true">
-    <video ref="first" :src="src" :poster="poster" muted playsinline preload="auto" @canplay="resume" @ended="onEnded"></video>
-    <video ref="second" :src="src" :poster="poster" muted playsinline preload="auto" @canplay="resume" @ended="onEnded"></video>
+    <video ref="first" :src="src" :poster="poster" :loop="single" muted playsinline preload="auto" @canplay="resume" @ended="onEnded"></video>
+    <video v-if="!single" ref="second" :src="src" :poster="poster" muted playsinline preload="auto" @canplay="resume" @ended="onEnded"></video>
   </div>
 </template>
 
 <style scoped>
-.looping-video{position:absolute;inset:0;pointer-events:none;isolation:isolate}.looping-video video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;pointer-events:none}.looping-video video:first-child{z-index:1;opacity:1}.looping-video video:last-child{z-index:0;opacity:0}
+.looping-video{position:absolute;inset:0;pointer-events:none;isolation:isolate}.looping-video video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;pointer-events:none}.looping-video video:first-child{z-index:1;opacity:1}.looping-video video:nth-child(2){z-index:0;opacity:0}
 </style>

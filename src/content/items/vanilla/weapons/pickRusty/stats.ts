@@ -3,8 +3,7 @@ import type { ItemDef } from '../../../types'
 
 /** 采集档位只判门槛，效率是每次扣除的采集HP；时间为秒。 */
 export const stats = {
-  rarity: 1,
-  tier: 1,
+  grade: 1,
   maxStack: 1,
   equipSlot: 'pick',
   miningPower: 1,

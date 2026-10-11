@@ -22,9 +22,11 @@ export interface RunStats {
 }
 
 /** 游戏内覆盖面板（同一时刻至多一个；null = 全部关闭） */
-export type UIPanelKind = 'inventory' | 'map' | 'pause' | 'npc' | 'quests' | 'storage' | 'cooking' | 'floors' | 'crafting' | 'furnace'
+export type UIPanelKind = 'inventory' | 'map' | 'pause' | 'npc' | 'quests' | 'storage' | 'cooking' | 'floors' | 'crafting' | 'furnace' | 'grill' | 'wardrobe'
 
 export interface GameEvents {
+  /** 战斗事件只承载状态结果；音效、图鉴、统计等可独立订阅。 */
+  'simulation:events': readonly import('../core/simulation/events').TimedEvent[]
   /** 基地入口选层面板确认进入；基地验证解锁并保存下矿前检查点。 */
   'base:enterFloor': { floor: number }
   /** 矿洞：抵达下行裂隙并撤离（批次 C 前为占位结算） */
@@ -37,6 +39,8 @@ export interface GameEvents {
   'cave:restart': void
   /** 模块 → UI：面板开关状态变化（Tab/M 键触发，Vue 据此显隐） */
   'ui:panel': UIPanelKind | null
+  /** 在撤离与死亡清算前同步归还光标上的物品。 */
+  'ui:inventoryReturn': undefined
   /** UI → 模块：请求切换面板（关闭按钮/快捷操作） */
   'ui:requestPanel': UIPanelKind | null
   /** 基地：收音机开始/切换曲目（payload＝曲名 i18n 键，UI 弹 3 秒 toast） */

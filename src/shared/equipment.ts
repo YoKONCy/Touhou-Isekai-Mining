@@ -2,10 +2,11 @@
  * 装备状态（纸娃娃槽位）：纯数据
  *
  * 当前槽位：武器A/B、镐、符卡A/B、装束（头/身/腿三合一全身槽）、饰品 A~D。
- * ENABLED_SLOTS 控制哪些槽位已实装（符卡 B 仍灰显，其余已开放）。
+ * ENABLED_SLOTS 控制哪些槽位已实装，符卡 A/B 均已开放。
  * 玩家实际攻击招式以这里装备的物品为准（CaveModule 同步给 Player）。
  */
 import { getItemDef, type EquipSlot, type ItemId } from './itemDefs'
+import { itemStack,type Slot } from './inventory'
 import {
   SWORD_RUSTY_ID,
   PICK_RUSTY_ID
@@ -41,6 +42,7 @@ export const ENABLED_SLOTS: ReadonlySet<EquipSlot> = new Set<EquipSlot>([
   'weaponA',
   'weaponB',
   'spellA',
+  'spellB',
   'outfit',
   'trinketA',
   'trinketB',
@@ -64,6 +66,9 @@ export function slotAccepts(slot: EquipSlot, id: ItemId): boolean {
 }
 
 export class Equipment {
+  private changeSerial=0
+  private durability:Partial<Record<EquipSlot,number>>={}
+  get revision():number{return this.changeSerial}
   private slots: Record<EquipSlot, ItemId | null> = {
     weaponA: SWORD_RUSTY_ID,
     weaponB: null,
@@ -80,11 +85,34 @@ export class Equipment {
   get(slot: EquipSlot): ItemId | null {
     return this.slots[slot]
   }
+  getStack(slot:EquipSlot):Slot {
+    const id=this.get(slot);return id?itemStack(id,1,this.durability[slot]):null
+  }
+  setStack(slot:EquipSlot,stack:Slot):Slot {
+    const old=this.getStack(slot);this.set(slot,stack?.id??null)
+    if(stack)this.setDurability(slot,stack.durability)
+    return old
+  }
+  setDurability(slot:EquipSlot,value?:number):void {
+    const id=this.get(slot),max=id?getItemDef(id).durability:undefined
+    if(max===undefined){delete this.durability[slot];return}
+    const next=itemStack(id!,1,value).durability!
+    if(this.durability[slot]!==next){this.durability[slot]=next;this.changeSerial++}
+  }
+  wear(slot:EquipSlot,amount:number):boolean {
+    const stack=this.getStack(slot)
+    if(stack?.durability===undefined||stack.durability<=0)return false
+    this.setDurability(slot,stack.durability-Math.max(0,amount));return true
+  }
+  durabilityJSON():Partial<Record<EquipSlot,number>> {return {...this.durability}}
+  restoreDurability(data:Partial<Record<EquipSlot,number>>={}):void {
+    for(const slot of Object.keys(this.slots) as EquipSlot[])this.setDurability(slot,data[slot])
+  }
 
   /** 穿戴；返回被替换下来的旧物品 id（无则 null） */
   set(slot: EquipSlot, id: ItemId | null): ItemId | null {
     const old = this.slots[slot]
-    this.slots[slot] = id
+    if(old!==id){this.slots[slot] = id;delete this.durability[slot];this.changeSerial++;if(id)this.setDurability(slot)}
     return old
   }
 
@@ -100,7 +128,20 @@ export class Equipment {
 
   fromJSON(data: Partial<Record<EquipSlot, ItemId | null>>): void {
     for (const key of Object.keys(this.slots) as EquipSlot[]) {
-      if (data[key] !== undefined) this.slots[key] = data[key]
+      if (data[key] !== undefined) this.set(key,data[key]!)
     }
   }
+}
+
+/** 同一种饰品仅选一个生效槽；耗尽的消耗型饰品不挡住仍有耐久的同款。 */
+export function uniqueTrinketSlots(equipment:Equipment):readonly EquipSlot[] {
+  const selected:EquipSlot[]=[],indices=new Map<ItemId,number>()
+  for(const slot of TRINKET_SLOTS){
+    const id=equipment.get(slot);if(!id)continue
+    const index=indices.get(id)
+    if(index===undefined){indices.set(id,selected.length);selected.push(slot);continue}
+    const previous=equipment.getStack(selected[index]!),current=equipment.getStack(slot)
+    if(previous?.durability===0&&(current?.durability??0)>0)selected[index]=slot
+  }
+  return selected
 }

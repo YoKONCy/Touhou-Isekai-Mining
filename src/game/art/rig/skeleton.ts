@@ -47,6 +47,9 @@ export interface PlayerPose {
   scaleX: number
   scaleY: number
   bone: PlayerBoneAngles
+  /** 招式专用的腿长表现倍率，缺省为一；鞋子大小与碰撞体积不受影响。 */
+  nearLegScale?: number
+  farLegScale?: number
   /** 披风摆角（正=朝屏幕右飘） */
   cape: number
   /** 发梢摆角 */
@@ -59,9 +62,13 @@ export interface PlayerPose {
   weaponInFront: boolean
   /** 双手握持时刀轴独立于前臂，仍使用当前朝向的局部角。 */
   weaponAngle?: number
+  weaponHand?: 'near' | 'far'
+  palmOffset?: number
   supportWeaponAngle?: number
   supportGripWeight?: number
   gripInFront?: boolean
+  supportInFront?: boolean
+  accessoryInFront?: boolean
   /** 步态相位（外部扬尘等特效可选读） */
   phase: number
   /** 动画总时钟（眨眼等周期细节用） */

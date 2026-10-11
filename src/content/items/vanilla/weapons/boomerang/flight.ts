@@ -3,7 +3,6 @@ import type { Enemy } from '../../../../../game/Enemy'
 import type { TileMap } from '../../../../../game/tilemap'
 import { circleHitsProp, type Prop } from '../../../../../game/art/props'
 import { getItemDef } from '../../../../../shared/itemDefs'
-import { calculateRangedDamage } from '../../../../../shared/combat'
 import { aoeMultiplier } from '../../../combatComponents'
 
 export function updateBoomerang(player: Player, dt: number, map: TileMap, props: readonly Prop[], enemies: readonly Enemy[], onHit: (enemy: Enemy, damage: number, critical: boolean) => void): void {
@@ -36,10 +35,10 @@ export function updateBoomerang(player: Player, dt: number, map: TileMap, props:
       if (!enemy.canBeHit || flight.hits.has(enemy) || !enemy.containsHit(x,y,5)) continue
       const multiplier = aoeMultiplier(def.aoe, flight.hits.size)
       flight.hits.add(enemy)
-      const result = calculateRangedDamage({ base: def.damage * multiplier,damageBonus:flight.damageBonus??0,
-        resistance: enemy.def.combat.physicalResist, penetration: flight.penetration, critChance: flight.critChance })
+      const result = enemy.resolveDamage({base:def.damage,falloff:multiplier,damageBonus:flight.damageBonus??0,
+        penetration:flight.penetration,critChance:flight.critChance},'physical',true)
       const damage = result.damage
-      enemy.takeDamage(damage,flight.angle,player.knockbackBonus,0)
+      enemy.takeDamage(damage,flight.angle,player.knockbackBonus,0,'physical')
       onHit(enemy,damage,result.critical); hit=true
     }
     if (hit && !flight.returning) turn()
