@@ -493,6 +493,7 @@ onBeforeUnmount(() => {
 
     <!-- 底部操作快捷栏（武器/镐/符卡/道具） -->
     <Hotbar
+      v-show="!touchControls || (!panel && !touchBlocked && !searchView)"
       :cave="currentActions"
       :tick="hudTick"
       :hand="debug.selected"

@@ -9,7 +9,7 @@ import {IRON_WORK_FLAGS} from '../content/story/sidequests/crafting/ironWork'
 import { WOOD_ID, ROCK_STONE_ID, FLAX_ID, HEMP_THREAD_ID, SLIME_BALL_ID, COAL_ID, ORE_COPPER_ID, ORE_IRON_ID, COPPER_INGOT_ID, IRON_INGOT_ID, SPEAR_STONE_ID, STAFF_WOOD_ID, SALT_SOUP_ID, SOUP_ID, MUSHROOM_ID, HERB_ID, ROCK_SALT_ID, HEAT_NOZZLE_ID } from '../content/items/vanilla/ids'
 export { SOUP_RECIPE, SALT_SOUP_RECIPE } from './cookingRecipes'
 import { GRILL_COST } from './cookingRecipes'
-import { SILICA_SAND_ID,GLASS_ID,GOLD_INGOT_ID,ORE_GOLD_ID,GOLD_BELL_ID,RUBY_PENDANT_ID,BAT_FEATHER_CHARM_ID,VENOM_VIAL_ID,RUBY_ID,CLOVER_ID,BAT_WING_ID,POISON_GRASS_ID,FORGET_ME_NOT_ID,SMALL_CRYSTAL_CORE_ID } from '../content/items/vanilla/ids'
+import { SILICA_SAND_ID,GLASS_ID,GOLD_INGOT_ID,ORE_GOLD_ID,SILVER_INGOT_ID,ORE_SILVER_ID,GOLD_BELL_ID,RUBY_PENDANT_ID,BAT_FEATHER_CHARM_ID,VENOM_VIAL_ID,RUBY_ID,CLOVER_ID,BAT_WING_ID,POISON_GRASS_ID,FORGET_ME_NOT_ID,SMALL_CRYSTAL_CORE_ID } from '../content/items/vanilla/ids'
 import { refreshCulinaryProgress } from '../content/story/sidequests/culinary/state'
 import { FIRE_CORE_ID,FIRE_CRYSTAL_ID,GUNPOWDER_ID,SULFUR_ID } from '../content/items/vanilla/ids'
 import { SALTPETER_ID } from '../content/items/vanilla/materials/saltpeter'
@@ -44,7 +44,8 @@ export const CRAFT_RECIPES:readonly Recipe[]=[
   {id:SPEAR_TETANUS_ID,qty:1,unlock:'recipe.tetanusSpear.unlocked',cost:[[SPEAR_STONE_ID,1],[STRANGE_GEL_ID,1],[SWORD_RUSTY_ID,1]]}
 ]
 export const SMELT_RECIPES:readonly Recipe[]=[{id:COPPER_INGOT_ID,qty:1,unlock:'base.furnace.ready',cost:[[ORE_COPPER_ID,3],[COAL_ID,1]]},{id:IRON_INGOT_ID,qty:1,unlock:'base.furnace.ready',cost:[[ORE_IRON_ID,3],[COAL_ID,1]]},
-  {id:GLASS_ID,qty:1,unlock:'base.furnace.ready',cost:[[SILICA_SAND_ID,4]]},{id:GOLD_INGOT_ID,qty:1,unlock:'base.furnace.ready',cost:[[ORE_GOLD_ID,3]]}]
+  {id:GLASS_ID,qty:1,unlock:'base.furnace.ready',cost:[[SILICA_SAND_ID,4]]},{id:GOLD_INGOT_ID,qty:1,unlock:'base.furnace.ready',cost:[[ORE_GOLD_ID,3]]},
+  {id:SILVER_INGOT_ID,qty:1,unlock:'base.furnace.ready',cost:[[ORE_SILVER_ID,3]]}]
 export const SMELT_BATCH_LIMIT=8
 export const FURNACE_COSTS:readonly MaterialCost[]=[[[ROCK_STONE_ID,40],[WOOD_ID,15]],[[WOOD_ID,20],[HEMP_THREAD_ID,4],[SLIME_BALL_ID,3]],[[HEAT_NOZZLE_ID,1],[COAL_ID,8]]]
 export const sources=(c:CharacterProfile)=>[c.inventory,c.quickSlots,c.storage]

@@ -62,7 +62,8 @@ export function inventorySlots(profile:CharacterProfile,actions:ModuleActions,wi
     const [kind]=parts(key),all=keys()
     if(withStorage)return all.filter(k=>kind==='storage'?k.startsWith('inv:')||k.startsWith('quick:'):k.startsWith('storage:'))
     if(kind!=='inv')return all.filter(k=>k.startsWith('inv:'))
-    const equipment=keys(true).filter(k=>k.startsWith('eq:')&&!get(k)&&accepts(k,id))
+    // 时装必须由玩家明确放入，快捷穿戴不把第二件装束自动塞进外观槽。
+    const equipment=keys(true).filter(k=>k.startsWith('eq:')&&k!=='eq:vanityOutfit'&&!get(k)&&accepts(k,id))
     return [...equipment,...all.filter(k=>k.startsWith('quick:')&&accepts(k,id))]
   }
   const action=(key:ItemSlotKey):ItemAction|null=>{

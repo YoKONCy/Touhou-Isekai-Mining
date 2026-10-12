@@ -35,7 +35,7 @@ import { PROLOGUE_TREE, PNODE } from '../content/story/prologue/dialogues'
 import { FIRST_DEATH_TREE } from '../content/story/events/first-death/dialogues'
 import { drawPlayerRig } from './art/rig/playerRig'
 import { acceptCookingQuest } from '../content/story/mainline/camp-soup/transactions'
-import { t, itemName } from '../i18n'
+import { t, itemName, formatKeyBindings } from '../i18n'
 import { canEnterMineFloor } from '../shared/mineFloors'
 import { materialCount, furnaceStage, CRAFT_RECIPES } from '../shared/production'
 import { ROCK_SALT_ID } from '../content/items/vanilla/ids'
@@ -541,7 +541,7 @@ export class BaseModule extends CharacterModuleActions implements IGameModule {
       if(e.kind==='bed'&&this.deathStage!=='none'){
         g.save();g.translate(e.x-12,e.y-30);g.rotate(-Math.PI/2)
         // 主角直接躺在旧木板上的草席上，不再叠加被褥。
-        withPlayerCostume(this.character.costume,()=>drawPlayerRig(g,0,0,this.animator.build(Math.PI/2),{expression:'blink'}))
+        withPlayerCostume(this.equipment.visibleCostume(this.character.costume),()=>drawPlayerRig(g,0,0,this.animator.build(Math.PI/2),{expression:'blink'}))
         g.restore()
       }
     }}))
@@ -570,7 +570,7 @@ export class BaseModule extends CharacterModuleActions implements IGameModule {
       if(furnace)drawCraftMarker(g,furnace.x+furnace.w/2+14,furnace.y+4,this.time)
     }
     const p=this.nearest()
-    if(p&&!this.panel&&this.deathStage==='none'&&this.arrivalTime<0&&!dialogue.isActive){g.font='16px zpix, sans-serif';g.textAlign='center';const text=touchControls.value?p.title:`F · ${p.title}`,w=g.measureText(text).width;g.fillStyle='#201e2be8';g.beginPath();g.roundRect(this.player.x-w/2-10,this.player.y-75,w+20,26,5);g.fill();g.fillStyle='#efdbc0';g.fillText(text,this.player.x,this.player.y-57)}
+    if(p&&!this.panel&&this.deathStage==='none'&&this.arrivalTime<0&&!dialogue.isActive){g.font='16px zpix, sans-serif';g.textAlign='center';const text=touchControls.value?p.title:formatKeyBindings(`{key:interact} · ${p.title}`),w=g.measureText(text).width;g.fillStyle='#201e2be8';g.beginPath();g.roundRect(this.player.x-w/2-10,this.player.y-75,w+20,26,5);g.fill();g.fillStyle='#efdbc0';g.fillText(text,this.player.x,this.player.y-57)}
     const now=(this.time*1000)
     this.storageFlights=this.storageFlights.filter(f=>now<f.start+1050)
     for(const f of this.storageFlights){
@@ -590,7 +590,7 @@ export class BaseModule extends CharacterModuleActions implements IGameModule {
       g.fillStyle=`rgba(0,0,0,${alpha})`;g.fillRect(0,0,engine.viewW,engine.viewH)
     }
     if(!touchControls.value&&!this.panel&&this.deathStage==='none'){const mx=engine.input.mouseX,my=engine.input.mouseY;g.strokeStyle='rgba(255,255,255,0.85)';g.lineWidth=1.6;g.beginPath();g.arc(mx,my,7,0,Math.PI*2);g.moveTo(mx-11,my);g.lineTo(mx-5,my);g.moveTo(mx+5,my);g.lineTo(mx+11,my);g.moveTo(mx,my-11);g.lineTo(mx,my-5);g.moveTo(mx,my+5);g.lineTo(mx,my+11);g.stroke()}
-    if(this.messageTime>0){g.fillStyle='#231b22ec';g.fillRect(engine.viewW*0.16,engine.viewH-165,engine.viewW*0.68,60);g.fillStyle='#dfc6a6';g.font='15px zpix, sans-serif';g.textAlign='center';(this.message.match(/.{1,48}/g)??[]).forEach((text,i)=>g.fillText(text,engine.viewW/2,engine.viewH-143+i*20))}
+    if(this.messageTime>0){g.fillStyle='#231b22ec';g.fillRect(engine.viewW*0.16,engine.viewH-165,engine.viewW*0.68,60);g.fillStyle='#dfc6a6';g.font='15px zpix, sans-serif';g.textAlign='center';(formatKeyBindings(this.message).match(/.{1,48}/g)??[]).forEach((text,i)=>g.fillText(text,engine.viewW/2,engine.viewH-143+i*20))}
     if(this.recipeNoticeTime>0&&!this.panel&&!dialogue.isActive&&this.deathStage==='none'&&this.arrivalTime<0&&!this.fourth?.blocking){
       g.save();g.globalAlpha*=Math.min(1,(4-this.recipeNoticeTime)/.25,this.recipeNoticeTime/.5)
       g.font='14px zpix, sans-serif';g.textAlign='center';g.shadowColor='#1b1212';g.shadowBlur=4;g.shadowOffsetY=2;g.fillStyle='#f0d39e'

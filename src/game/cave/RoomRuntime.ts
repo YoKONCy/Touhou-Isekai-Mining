@@ -27,7 +27,7 @@ import type { WeaponImpactInstance } from '../../content/items/types'
 import { aoeMultiplier, meleeImpact } from '../../content/items/combatComponents'
 import { CavePlants } from '../art/cavePlants'
 import { getItemDef, findItemDef, type ItemId, type SpellCardDef, type SpellFxColors } from '../../shared/itemDefs'
-import { t, hasKey, itemName, mineralName } from '../../i18n'
+import { t, hasKey, itemName, mineralName, formatKeyBindings } from '../../i18n'
 import { ROCK_STONE_ID, SILICA_SAND_ID, PICK_RUSTY_ID, SWORD_IRON_ID, DOOMSDAY_ID } from '../../content/items/vanilla/ids'
 import { rollEnemyId, fixedEnemyIds, enemies } from '../../content/enemies/registry'
 import { weightedPick } from '../../content/core/Registry'
@@ -479,6 +479,7 @@ export class RoomRuntime {
     this.script = script ?? null
     if (script?.manualTorches) this.manualTorch = true
     const biome = currentBiome(def)
+    const noResources = def.encounter === 'survival' && biome.survivalEncounter?.noResources === true
     this.artStyle = resolveCaveArt(biome, def.floor ?? 1)
     let backgroundRocks:readonly import('../art/floorDecorations').BackgroundRock[]=[]
     // 脚本房按固定表计数；普通房和陷阱房共用楼层预算，陷阱房选择偏多的一档。
@@ -499,11 +500,11 @@ export class RoomRuntime {
     this.map = new TileMap({
       terrain:def.terrain,
       mineralIds:biome.mineralIds,
-      lavaBankMinerals:script?.noOre?undefined:biome.lavaBankMinerals,
+      lavaBankMinerals:script?.noOre||noResources?undefined:biome.lavaBankMinerals,
       spawnCol: Math.floor(spawnX / CONFIG.tile),
       spawnRow: Math.floor(spawnY / CONFIG.tile),
       // 矿量：noOre 清零 → spec.oreRange 脚本定量（序章极少量）→ 群系按房型随机
-      oreRange: script?.noOre ? [0, 0] : script?.oreRange ?? oreRangeForRoom(biome, def.kind),
+      oreRange: script?.noOre || noResources ? [0, 0] : script?.oreRange ?? oreRangeForRoom(biome, def.kind),
       roomKind: def.kind,
       depth: def.depth ?? 0,
       // 楼层门控：def.floor 缺省按正式第 1 层；序章 plan 显式写 0
@@ -561,7 +562,7 @@ export class RoomRuntime {
         nameKey: `prop.${prop.id}.name`, ref: script?.searchProps?.find(p => p.x === prop.x && p.y === prop.y)?.ref })
     }
     this.steam = new SteamVents(this.vents)
-    if (!script?.noNature && !script && (!biome.emptyContent||biome.gatherSpawns)) {
+    if (!noResources && !script?.noNature && !script && (!biome.emptyContent||biome.gatherSpawns)) {
       // 非采矿的背景岩块与石质摆件均逐块判定，TileMap 中可挖的岩石不在此表。
       const gatherRocks=[...backgroundRocks,...this.props.filter(p=>propDefs.get(p.id)?.tags?.includes('rock')).map(p=>({x:p.x,y:p.y,radius:(propDefs.get(p.id)?.halfWidth??18)*p.s+18}))]
       this.nature = new CaveNature(this.map, this.props, spawnX, spawnY, def.floor ?? 1, gatherRocks,
@@ -663,7 +664,8 @@ export class RoomRuntime {
 
     // 常亮安全房（序章基地）：墙上火把视为早已燃着，无需清场/点火流程
     if (script?.litRoom) this.litStart = -10
-    if(!script)this.threats.initialize(this.map,biome)
+    // 配置过的陷阱房统一由限时波次增援，熔岩岸边不再另刷随机单只怪物。
+    if(!script&&!(def.encounter==='survival'&&biome.survivalEncounter))this.threats.initialize(this.map,biome)
     this.refreshCollisionProps()
     this.touchRenderBudget()
   }
@@ -928,7 +930,7 @@ export class RoomRuntime {
    * - 其余脚本房若声明了 script.ambient（序章后续房间逐房加暗）：按清场状态取 dim/lit；
    * @returns null 表示调用方按 cleared 走 CONFIG 常规两档
    */
-  get survivalSeconds():number|null{return this.def.encounter==='survival'&&!this.survivalComplete?Math.max(0,Math.ceil(30-this.survivalElapsed)):null}
+  get survivalSeconds():number|null{return this.def.encounter==='survival'&&!this.survivalComplete?Math.max(0,Math.ceil((currentBiome(this.def).survivalEncounter?.duration??30)-this.survivalElapsed)):null}
   get ambientLevel(): AmbientLevel | null {
     if(this.oldHell)return {center:.1,edge:.25,cc:'28,25,20',ec:'20,21,18'}
     if(this.def.encounter==='survival'){
@@ -1478,35 +1480,64 @@ export class RoomRuntime {
     }
   }
 
-  /** 五秒一批增援；三十秒只解封和点灯，不清理敌人或弹幕。 */
+  /** 共用限时增援；群系配置数量和间隔，到时只解封，不清理敌人或弹幕。 */
   private updateSurvival(dt:number,player:Player):void{
-    this.survivalElapsed=Math.min(30,this.survivalElapsed+dt)
-    while(this.survivalWave<5&&this.survivalElapsed>=(this.survivalWave+1)*5){
+    const biome=currentBiome(this.def),profile=biome.survivalEncounter
+    const duration=profile?.duration??30,interval=profile?.interval??5
+    this.survivalElapsed=Math.min(duration,this.survivalElapsed+dt)
+    while((this.survivalWave+1)*interval<duration&&this.survivalElapsed>=(this.survivalWave+1)*interval){
+      const range=profile?.reinforcementCount
+      const count=range?range[0]+Math.floor(randomCombat()*(range[1]-range[0]+1)):randomCombat()<1/3?1:2
+      if(!this.spawnSurvivalWave(count,player))break
       this.survivalWave++
-      const count=randomCombat()<1/3?1:2,{left,right,top,bottom}=this.map.bounds
-      for(let n=0;n<count;n++){
-        const id=rollEnemyId('normal',this.def.depth,this.def.floor??1,currentBiome(this.def).enemyIds);if(!id)continue
-        const definition=enemies.require(id),radius=definition.radius+3
-        let point:{x:number;y:number}|null=null
-        for(let tries=0;tries<160;tries++){
-          const x=left+radius+randomCombat()*(right-left-radius*2),y=top+radius+randomCombat()*(bottom-top-radius*2)
-          if(Math.hypot(x-player.x,y-player.y)<110||this.enemies.some(e=>e.alive&&Math.hypot(e.x-x,e.y-y)<e.r+radius+12)||this.props.some(p=>circleHitsProp(x,y,radius,p))||this.wrecks?.colliders.some(p=>circleHitsProp(x,y,radius,p)))continue
-          if([[0,0],[radius,0],[-radius,0],[0,radius],[0,-radius]].some(([dx,dy])=>this.map.solidAtWorld(x+dx!,y+dy!)))continue
-          point={x,y};break
-        }
-        if(!point)continue
-        const kind=definition.movement==='stationary'?'burrow':definition.movement==='flying'?'ceiling':randomCombat()<.5?'burrow':'ceiling'
-        const enemy=new Enemy(point.x,point.y,id);enemy.startEncounterSpawn(kind);enemy.alert();this.enemies.push(enemy);this.enemyTotal++
-        if(kind==='burrow')sfx.burrowWarn(Math.max(-.7,Math.min(.7,(point.x-player.x)/430)))
-      }
     }
-    if(this.survivalElapsed>=30){
+    if(this.survivalElapsed>=duration){
       this.survivalComplete=true
       if(!this.oldHell){this.litStart=this.time;sfx.torchIgnite()}
       sfx.roomClear()
       for(const door of this.doors){this.map.openDoor(door.col,door.row);door.open=true}
-      sfx.doorOpen();this.fx.damageText(player.x,player.y-45,t('game.survival.open'),'#dfc897')
+      sfx.doorOpen();this.fx.damageText(player.x,player.y-45,t(profile?.openMessageKey??'game.survival.open'),'#dfc897')
     }
+  }
+
+  /** 整波先找齐合法落点再生成，避免双怪波次因为建筑遮挡只刷出一只。 */
+  private spawnSurvivalWave(count:number,player:Player):boolean {
+    const staged:Array<{id:string;x:number;y:number;radius:number;kind:'burrow'|'ceiling'}>=[]
+    const {left,right,top,bottom}=this.map.bounds
+    if(this.oldHell)this.navigation.configure(this.map,this.collisionProps)
+    for(let n=0;n<count;n++){
+      const id=rollEnemyId('normal',this.def.depth,this.def.floor??1,currentBiome(this.def).enemyIds)
+      if(!id)return false
+      const definition=enemies.require(id),radius=definition.radius+3,diagonal=radius/Math.SQRT2
+      const valid=(x:number,y:number):boolean=>{
+        if(this.knownPlayers.some(p=>p.alive&&Math.hypot(x-p.x,y-p.y)<110))return false
+        if(this.enemies.some(e=>e.alive&&Math.hypot(e.x-x,e.y-y)<e.r+radius+12)||staged.some(e=>Math.hypot(e.x-x,e.y-y)<e.radius+radius+12))return false
+        if(this.collisionProps.some(p=>circleHitsProp(x,y,radius,p)))return false
+        if([[0,0],[radius,0],[-radius,0],[0,radius],[0,-radius],[diagonal,diagonal],[-diagonal,diagonal],[diagonal,-diagonal],[-diagonal,-diagonal]].some(([dx,dy])=>this.map.solidAtWorld(x+dx!,y+dy!)))return false
+        return !this.oldHell||this.navigation.canReach(x,y,player.x,player.y,definition.radius,definition.movement==='flying')
+      }
+      let point:{x:number;y:number}|null=null
+      for(let tries=0;tries<160;tries++){
+        const x=left+radius+randomCombat()*(right-left-radius*2),y=top+radius+randomCombat()*(bottom-top-radius*2)
+        if(valid(x,y)){point={x,y};break}
+      }
+      if(!point){
+        // 随机点全部失败时扫描真实地面；仍无净空则整波延后，不塞进墙内或吞掉半波。
+        search:for(let row=1;row<this.map.rows-1;row++)for(let col=1;col<this.map.cols-1;col++){
+          const x=(col+.5)*this.map.tile,y=(row+.5)*this.map.tile
+          if(x-radius<left||x+radius>right||y-radius<top||y+radius>bottom)continue
+          if(valid(x,y)){point={x,y};break search}
+        }
+      }
+      if(!point)return false
+      const kind=definition.movement==='stationary'?'burrow':definition.movement==='flying'?'ceiling':randomCombat()<.5?'burrow':'ceiling'
+      staged.push({id,...point,radius,kind})
+    }
+    for(const entry of staged){
+      const enemy=new Enemy(entry.x,entry.y,entry.id);enemy.startEncounterSpawn(entry.kind);enemy.alert();this.enemies.push(enemy);this.enemyTotal++
+      if(entry.kind==='burrow')sfx.burrowWarn(Math.max(-.7,Math.min(.7,(entry.x-player.x)/430)))
+    }
+    return true
   }
 
   /** 敌人落位（避开实心瓦片、出生点、彼此重叠）；种类按注册表权重混编 */
@@ -2110,6 +2141,7 @@ export class RoomRuntime {
 
     if(!this.cleared&&this.def.encounter==='survival'&&this.survivalComplete&&this.aliveEnemies===0&&!this.threats.blocksClear){
       this.cleared=true
+      emitSimulationEvent({type:'clear',room:this.def.id})
       this.threats.clear()
       this.setDoorsOpen(true)
       if(this.oldHell)this.fogClearStart=this.time
@@ -3400,7 +3432,7 @@ export class RoomRuntime {
     ctx.fillStyle = '#ffe9a8'
     ctx.strokeStyle = 'rgba(0,0,0,0.7)'
     ctx.lineWidth = 3
-    const hint = t('game.fissure.extract_hint')
+    const hint = formatKeyBindings(t('game.fissure.extract_hint'))
     ctx.strokeText(hint, f.x, f.y - r - 10)
     ctx.fillText(hint, f.x, f.y - r - 10)
   }

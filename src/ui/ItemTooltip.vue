@@ -74,6 +74,7 @@ onBeforeUnmount(()=>{if(frame)cancelAnimationFrame(frame);observer?.disconnect()
       <template v-if="def">
         <button v-if="touchControls" class="touch-tip-close" :aria-label="t('ui.common.close')" @click="touchDismissed=true">×</button>
         <header class="item-heading"><ItemIcon :id="def.id" :size="38"/><div><strong class="item-name">{{itemName(def.id)}}</strong><div class="item-meta"><span>{{kindLabel}}</span><span v-if="def.tags?.includes('dish')" class="quality-stamp">{{t('ui.item.tag.dish')}}</span><span v-if="def.grade" class="quality-stamp">{{t(gradeNameKey(def.grade))}}</span><span v-else-if="def.rarity" class="quality-stamp">{{t('ui.item.rarity',{n:def.rarity})}}</span></div></div></header>
+        <p v-if="display?.target === 'eq:vanityOutfit'" class="item-description">{{ t('ui.vanity.cosmetic_only') }}</p>
         <ItemStatSheet :def="def" :expanded="displayExpanded&&details" :ranged-crit="derived.rangedCritChance" :shooting-deviation="derived.shootingDeviation" :durability="durability"/>
         <p class="item-description">{{itemDesc(def.id)}}</p><p v-if="flavor" class="item-flavor">{{flavor}}</p>
         <footer><span v-if="details"><kbd>Shift</kbd>{{t(displayExpanded?'ui.item.details_collapse':'ui.item.details_expand')}}</span><span v-if="displayExpanded&&details">{{t('ui.item.scroll_details')}}</span><button v-if="action" @click="emit('action')">{{t(`ui.item.action.${action}`)}}</button></footer>

@@ -40,6 +40,8 @@ export interface RoomTerrain {
   /** 天然岩台、断柱与承重岩柱；占地与墙体碰撞一致，外观高度独立于网格尺寸。 */
   rockFormations?: Array<{kind:'terrace'|'broken'|'pillar';cells:number[];height:number;seed:number}>
   buildings: Array<{col:number;row:number;width:number;height:number;variant:0|1;seed:number;containers:Array<{col:number;row:number;large:boolean;id?:import('../../../content/props/types').PropId}>}>
+  /** 无建筑也能放置的独立搜索点，保证特殊房间奖励有真实可达落点。 */
+  containers?: Array<{col:number;row:number;large:boolean;id:import('../../../content/props/types').PropId}>
 }
 
 export interface RoomDef {

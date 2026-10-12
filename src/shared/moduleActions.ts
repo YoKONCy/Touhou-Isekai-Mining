@@ -15,6 +15,11 @@ export abstract class CharacterModuleActions {
   get quickSlots() { return this.character.quickSlots }
   get foodCooldown() { return this.character.food.remaining }
   get foodCooldownDuration() { return this.character.food.duration }
+  setEquipmentVisible(slot: EquipSlot, visible: boolean): boolean {
+    if (this.actionsLocked || !ENABLED_SLOTS.has(slot)) return false
+    this.equipment.setVisualVisible(slot, visible)
+    return true
+  }
   getWeaponSkillCooldown(_id:string):number { return 0 }
   selectCostume(costume:'default'|'old_miner'):boolean {
     if(costume==='old_miner'&&!this.character.flagBool('unlock.costume.old_miner'))return false

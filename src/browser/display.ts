@@ -10,6 +10,7 @@ export const portrait = computed(() => viewport.height > viewport.width)
 export const compactLayout = computed(() => viewport.coarse || viewport.width < 760 || viewport.height < 600)
 export const landscapeRequired = computed(() => portrait.value && (viewport.coarse || touchControls.value))
 const listeners = new Set<() => void>()
+let renderLayoutKey = ''
 export function activateGamepad(): void { if(viewport.lastInput!=='gamepad'){viewport.lastInput='gamepad';syncDocument()} }
 export function deactivateGamepad(): void { if(viewport.lastInput==='gamepad'){viewport.lastInput=viewport.coarse?'touch':'mouse';syncDocument()} }
 export function onDisplayChange(listener: () => void): () => void { listeners.add(listener); return () => listeners.delete(listener) }
@@ -27,7 +28,12 @@ function syncDocument(): void {
   root.style.setProperty('--view-width', `${viewport.width}px`)
   root.style.setProperty('--touch-scale', String(displaySettings.buttonScale))
   root.style.setProperty('--touch-opacity', String(displaySettings.opacity))
-  for (const listener of listeners) listener()
+  // 点击、焦点与操作方式变化只更新界面状态，实际渲染尺寸改变才通知画布。
+  const nextRenderLayoutKey = `${viewport.width}:${viewport.height}:${compactLayout.value}:${displaySettings.quality}:${window.devicePixelRatio}`
+  if (nextRenderLayoutKey !== renderLayoutKey) {
+    renderLayoutKey = nextRenderLayoutKey
+    for (const listener of listeners) listener()
+  }
 }
 /** 可用空间与输入设备分别记录，平板接鼠标时不必伪装成手机。 */
 export function startDisplayAdaptation(): () => void {
@@ -48,7 +54,13 @@ export function startDisplayAdaptation(): () => void {
     viewport.coarse = media.matches
     syncDocument()
   }
+  let lastTouch = -Infinity
   const pointer = (event: PointerEvent) => {
+    if (!['touch', 'mouse', 'pen'].includes(event.pointerType)) return
+    // 部分移动浏览器的兼容鼠标事件不能把触控布局立即切回桌面。
+    if (event.pointerType === 'touch') lastTouch = performance.now()
+    const source = event as PointerEvent & { sourceCapabilities?: { firesTouchEvents?: boolean } }
+    if (event.pointerType === 'mouse' && (source.sourceCapabilities?.firesTouchEvents || performance.now() - lastTouch < 800)) return
     const next = event.pointerType === 'touch' ? 'touch' : 'mouse'
     if (viewport.lastInput !== next) { viewport.lastInput = next; syncDocument() }
   }

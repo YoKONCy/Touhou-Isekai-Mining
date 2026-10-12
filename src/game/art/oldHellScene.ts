@@ -72,6 +72,10 @@ export class OldHellScene {
           artStyle:{wallTint:'#9b775b',tintStrength:.24,dampness:0,vegetation:0,deposits:0,fungi:0,boneFragments:0,fogStrength:1,deepHollow:false}})
       })
     }
+    for (const [index, box] of (terrain.containers ?? []).entries()) {
+      this.containerProps.push({id:box.id,x:(box.col+.5)*t,y:(box.row+.8)*t,s:.9,seed:seed+index*7919+3571,
+        artStyle:{wallTint:'#9b775b',tintStrength:.24,dampness:0,vegetation:0,deposits:0,fungi:0,boneFragments:0,fogStrength:1,deepHollow:false}})
+    }
     this.rocks=new OldHellRocks(map,terrain,this.buildingCells)
     // 裂缝形状固定于房间种子；热汽与火星只以模拟时间驱动，不消耗战斗随机源。
     for(let i=0;i<55&&this.vents.length<11;i++){

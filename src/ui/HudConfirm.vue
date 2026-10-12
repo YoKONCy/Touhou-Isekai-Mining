@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { t } from '../i18n'
+import { touchControls } from '../browser/display'
 
 const props = withDefaults(defineProps<{ title: string; message: string; confirmLabel?: string; busy?: boolean; theme?: 'game' | 'title' }>(), { busy: false, theme: 'game' })
 const emit = defineEmits<{ confirm: []; cancel: [] }>()
@@ -20,13 +21,15 @@ function onKey(event: KeyboardEvent): void {
 onMounted(async () => {
   window.addEventListener('keydown', onKey, true)
   await nextTick()
-  const input = panel.value?.querySelector<HTMLInputElement>('input')
-  if (input) { input.focus(); input.select() }
-  else panel.value?.querySelector<HTMLButtonElement>('button')?.focus()
+  if (!touchControls.value) {
+    const input = panel.value?.querySelector<HTMLInputElement>('input')
+    if (input) { input.focus({ preventScroll: true }); input.select() }
+    else panel.value?.querySelector<HTMLButtonElement>('button')?.focus({ preventScroll: true })
+  }
 })
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKey, true)
-  if (previousFocus?.isConnected) previousFocus.focus()
+  if (!touchControls.value && previousFocus?.isConnected) previousFocus.focus({ preventScroll: true })
 })
 </script>
 
@@ -36,7 +39,7 @@ onBeforeUnmount(() => {
       <section ref="panel" class="confirm-panel" :class="theme === 'title' ? 'title-hud-panel' : 'gpanel hud-panel'" role="dialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-message">
         <span class="confirm-caption">{{ t(theme === 'title' ? 'ui.title.confirm_caption' : 'ui.confirm.caption') }}</span>
         <h2 id="confirm-title">{{ title }}</h2>
-        <slot name="body"><div class="confirm-paper"><p id="confirm-message">{{ message }}</p><span aria-hidden="true">{{ theme === 'title' ? '✦' : t('ui.records.stamp') }}</span></div></slot>
+        <div class="confirm-body"><slot name="body"><div class="confirm-paper"><p id="confirm-message">{{ message }}</p><span aria-hidden="true">{{ theme === 'title' ? '✦' : t('ui.records.stamp') }}</span></div></slot></div>
         <footer><button :class="theme === 'title' ? 'title-hud-action' : 'gbtn'" :disabled="busy" @click="emit('cancel')">{{ t('ui.common.cancel') }}</button><button :class="theme === 'title' ? 'title-hud-action primary' : 'gbtn primary'" :disabled="busy" @click="emit('confirm')">{{ busy ? t('ui.common.processing') : confirmLabel ?? t('ui.common.confirm') }}</button></footer>
       </section>
     </div>
@@ -44,6 +47,9 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.confirm-panel{display:flex;flex-direction:column;min-height:0;max-height:calc(var(--view-height,100dvh) - var(--safe-top,0px) - var(--safe-bottom,0px) - 40px);overflow:hidden}
+.confirm-caption,.confirm-panel h2,.confirm-panel footer{flex:none}
+.confirm-body{min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;touch-action:pan-y}
 .confirm-mask{position:fixed;inset:0;z-index:3000;display:grid;place-items:center;padding:20px;background:#080812b3;cursor:default}
 .confirm-panel{width:min(440px,100%);padding:24px;background:repeating-linear-gradient(25deg,#dcc7a805 0 1px,transparent 1px 5px),linear-gradient(140deg,#45353b,#25202b);box-shadow:0 20px 70px #0009}
 .confirm-caption{font-size:10px;letter-spacing:3px;color:#a78f70}.confirm-panel h2{margin:10px 0 20px;color:#ead6b1;font-size:22px;font-weight:400;letter-spacing:3px}

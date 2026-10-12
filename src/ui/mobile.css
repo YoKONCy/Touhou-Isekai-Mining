@@ -1,5 +1,5 @@
 /* 视口、安全区与触控尺寸集中定义，界面只消费规则，不判断设备型号。 */
-:root{--safe-top:env(safe-area-inset-top,0px);--safe-right:env(safe-area-inset-right,0px);--safe-bottom:env(safe-area-inset-bottom,0px);--safe-left:env(safe-area-inset-left,0px);--touch-scale:1;--touch-opacity:.82;--view-height:100dvh;--view-width:100vw}
+:root{--safe-top:env(safe-area-inset-top,0px);--safe-right:env(safe-area-inset-right,0px);--safe-bottom:env(safe-area-inset-bottom,0px);--safe-left:env(safe-area-inset-left,0px);--touch-scale:1;--touch-opacity:.82;--view-height:100dvh;--view-width:100vw;--touch-pad:calc(clamp(86px,var(--view-height)*.22,112px)*var(--touch-scale));--touch-small:max(44px,calc(48px*var(--touch-scale)))}
 html,body,#app{height:var(--view-height);width:100%;overscroll-behavior:none}
 .game-root,.title-screen{height:100%!important;width:100%!important}
 input,textarea{user-select:text;-webkit-user-select:text}
@@ -28,23 +28,56 @@ html[data-layout=compact] .hud-topleft .now-playing{display:none}
 html[data-layout=compact] .nmap{max-height:120px}
 html[data-layout=compact] .player-status{right:calc(var(--safe-right) + 8px)!important;top:calc(var(--safe-top) + 58px)!important;font-size:10px;max-width:200px;pointer-events:none}
 html[data-layout=compact] .room-toast{top:calc(var(--safe-top) + 56px)!important;font-size:12px!important;padding:7px 12px!important;max-width:55%;white-space:normal;text-align:center}
-html[data-layout=compact] .hotbar{bottom:calc(var(--safe-bottom) + 8px)!important;gap:3px!important;padding:4px!important;flex-wrap:wrap;justify-content:center;width:calc(100% - var(--safe-left) - var(--safe-right) - 480px*var(--touch-scale));max-width:440px;min-width:176px}
+html[data-layout=compact] .hotbar{bottom:calc(var(--safe-bottom) + 8px)!important;gap:4px!important;padding:4px!important;flex-wrap:nowrap;justify-content:center;width:max-content;max-width:calc(100% - var(--safe-left) - var(--safe-right) - 20px);min-width:0;height:auto;min-height:0}
 html[data-layout=compact] .hotbar .cell{width:44px!important;height:44px!important;flex:none;transform:none!important}
 html[data-layout=compact] .hotbar .cell .item-icon{width:30px!important;height:30px!important}
-html[data-layout=compact] .hotbar .sep{width:3px!important;margin:0!important}
+html[data-layout=compact] .hotbar .sep{width:4px!important;margin:0!important;height:28px;flex:none}
+html[data-layout=compact] .hotbar .cell.spell-first,html[data-layout=compact] .hotbar .cell.spell-last{margin:0;padding:0;border-radius:3px}
+html[data-controls=touch] .hotbar{border:0;background:transparent;box-shadow:none;pointer-events:none}
+html[data-controls=touch] .hotbar .cell{pointer-events:auto;touch-action:manipulation;border-color:#b49a6c66;border-radius:5px;background:#24212ba6;box-shadow:inset 0 1px #e0c79c22,0 1px 3px #100c1980}
+html[data-controls=touch] .hotbar .cell.active{border-color:#e4c389;box-shadow:inset 0 0 0 1px #d4b47c88,inset 0 1px #f0dab1,0 1px 4px #100c19aa}
+html[data-controls=touch] .hotbar .cell.locked{opacity:.42}
+html[data-controls=touch] .hotbar .touch-slot-ghost{width:26px;height:26px;opacity:.38}
+html[data-controls=touch] .hotbar .sep::before{background:#c2a77755;box-shadow:none}
+html[data-controls=touch] .hotbar .cell:focus-visible{outline:2px solid #ecd1a0;outline-offset:2px}
 html[data-controls=touch] .hotbar .keyhint,html[data-controls=touch] .hotbar .gtooltip,html[data-layout=compact] .hotbar .quest-hud{display:none!important}
 html[data-layout=compact] .hotbar .qty{font-size:11px}
 
-/* 搜索时留出左侧移动与中断入口，右侧的完整网格保留物品形状。 */
-html[data-layout=compact] .search-panel{top:calc(var(--safe-top) + 56px)!important;right:calc(var(--safe-right) + 10px)!important;transform:none!important;max-height:calc(var(--view-height) - var(--safe-top) - var(--safe-bottom) - 66px)!important;width:max(260px,calc(var(--search-cols)*var(--cell) + 24px))!important;max-width:calc(100% - var(--safe-left) - var(--safe-right) - 190px)!important;padding:10px!important;--cell:clamp(44px,12vh,62px)}
-html[data-layout=compact] .search-header{margin-bottom:7px!important;min-height:32px!important;gap:7px!important}
+/* 搜索正文按剩余视口计算尺寸；横屏左侧保留移动和交互，右侧固定操作摘要。 */
+html[data-layout=compact] .search-panel{
+  --search-reserve:calc(var(--touch-pad) + var(--touch-small) + 40px);
+  --search-rail:136px;
+  --cell:max(44px,min(64px,calc((var(--view-height) - var(--safe-top) - var(--safe-bottom) - 102px)/var(--search-rows)),calc((var(--view-width) - var(--safe-left) - var(--safe-right) - var(--search-reserve) - var(--search-rail) - 46px)/var(--search-cols))));
+  display:grid;grid-template-columns:minmax(0,1fr) var(--search-rail);grid-template-rows:44px minmax(0,1fr);gap:8px 12px;
+  top:calc(var(--safe-top) + 8px)!important;right:calc(var(--safe-right) + 8px)!important;transform:none!important;
+  width:calc(var(--search-cols)*var(--cell) + var(--search-rail) + 46px)!important;
+  max-width:calc(var(--view-width) - var(--safe-left) - var(--safe-right) - var(--search-reserve))!important;
+  height:min(max(252px,calc(var(--search-rows)*var(--cell) + 86px)),calc(var(--view-height) - var(--safe-top) - var(--safe-bottom) - 16px));
+  max-height:calc(var(--view-height) - var(--safe-top) - var(--safe-bottom) - 16px)!important;
+  padding:10px!important;overflow:hidden;animation:none;min-width:0;min-height:0;
+}
+html[data-layout=compact] .search-header{grid-column:1/-1;margin:0!important;min-height:44px!important;gap:7px!important}
+html[data-layout=compact] .search-grid-viewport{grid-column:1;grid-row:2;min-width:0;min-height:0;overflow:auto;padding:5px;overscroll-behavior:contain;touch-action:pan-y}
+html[data-layout=compact] .search-summary{grid-column:2;grid-row:2;display:flex;flex-direction:column;gap:8px;min-width:0;min-height:0;overflow:hidden;padding:2px}
+html[data-layout=compact][data-controls=desktop] .search-panel{--search-reserve:24px}
 html[data-layout=compact] .search-heading small,html[data-layout=compact] .search-legend,html[data-layout=compact] .search-help{display:none!important}
-html[data-layout=compact] .search-heading h2{font-size:15px!important;letter-spacing:1px!important}
-html[data-layout=compact] .search-close{width:40px!important;height:40px!important}
-html[data-layout=compact] .search-inspect{margin-bottom:5px!important;font-size:11px!important}
-html[data-layout=compact] .search-status{margin-top:6px!important;font-size:11px!important}
-html[data-layout=compact] .search-panel footer{gap:6px!important}
-html[data-layout=compact] .search-take,html[data-layout=compact] .search-resume{min-height:40px!important;padding:6px!important;font-size:12px!important}
+html[data-layout=compact] .search-heading h2{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;font-size:15px!important;letter-spacing:1px!important;margin:0}
+html[data-layout=compact] .search-header .header-symbol{width:24px;height:28px}
+html[data-layout=compact] .search-header .grid-size{display:none}
+html[data-layout=compact] .search-close{width:44px!important;height:44px!important}
+html[data-layout=compact] .search-inspect{display:flex!important;flex:1;flex-direction:column;align-items:flex-start;min-height:0;gap:4px;margin:0!important;font-size:11px!important;overflow-wrap:anywhere;overflow:auto;touch-action:pan-y}
+html[data-layout=compact] .search-status{flex:none;flex-wrap:wrap;gap:6px;margin:0!important;font-size:11px!important;line-height:1.5}
+html[data-layout=compact] .search-status small{padding-left:12px;width:100%}
+html[data-layout=compact] .search-panel footer{flex:none;flex-direction:column;gap:6px!important;margin-top:auto}
+html[data-layout=compact] .search-take,html[data-layout=compact] .search-resume{min-height:44px!important;padding:6px!important;font-size:12px!important;gap:5px;letter-spacing:0}
+html[data-layout=compact] .search-take .touch-glyph{width:22px;height:22px}
+html[data-layout=compact] .search-item{overflow:hidden}
+html[data-layout=compact] .search-item .discovered-item{inset:5px 4px 16px}
+html[data-layout=compact] .search-item .item-label{bottom:3px;left:3px;right:3px;font-size:10px}
+html[data-layout=compact] .search-item .quality-mark{top:3px;left:4px;font-size:10px}
+html[data-layout=compact] .search-item .search-qty{top:3px;right:4px;font-size:10px}
+html[data-layout=compact] .search-lens,html[data-layout=compact] .lens-progress{width:42px;height:42px}
+html[data-layout=compact] .lens-glass{left:7px;top:7px;width:28px;height:28px}
 
 /* 背包、仓库只重排展示，共用格子、装备和物品事务。 */
 html[data-layout=compact] .inv-panel{width:min(960px,100%)!important;height:100%!important;max-height:100%!important;padding:10px 12px!important;overflow:auto!important}
@@ -142,13 +175,138 @@ html[data-layout=compact] .dc-panel{max-height:100%!important;max-width:100%!imp
 html[data-layout=compact] .dc-scroll{touch-action:pan-y}
 html[data-layout=compact] .dc-panel button{min-height:40px}
 html[data-layout=compact] .confirm-mask{height:var(--view-height)!important;padding:calc(var(--safe-top) + 8px) calc(var(--safe-right) + 8px) calc(var(--safe-bottom) + 8px) calc(var(--safe-left) + 8px)!important}
-html[data-layout=compact] .confirm-panel{max-height:100%!important;overflow:auto!important;padding:16px!important}
+html[data-layout=compact] .confirm-panel{max-height:100%!important;overflow:hidden!important;padding:16px!important}
 html[data-controls=touch] .item-hover-card{left:calc(var(--safe-left) + 10px)!important;top:auto!important;bottom:calc(var(--safe-bottom) + 10px)!important;transform:none!important;width:min(440px,calc(100% - var(--safe-left) - var(--safe-right) - 20px))!important;max-height:calc(var(--view-height) - var(--safe-top) - var(--safe-bottom) - 20px)!important;z-index:2500;touch-action:pan-y;pointer-events:auto}html[data-controls=touch] .item-hover-card footer>span{display:none}.touch-tip-close{float:right;min-width:40px;min-height:40px;border:1px solid #9c805244;background:#d2bf9d;color:#675940;font:inherit;font-size:22px;margin-left:10px}
 html[data-layout=compact] input[type=text],html[data-layout=compact] input[type=number],html[data-layout=compact] input:not([type]),html[data-layout=compact] textarea{font-size:16px!important}
 html[data-layout=compact] .github-link{right:calc(var(--safe-right) + 10px)!important;bottom:calc(var(--safe-bottom) + 10px)!important;min-height:40px!important;padding:6px 9px!important}
 html[data-layout=compact] .github-copy small{display:none}
-html[data-layout=compact] .new-game{padding-top:calc(var(--safe-top) + 10px)!important;padding-bottom:calc(var(--safe-bottom) + 8px)!important}
-html[data-layout=compact] .title-menu{left:max(calc(var(--safe-left) + 20px),12%)!important;gap:4px!important;top:44%!important}
+html[data-layout=compact] .title-menu{gap:4px!important}
 html[data-layout=compact] .title-option{min-height:42px;font-size:clamp(20px,4vh,30px)!important;padding:5px!important}
-@media(max-height:480px){html[data-layout=compact] .new-game header small{display:none}html[data-layout=compact] .new-game h1{font-size:22px!important;margin-top:0!important}html[data-layout=compact] .hero-choices{min-height:100px!important;max-height:45vh!important;margin:0!important}html[data-layout=compact] .hero-label{font-size:18px!important}html[data-layout=compact] .journey-form label{margin:4px 0!important}html[data-layout=compact] .journey-actions{margin:5px 0!important}html[data-layout=compact] .hud-topleft{transform:scale(.66)}html[data-layout=compact] .search-inspect{display:none}html[data-layout=compact] .search-panel{--cell:44px}}
+@media(max-height:480px){html[data-layout=compact] .hud-topleft{transform:scale(.66)}}
 @media(max-width:650px){html[data-layout=compact] .rack-col{width:165px!important}html[data-layout=compact] .doll-stage.board{width:150px!important}html[data-layout=compact] .doll-grid{grid-template-columns:repeat(3,42px)!important}html[data-layout=compact] .container-shelves{grid-template-columns:1fr}html[data-layout=compact] .cook-layout,html[data-layout=compact] .production-layout,html[data-layout=compact] .ability-columns{grid-template-columns:1fr!important}html[data-layout=compact] .bar-grid{grid-template-columns:repeat(4,minmax(40px,1fr))!important}html[data-layout=compact] .inv-head{flex-wrap:wrap}}
+
+/* 窄横屏固定成紧凑的两排，避免自由换行挤出孤立槽位和整块空底。 */
+@media(max-width:740px){
+  html[data-layout=compact][data-controls=touch] .hotbar{display:grid;grid-template-columns:repeat(4,44px);gap:4px!important;width:max-content;justify-content:center}
+  html[data-layout=compact][data-controls=touch] .hotbar .sep{display:none}
+}
+
+/* 首页弹窗采用同一安全区与滚动契约，正文让出固定的关闭和确认入口。 */
+html[data-layout=compact] .title-hud-mask:is(.settings-mask,.records-mask,.confirm-mask){
+  width:var(--view-width);min-height:0;overflow:hidden;overscroll-behavior:contain;
+}
+html[data-layout=compact] .title-hud-mask .title-hud-panel{
+  min-width:0;min-height:0;max-height:100%!important;padding:14px 18px!important;
+  overscroll-behavior:contain;scrollbar-gutter:auto;
+}
+html[data-layout=compact] .title-hud-mask .title-hud-panel h2{font-size:24px;margin:4px 0 8px;letter-spacing:3px}
+html[data-layout=compact] .title-hud-mask .title-hud-action{min-height:44px;padding:8px 12px;font-size:18px;letter-spacing:2px;white-space:nowrap}
+html[data-layout=compact] .title-hud-mask .title-settings-head{flex:none;padding-bottom:8px;border-bottom:1px solid #aaa0cc2e}
+html[data-layout=compact] .title-hud-mask .title-settings-head small{font-size:10px;letter-spacing:2px}
+html[data-layout=compact] .title-hud-mask .title-settings-head h2{margin:4px 0 0}
+html[data-layout=compact] .title-hud-mask .settings-panel{
+  display:flex;flex-direction:column;width:min(780px,100%);height:100%;overflow:hidden!important;
+}
+html[data-layout=compact] .title-hud-mask .title-settings-content{
+  display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr);align-items:start;
+  gap:24px;min-height:0;flex:1;overflow-y:auto;overflow-x:hidden;padding:10px 4px 6px 0;touch-action:pan-y;
+}
+html[data-layout=compact] .title-hud-mask .title-audio-settings{margin:0;gap:14px;min-width:0}
+html[data-layout=compact] .title-hud-mask .title-audio-settings label{grid-template-columns:58px minmax(0,1fr) 40px;gap:8px;min-height:44px;font-size:12px;letter-spacing:0}
+html[data-layout=compact] .title-hud-mask .title-audio-settings label>span{width:auto}
+html[data-layout=compact] .title-hud-mask .title-audio-settings input{height:40px}
+html[data-layout=compact] .title-hud-mask .title-audio-settings small{width:40px;font-size:11px}
+html[data-layout=compact] .title-hud-mask .title-display-settings{
+  margin:0;padding:0 0 0 18px;border-top:0;border-left:1px solid #aaa0cc2e;gap:6px;font-size:12px;
+}
+html[data-layout=compact] .title-hud-mask .title-display-settings legend{padding:0 0 6px;font-size:10px;letter-spacing:1px}
+html[data-layout=compact] .title-hud-mask .title-display-settings label{min-height:44px;gap:8px}
+html[data-layout=compact] .title-hud-mask .title-display-settings select{width:136px;min-height:44px;padding-left:10px}
+html[data-layout=compact] .title-hud-mask .setting-range{width:136px;gap:6px}
+html[data-layout=compact] .title-hud-mask .setting-range input{height:40px}
+html[data-layout=compact] .title-hud-mask .title-settings-foot{flex:none;justify-content:flex-end;border-top:1px solid #aaa0cc2e;padding-top:4px}
+html[data-layout=compact] .title-hud-mask .records-panel{width:min(780px,100%);height:100%;overflow:hidden!important}
+html[data-layout=compact] .title-hud-mask .records-panel>header{flex:none;gap:12px;padding-bottom:8px!important}
+html[data-layout=compact] .title-hud-mask .records-close{width:44px;height:44px;flex:none;line-height:1}
+html[data-layout=compact] .title-hud-mask .records-list{flex:1;min-height:0;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px!important;padding:10px 2px!important;align-content:start;overflow:auto;touch-action:pan-y}
+html[data-layout=compact] .title-hud-mask .record-row{min-width:0}
+html[data-layout=compact] .title-hud-mask .title-record-sheet{min-height:112px;padding:12px;gap:6px;overflow-wrap:anywhere}
+html[data-layout=compact] .title-hud-mask .title-record-sheet.empty{min-height:112px}
+html[data-layout=compact] .title-hud-mask .record-number{font-size:10px;letter-spacing:1px;padding-right:60px;min-height:20px}
+html[data-layout=compact] .title-hud-mask .title-record-sheet strong{font-size:14px;padding-right:0;line-height:1.5}
+html[data-layout=compact] .title-hud-mask .title-record-sheet>span:not(.record-number),html[data-layout=compact] .title-hud-mask .title-record-sheet time{font-size:10px;line-height:1.5}
+html[data-layout=compact] .title-hud-mask .record-stamp{right:10px;bottom:8px;font-size:18px;opacity:.55}
+html[data-layout=compact] .title-hud-mask .record-rename{top:0;right:4px;min-width:52px;min-height:44px;padding:4px;font-size:11px}
+html[data-layout=compact] .title-hud-mask .records-panel>footer{flex:none;gap:12px;padding-top:4px!important;border-top:1px solid #aaa0cc2e}
+html[data-layout=compact] .title-hud-mask .records-panel>footer p{font-size:10px;line-height:1.5;min-width:0;overflow-wrap:anywhere}
+html[data-layout=compact] .title-hud-mask .confirm-panel{width:min(470px,100%);overflow:hidden!important}
+html[data-layout=compact] .title-hud-mask .confirm-caption{font-size:10px;letter-spacing:2px}
+html[data-layout=compact] .title-hud-mask .confirm-paper{padding:10px 0 16px}
+html[data-layout=compact] .title-hud-mask .confirm-paper p{font-size:12px;line-height:1.8}
+html[data-layout=compact] .title-hud-mask .confirm-panel footer{position:static;flex:none;background:transparent;gap:12px;margin-top:8px;padding:4px 0 0}
+html[data-layout=compact] .title-hud-mask .title-rename-form{padding:10px 0}
+html[data-layout=compact] .title-hud-mask .title-rename-form label{margin-bottom:6px;font-size:11px}
+html[data-layout=compact] .title-hud-mask .title-rename-form p{margin-top:6px;font-size:10px;line-height:1.6}
+
+/* 选人页在横屏中把立绘与表单并排，键盘弹出后仍可滚动操作。 */
+html[data-layout=compact] .new-game{
+  display:grid;grid-template-columns:minmax(0,1fr) minmax(210px,30%);grid-template-rows:auto minmax(0,1fr);
+  gap:10px 28px;align-items:center;
+  padding:calc(var(--safe-top) + 12px) calc(var(--safe-right) + 24px) calc(var(--safe-bottom) + 12px) calc(var(--safe-left) + 24px)!important;
+}
+html[data-layout=compact] .new-game>header{grid-column:1/-1}
+html[data-layout=compact] .new-game h1{font-size:24px!important;margin:0!important;letter-spacing:3px}
+html[data-layout=compact] .new-game header small{display:none}
+html[data-layout=compact] .hero-choices{width:100%;height:100%;min-height:0!important;max-height:none!important;margin:0!important;gap:12px}
+html[data-layout=compact] .hero-choice{width:46%;padding:8px 0 18px;min-height:0;height:100%}
+html[data-layout=compact] .hero-choice img{height:calc(100% - 36px);max-height:100%;max-width:100%;object-fit:contain}
+html[data-layout=compact] .hero-choice.selected img{transform:scale(1)}
+html[data-layout=compact] .hero-label{font-size:20px!important;letter-spacing:4px}
+html[data-layout=compact] .journey-form{width:100%;min-width:0;max-height:100%;overflow:auto;touch-action:pan-y;padding:8px 4px}
+html[data-layout=compact] .journey-form label{font-size:11px;line-height:1.6;letter-spacing:2px;margin:0 0 12px!important}
+html[data-layout=compact] .journey-form input{min-height:44px;font-size:16px;letter-spacing:2px;padding:8px}
+html[data-layout=compact] .journey-actions{gap:4px;margin:14px 0 0!important;flex-wrap:wrap}
+html[data-layout=compact] .journey-actions .art-action{min-height:44px;padding:8px 6px;font-size:18px;letter-spacing:2px}
+html[data-layout=compact] .journey-actions .begin{font-size:22px}
+html[data-layout=compact] .journey-actions .art-action span{margin-left:5px}
+html[data-layout=compact] .title-screen{--title-media-width:min(var(--view-width),calc(var(--view-height)*16/9));--title-media-height:calc(var(--title-media-width)*9/16)}
+html[data-layout=compact] .title-menu{left:max(calc(var(--safe-left) + 12px),calc((var(--view-width) - var(--title-media-width))*.5 + var(--title-media-width)*.12))!important;top:calc((var(--view-height) - var(--title-media-height))*.5 + var(--title-media-height)*.44)!important}
+
+@media(max-width:600px){
+  html[data-layout=compact] .title-hud-mask .title-settings-content{grid-template-columns:1fr;gap:16px}
+  html[data-layout=compact] .title-hud-mask .title-display-settings{padding:12px 0 0;border-left:0;border-top:1px solid #aaa0cc2e}
+  html[data-layout=compact] .title-hud-mask .records-list{grid-template-columns:1fr}
+}
+@media(orientation:portrait){
+  html[data-layout=compact] .new-game{display:flex;flex-direction:column;gap:12px;overflow:auto}
+  html[data-layout=compact] .hero-choices{flex:1 0 180px;height:40vh;min-height:180px!important;max-height:50vh!important}
+  html[data-layout=compact] .journey-form{flex:none;width:min(360px,100%);max-height:none}
+}
+
+/* 触摸没有悬停阶段；取消放大、位移和浏览器点击高亮，反馈只改变局部底色。 */
+html[data-controls=touch] :is(.title-screen,.title-hud-mask,.hud-modal,.records-mask,.search-panel) button{
+  -webkit-tap-highlight-color:transparent;transform:none!important;filter:none!important;transition:none!important;
+}
+html[data-controls=touch] .title-hud-mask .title-hud-panel::before,html[data-controls=touch] .title-hud-mask .title-hud-panel::after{filter:none}
+html[data-controls=touch] .title-hud-mask .title-hud-action:active{background:#b7a1db18;color:#f6efff}
+html[data-controls=touch] .title-hud-mask *,html[data-controls=touch] .search-grid-viewport{scrollbar-width:none}
+html[data-controls=touch] .title-hud-mask *::-webkit-scrollbar,html[data-controls=touch] .search-grid-viewport::-webkit-scrollbar{display:none;width:0;height:0}
+html[data-controls=touch] .search-item.revealed:not(.fresh):not(:disabled):hover .discovered-item{transform:none}
+
+/* 小横屏把摘要收到底部，格子单独滚动，关闭与拿取始终留在视口内。 */
+@media(max-width:640px){
+  html[data-layout=compact] .search-panel{
+    --cell:max(44px,min(56px,calc((var(--view-height) - var(--safe-top) - var(--safe-bottom) - 170px)/var(--search-rows)),calc((var(--view-width) - var(--safe-left) - var(--safe-right) - var(--search-reserve) - 34px)/var(--search-cols))));
+    display:flex;flex-direction:column;gap:6px;
+    width:max(240px,calc(var(--search-cols)*var(--cell) + 34px))!important;
+    height:calc(var(--view-height) - var(--safe-top) - var(--safe-bottom) - 16px);
+  }
+  html[data-layout=compact] .search-header{flex:none}
+  html[data-layout=compact] .search-grid-viewport{flex:1}
+  html[data-layout=compact] .search-summary{flex:none;gap:5px;overflow:visible;padding:0}
+  html[data-layout=compact] .search-summary .search-inspect{display:none!important}
+  html[data-layout=compact] .search-summary .search-status{flex-wrap:nowrap;font-size:10px!important}
+  html[data-layout=compact] .search-status small{width:auto;padding:0;font-size:10px}
+  html[data-layout=compact] .search-panel footer{flex-direction:row;margin:0}
+  html[data-layout=compact] .search-take .touch-glyph{display:none}
+}

@@ -13,7 +13,6 @@ export function registerResourceCache(): void {
     navigator.serviceWorker.addEventListener('controllerchange', () => {
       // 仅首次打开、尚未操作的首页采用新版本；玩家操作后绝不刷新或中断游戏。
       if (!interacted && document.querySelector('.title-screen') && !document.querySelector('.journey-transition')) window.location.reload()
-      else navigator.serviceWorker.controller?.postMessage({ type: 'CACHE_RESOURCES' })
     }, { once: true })
     registration.waiting.postMessage({ type: 'ACTIVATE_UPDATE' })
     return true
@@ -27,11 +26,9 @@ export function registerResourceCache(): void {
       })
       if (registration.installing) registration.installing.addEventListener('statechange', () => { activateIdleUpdate(registration) })
       if (activateIdleUpdate(registration)) return
-      const ready = await navigator.serviceWorker.ready
-      ready.active?.postMessage({ type: 'CACHE_RESOURCES' })
     } catch (error) { console.warn('[资源缓存] 浏览器缓存未启用，继续正常加载资源。', error) }
   }
-  // 前台首页先完成加载，剩余资源由后台按小并发预取，不挡住玩家启程。
+  // 首页完成后只注册缓存服务；图片、字体与音视频均随真实使用缓存，不进行全量预取。
   if (document.readyState === 'complete') void begin()
   else window.addEventListener('load', () => { void begin() }, { once: true })
 }

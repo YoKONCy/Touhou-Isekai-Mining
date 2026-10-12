@@ -11,6 +11,7 @@ const amulet:ItemDef={
 
 const plate:ItemDef={
   id:KNIGHT_PLATE_ID,kind:'armor',equipSlot:'outfit',grade:2,maxStack:1,tags:['armor'],
+  wearableAppearance:'knight_plate',
   color:'#7d899b',hi:'#d7dfe7',text:'#b9c7da',
   combat:{physicalResist:6,meleeWeaponDamageBonus:.1,projectileReductionRange:[3,5],moveSpeedMultiplier:.76,dodgeCooldownMultiplier:2.5},
   icon:svgIcon('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><path d="M16 7L19 3H29L32 7L31 16H17Z" fill="#a5adba" stroke="#343747" stroke-width="1.5"/><path d="M19 4Q24 9 29 4L28 10Q24 13 20 10Z" fill="#3e4252"/><path d="M15 8L7 9L2 17L4 23L13 21L16 16M33 8L41 9L46 17L44 23L35 21L32 16" fill="#8e9bac" stroke="#343747" stroke-width="1.5"/><path d="M7 10L3 17L12 16L15 9M34 9L36 16L45 17L41 10" fill="#c5cfdc"/><path d="M13 11L19 13H29L35 11L34 25L29 32H19L14 25Z" fill="#9faab9" stroke="#343747" stroke-width="1.5"/><path d="M14 12L19 14L24 17V30L19 29L16 24Z" fill="#d4dce4"/><path d="M24 17L33 12L32 25L28 30H24Z" fill="#7a869a"/><path d="M24 16V30M15 22L22 25M33 22L26 25" stroke="#4d566a" fill="none"/><path d="M17 29H31L33 34L32 38L35 43L27 46L24 41L21 46L13 43L16 38L15 34Z" fill="#8896a8" stroke="#343747" stroke-width="1.4"/><path d="M16 33L24 35L32 33M16 38L24 40L32 38M15 42L21 43M27 43L33 42" fill="none" stroke="#d3dce6" stroke-width="1"/><path d="M17 31H31" stroke="#c2ad7b" stroke-width="2"/><rect x="22" y="29.5" width="4" height="3" fill="#746448" stroke="#e2c995" stroke-width=".6"/></svg>')

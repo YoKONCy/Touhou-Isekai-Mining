@@ -1,5 +1,6 @@
 import { SnapshotCodec, type StateFields } from '../../core/simulation/snapshot'
 import type { CharacterProfile } from '../../shared/profile'
+import { withPlayerCostume } from '../../shared/playerAppearance'
 import type { EngineContext } from '../../core/types'
 import type { ScriptedRoomSpec } from './dungeon/script'
 import type { RoomRuntime } from './RoomRuntime'
@@ -156,7 +157,7 @@ export class FourthFloorDirector {
     if (this.biting) {
       if (resolveDialogueCG(dialogue.state.value?.node)) this.biteHasCG = true
       // 完整 CG 退场后不再补播程序小插图，避免窜入设计范围以外的台词。
-      if (!this.biteHasCG) drawRumiaBiteCutin(g, width, height, this.clock,this.biteCutinAge)
+      if (!this.biteHasCG) withPlayerCostume(this.profile.equipment.visibleCostume(this.profile.costume), () => drawRumiaBiteCutin(g, width, height, this.clock,this.biteCutinAge))
     }
     if (this.boss.alive && this.phase !== 'waiting' && this.phase !== 'intro') {
       const w = Math.min(460, width * .45), x = (width - w) / 2

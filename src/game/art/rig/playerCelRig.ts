@@ -1,4 +1,5 @@
 import { oldMinerAtlas } from './playerCostume'
+import { knightPlateAtlas } from './knightPlate'
 import { ARM_RIG, armShoulders } from './handGrip'
 import type { Dir4, PlayerPose } from './skeleton'
 import type { HandAnchor, RigOptions } from './playerRig'
@@ -60,6 +61,7 @@ export function loadPlayerRigAssets(appearance: PlayerAppearance = simulationApp
   if (existing) return existing
   if (typeof Image === 'undefined') return Promise.resolve(false)
   const image = new Image()
+  image.decoding = 'async'
   atlases.set(appearance, image)
   const loading = new Promise<boolean>(resolve => {
     image.onload = () => resolve(hasCompleteAtlas(image))
@@ -84,9 +86,13 @@ export function getPlayerRigAtlas(): PlayerAtlas | undefined {
   const appearance = simulationAppearance()
   void loadPlayerRigAssets(appearance)
   const atlas = atlases.get(appearance)
-  return atlas && hasCompleteAtlas(atlas) ? simulationCostume()==='old_miner'?oldMinerAtlas(atlas,appearance):atlas : undefined
+  if (!atlas || !hasCompleteAtlas(atlas)) return undefined
+  const costume = simulationCostume()
+  if (costume === 'old_miner') return oldMinerAtlas(atlas, appearance)
+  if (costume === 'knight_plate') return knightPlateAtlas(atlas, appearance)
+  return atlas
 }
-void loadPlayerRigAssets()
+// 入场按所选角色显式加载，避免选择妹妹时也提前下载哥哥的图集。
 
 function part(g: CanvasRenderingContext2D, image: PlayerAtlas, id: number): void {
   const { width, height, columns, top, scale } = playerBodyAtlas
@@ -94,7 +100,7 @@ function part(g: CanvasRenderingContext2D, image: PlayerAtlas, id: number): void
   g.drawImage(image, id % columns * width, top + Math.floor(id / columns) * height, width, height, -16, -16, width / scale, height / scale)
 }
 
-/** 头图沿用确认参考的完整五官；侧面单眼，背面完全遮住五官。 */
+/** 默认头图保留角色五官；全盔装束使用同位置的独立头盔图格。 */
 export function drawPlayerCelHead(g: CanvasRenderingContext2D, dir: Dir4, expression: PlayerCelExpression, tilt = 0): void {
   const image = getPlayerRigAtlas()
   if (!image) return
@@ -215,18 +221,22 @@ export function drawPlayerCelRig(g: CanvasRenderingContext2D, x: number, y: numb
     if ((back || behindGrip) && !twoHanded) nearArm()
     if (behindGrip) palms()
   }
-  const expression = opts.expression ?? (opts.hurt ? 'angry' : pose.time % 3.6 < .12 ? 'blink' : 'neutral')
-  drawPoseLayer(g, pose, image, opts.cacheBody, 'torso', `${dir}:${torsoAngle}:${bone.head}:${pose.hair}:${expression}`, c => {
+  const closedHelmet = simulationCostume() === 'knight_plate'
+  // 全盔没有眨眼或发丝摆动，避免相同头盔因表情变化反复重烘焙。
+  const expression = closedHelmet ? 'neutral' : opts.expression ?? (opts.hurt ? 'angry' : pose.time % 3.6 < .12 ? 'blink' : 'neutral')
+  const headTilt = (bone.head + Math.PI / 2) + (closedHelmet ? 0 : pose.hair * .08)
+  drawPoseLayer(g, pose, image, opts.cacheBody, 'torso', `${dir}:${torsoAngle}:${headTilt}:${expression}`, c => {
     c.save(); c.rotate(torsoAngle)
     part(c, image, back ? playerBodyParts.back : side ? playerBodyParts.side : playerBodyParts.front)
     c.restore()
     c.save()
-    if (simulationAppearance() === 'sister') {
+    if (closedHelmet) c.translate(8.2 * Math.sin(torsoAngle), -8.2 * Math.cos(torsoAngle))
+    else if (simulationAppearance() === 'sister') {
       // 头颈随领口绕衣身原点移动，头自身仍保留原动画倾角；侧身缩短颈部空隙。
       const neckX = side ? .45 : 0, neckY = side ? -6.4 : back ? -6.9 : -7.1
       c.translate(neckX * Math.cos(torsoAngle) - neckY * Math.sin(torsoAngle), neckX * Math.sin(torsoAngle) + neckY * Math.cos(torsoAngle))
     } else c.translate(0, -8.2)
-    drawPlayerCelHead(c, dir, expression, (bone.head + Math.PI / 2) + pose.hair * .08)
+    drawPlayerCelHead(c, dir, expression, headTilt)
     c.restore()
   })
   if (accessoryFront !== false) accessory()

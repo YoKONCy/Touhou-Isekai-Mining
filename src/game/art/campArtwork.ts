@@ -17,6 +17,7 @@ export function loadCampArtwork(): Promise<boolean> {
   if (typeof Image === 'undefined') return Promise.resolve(false)
   const load = (name: string): Promise<HTMLImageElement> => new Promise((resolve, reject) => {
     const image = new Image()
+    image.decoding = 'async'
     image.onload = () => image.naturalWidth > 0 ? resolve(image) : reject(new Error('基地贴图尺寸无效。'))
     image.onerror = () => reject(new Error(`基地贴图加载失败：${name}`))
     image.src = `${import.meta.env.BASE_URL}scenes/base/${name}.png`

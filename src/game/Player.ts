@@ -4,7 +4,7 @@ import { MotionHistory } from '../core/simulation/interpolation'
 import { nextEntityId, emitSimulationEvent } from '../core/simulation/events'
 import { randomCombat,randomVisual } from '../core/simulation/random'
 import { renderMeleeEcho,type MeleeEcho } from './MeleeEchoes'
-import { simulationAppearance, withSimulationAppearance, withPlayerCostume, type PlayerAppearance, type PlayerCostume } from '../shared/playerAppearance'
+import { simulationAppearance, withSimulationAppearance, withPlayerCostume, type PlayerAppearance, type PlayerCostume, type PlayerVisualCostume } from '../shared/playerAppearance'
 import { CONFIG, type DodgeKind, type DodgePhase, type SwingPhase } from './config'
 import type { Collider, TileMap } from './tilemap'
 import { getItemDef, items, type ItemId, type MeleeMove, type SpellCardDef } from '../shared/itemDefs'
@@ -152,6 +152,7 @@ export class Player {
   private swingAccessoryEffects:StatusDefinition[]|null=null
   private dodgeDistanceMul=1
   bindEquipment(equipment:Equipment):void {this.equipmentSource=equipment}
+  private get visualCostume(): PlayerVisualCostume { return this.equipmentSource?.visibleCostume(this.costume) ?? this.costume }
   beginMineRun(token:string):void {
     if(this.mineRunToken===token)return
     this.mineRunToken=token;this.effects.removeSource('equipment:mineRun')
@@ -1262,7 +1263,7 @@ export class Player {
       this.meleeEchoes.push({x:this.x-Math.cos(angle)*behind-Math.sin(angle)*side,y:this.y-Math.sin(angle)*behind+Math.cos(angle)*side,
         angle,weaponId:this.swingToolId,age:0,delay,activeDuration,duration:delay+activeDuration+echo.fadeDuration,damage:echo.damage,
         magicPenetration:getItemDef(this.swingToolId).combat?.magicPenetration??0,move:{...sm},hitIds:new Set(),pose,motion:sample,
-        appearance:this.appearance??simulationAppearance(),costume:this.costume})
+        appearance:this.appearance??simulationAppearance(),costume:this.visualCostume})
     }
     this.emitWeaponImpact(0)
     const trail = this.weaponResource?.trail
@@ -1627,7 +1628,7 @@ export class Player {
     const started = profiler.start()
     const offset = this.motionHistory.offset(this.x, this.y)
     ctx.save(); ctx.translate(offset.x, offset.y)
-    try { withSimulationAppearance(this.appearance ?? simulationAppearance(), () => withPlayerCostume(this.costume,()=>this.renderCurrent(ctx))) } finally { ctx.restore(); profiler.end('playersRender', started) }
+    try { withSimulationAppearance(this.appearance ?? simulationAppearance(), () => withPlayerCostume(this.visualCostume,()=>this.renderCurrent(ctx))) } finally { ctx.restore(); profiler.end('playersRender', started) }
   }
 
   private renderCurrent(ctx: CanvasRenderingContext2D): void {

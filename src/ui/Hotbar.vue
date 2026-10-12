@@ -17,6 +17,7 @@ import { beginPointerDrag, isClickSuppressed, type DragPayload, type DropTarget 
 import ItemIcon from './ItemIcon.vue'
 import { isInventoryMouseOpen } from './inventoryMouse'
 import { touchControls, viewport } from '../browser/display'
+import TouchGlyph from './TouchGlyph.vue'
 
 const props = defineProps<{ cave: ModuleActions; tick: number; hand: number; mana: number; spellCd: number }>()
 
@@ -187,7 +188,13 @@ function emptyHint(c: BarCell): string {
           'spell-first': c.kind === 'spell' && c.eq === 'spellA',
           'spell-last': c.kind === 'spell' && c.eq === 'spellB'
         }"
+        role="button"
+        tabindex="0"
+        :aria-label="cellId(c) ? itemName(cellId(c)!) : t(c.labelKey || 'ui.slot.quick', { n: (c.q ?? 0) + 1 })"
+        :aria-pressed="c.kind === 'hand' ? isActive(c, i) : undefined"
         :data-drop="c.kind === 'quick' ? `quick:${c.q}` : `eq:${c.eq}`"
+        @keydown.enter.stop.prevent="onClickCell(c, i)"
+        @keydown.space.stop.prevent="onClickCell(c, i)"
         @pointerdown="onCellPointerDown($event, $event.currentTarget as HTMLElement, c)"
         @click="onClickCell(c, i)"
         @mouseenter="(e) => onEnter(i, e)"
@@ -196,6 +203,7 @@ function emptyHint(c: BarCell): string {
       >
         <span class="keyhint">{{ keyHint(c) }}</span>
         <ItemIcon v-if="cellId(c)" :id="cellId(c)" :size="34" />
+        <TouchGlyph v-else-if="touchControls" class="touch-slot-ghost" :kind="c.kind === 'spell' ? 'spell' : c.kind === 'quick' ? 'quick' : c.eq === 'pick' ? 'pick' : 'attack'"/>
         <!-- 空槽暗纹：短剑线条（武器槽） -->
         <svg v-else-if="c.kind === 'hand' && c.eq !== 'pick'" class="ghost-ico" viewBox="0 0 24 24">
           <path d="M12 2.5v11.5M7 14h10M12 16.5v4.5" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" />

@@ -1,6 +1,6 @@
 import type { MeleeMove,WeaponMotionView,WeaponTrailView } from '../content/items/types'
 import type { PlayerPose } from './art/rig/skeleton'
-import type { PlayerAppearance,PlayerCostume } from '../shared/playerAppearance'
+import type { PlayerAppearance,PlayerVisualCostume } from '../shared/playerAppearance'
 import { withSimulationAppearance,withPlayerCostume } from '../shared/playerAppearance'
 import { getItemDef } from '../shared/itemDefs'
 import { drawPlayerRig,getPlayerHandAnchor,getPlayerSupportHandAnchor } from './art/rig/playerRig'
@@ -13,7 +13,7 @@ export interface MeleeEcho {
   /** 起手错开量归模拟时间管理，旧快照缺省立即挥出。 */
   delay?:number
   damage:number;magicPenetration:number;move:MeleeMove;hitIds:Set<string>
-  pose:PlayerPose;motion:WeaponMotionView;appearance:PlayerAppearance;costume:PlayerCostume
+  pose:PlayerPose;motion:WeaponMotionView;appearance:PlayerAppearance;costume:PlayerVisualCostume
 }
 const silhouettes=new WeakMap<MeleeEcho,{sprite:RasterSprite;frame:number}>()
 

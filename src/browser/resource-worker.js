@@ -1,98 +1,127 @@
-/* 构建时注入内容哈希与资源清单；不缓存存档、接口或仓库范围之外的请求。 */
+/* 构建时注入内容哈希；首页外壳按版本保存，实际用到的素材按内容版本跨更新复用。 */
 const BUILD_ID = '__BUILD_ID__'
 const MANIFEST = []
 const scope = new URL(self.registration.scope)
 const prefix = `touhou-isekai-mining:${scope.pathname}:`
 const cacheName = `${prefix}${BUILD_ID}`
+const assetCacheName = `${prefix}assets-v2`
+const manifestURL = new URL('.resource-manifest.json', scope).href
 const entries = new Map(MANIFEST.map(entry => [new URL(entry.path, scope).href, entry]))
 const pending = new Map()
-let warming
 
 function resourceURL(entry) { return new URL(entry.path, scope).href }
+function assetKey(entry) {
+  const url = new URL(resourceURL(entry))
+  url.searchParams.set('__resource_revision', entry.revision)
+  return url.href
+}
 
 async function digest(bytes) {
   const hash = await crypto.subtle.digest('SHA-256', bytes)
   return Array.from(new Uint8Array(hash), value => value.toString(16).padStart(2, '0')).join('')
 }
 
-/** 未变化的资源可复用旧构建缓存；内容哈希不同的文件必须重新获取。 */
-async function download(entry) {
-  const url = resourceURL(entry), cache = await caches.open(cacheName)
-  const cached = await cache.match(url)
-  if (cached) return cached
-  for (const name of await caches.keys()) {
-    if (name === cacheName || !name.startsWith(prefix)) continue
-    const previous = await (await caches.open(name)).match(url)
-    if (previous?.headers.get('X-Resource-Revision') !== entry.revision) continue
-    await cache.put(url, previous.clone())
-    return previous
-  }
-  const response = await fetch(url, { cache: 'no-cache' })
-  if (!response.ok || response.status !== 200) throw new Error(`资源获取失败：${entry.path}（${response.status}）`)
+/** 新缓存以内容哈希为键；旧版已缓存且哈希相同的资源在使用时迁入，不重新下载。 */
+async function cachedResource(entry) {
+  try {
+    const cache = await caches.open(entry.essential ? cacheName : assetCacheName)
+    const key = entry.essential ? resourceURL(entry) : assetKey(entry)
+    const cached = await cache.match(key)
+    if (cached) return cached
+    const shared = await (await caches.open(assetCacheName)).match(assetKey(entry))
+    if (shared) return shared
+    for (const name of await caches.keys()) {
+      if (!name.startsWith(prefix) || name === cacheName || name === assetCacheName) continue
+      const previous = await (await caches.open(name)).match(resourceURL(entry))
+      if (previous?.headers.get('X-Resource-Revision') !== entry.revision) continue
+      try { await cache.put(key, previous.clone()) }
+      catch (error) { console.warn('[资源缓存] 旧资源迁移暂未完成，继续使用已有资源。', error) }
+      return previous
+    }
+  } catch (error) { console.warn('[资源缓存] 本地缓存暂不可读，继续网络加载。', error) }
+  return null
+}
+
+/** 下载与校验写入分开：前台立即消费响应流，只有完整且匹配的资源才进入缓存。 */
+async function storeResource(entry, response) {
   const bytes = await response.arrayBuffer()
   if (bytes.byteLength !== entry.size || await digest(bytes) !== entry.revision) throw new Error(`资源版本不匹配：${entry.path}`)
   const headers = new Headers(response.headers)
   headers.delete('Content-Encoding'); headers.delete('Transfer-Encoding')
   headers.set('Content-Length', String(bytes.byteLength))
   headers.set('X-Resource-Revision', entry.revision)
-  const full = new Response(bytes, { status: 200, headers })
-  // 缓存满或不可用时仍返回当前资源，不能阻断正常游戏。
-  try { await cache.put(url, full.clone()) }
-  catch (error) { console.warn('[资源缓存] 写入失败，本次资源仍可使用。', error) }
-  return full
+  try {
+    const cache = await caches.open(entry.essential ? cacheName : assetCacheName)
+    await cache.put(entry.essential ? resourceURL(entry) : assetKey(entry), new Response(bytes, { status: 200, headers }))
+  } catch (error) { console.warn('[资源缓存] 写入失败，本次资源仍可使用。', error) }
 }
 
-async function ensureResource(entry) {
-  const url = resourceURL(entry)
-  let task = pending.get(url)
+function loadResource(entry, request) {
+  const key = assetKey(entry)
+  let task = pending.get(key)
   if (!task) {
-    task = download(entry)
-    pending.set(url, task)
-    task.then(() => pending.delete(url), () => pending.delete(url))
+    task = (async () => {
+      const cached = await cachedResource(entry)
+      if (cached) return { response: cached, stored: Promise.resolve() }
+      const response = await fetch(request || resourceURL(entry), { cache: entry.essential && !entry.path.endsWith('.html') ? 'default' : 'no-cache' })
+      const stored = response.status === 200 ? storeResource(entry, response.clone()) : Promise.resolve()
+      // 校验与写入由事件延长生命周期，不能让后台拒绝先于前台挂接处理而变成未处理错误。
+      stored.catch(() => {})
+      return { response, stored }
+    })()
+    pending.set(key, task)
+    const release = () => { if (pending.get(key) === task) pending.delete(key) }
+    task.then(result => result.stored).then(release, release)
   }
-  return (await task).clone()
-}
-
-async function warmResources(resources, required = false) {
-  let cursor = 0
-  async function run() {
-    while (cursor < resources.length) {
-      const entry = resources[cursor++]
-      try { await ensureResource(entry) }
-      catch (error) {
-        if (required) throw error
-        console.warn(`[资源缓存] 暂未缓存 ${entry.path}，后续访问会重试。`, error)
-      }
-    }
-  }
-  await Promise.all([run(), run()])
+  return task
 }
 
 self.addEventListener('install', event => {
-  event.waitUntil(warmResources(MANIFEST.filter(entry => entry.essential), true))
-  // 更新等待旧页面结束后再接管，避免正在游玩的页面突然混用两版资源。
+  event.waitUntil((async () => {
+    // 安装只缓存入口及静态依赖，绝不把动态玩法、整套立绘和音乐当作首页必需品。
+    await Promise.all(MANIFEST.filter(entry => entry.essential).map(async entry => {
+      const result = await loadResource(entry)
+      if (result.response.status !== 200) throw new Error(`首页资源获取失败：${entry.path}`)
+      await result.stored
+    }))
+    await (await caches.open(cacheName)).put(manifestURL, new Response(JSON.stringify(MANIFEST), { headers: { 'Content-Type': 'application/json' } }))
+  })())
 })
+
+/** 保留最近两个旧外壳供尚未关闭的页面使用；共享素材保留这些版本仍引用的内容。 */
+async function pruneCaches() {
+  const names = (await caches.keys()).filter(name => name.startsWith(prefix) && name !== cacheName && name !== assetCacheName)
+  const retained = names.slice(-2)
+  await Promise.all(names.slice(0, -2).map(name => caches.delete(name)))
+  const allowed = new Set(MANIFEST.map(assetKey))
+  for (const name of retained) {
+    const previous = await (await caches.open(name)).match(manifestURL)
+    // 旧缓存没有清单，先保留共享素材；仍可按响应中的内容哈希惰性迁移。
+    if (!previous) return
+    for (const entry of await previous.json()) allowed.add(assetKey(entry))
+  }
+  const assets = await caches.open(assetCacheName)
+  for (const request of await assets.keys()) if (!allowed.has(request.url)) await assets.delete(request)
+}
 
 self.addEventListener('activate', event => {
   event.waitUntil((async () => {
-    // 清理仅限本仓库的旧资源缓存，绝不操作 IndexedDB 或其他站点的缓存。
-    await Promise.all((await caches.keys()).filter(name => name.startsWith(prefix) && name !== cacheName).map(name => caches.delete(name)))
     await self.clients.claim()
+    try { await pruneCaches() }
+    catch (error) { console.warn('[资源缓存] 旧版本清理稍后重试，不影响当前加载。', error) }
   })())
 })
 
 self.addEventListener('message', event => {
-  if (event.data?.type === 'ACTIVATE_UPDATE') { event.waitUntil(self.skipWaiting()); return }
-  if (event.data?.type !== 'CACHE_RESOURCES') return
-  if (!warming) warming = warmResources(MANIFEST.filter(entry => !entry.essential)).finally(() => { warming = undefined })
-  event.waitUntil(warming)
+  if (event.data?.type === 'ACTIVATE_UPDATE') event.waitUntil(self.skipWaiting())
+  // 兼容旧页面消息，但不再执行 CACHE_RESOURCES 全量预取。
 })
 
-/** 音乐与循环视频使用字节区间读取；完整缓存可直接生成正确的 206 响应。 */
+/** 完整缓存存在时在原生 Blob 上截取字节区间，避免每次都复制整首音乐到 JS 数组。 */
 async function rangeResponse(response, range) {
   const match = /^bytes=(\d*)-(\d*)$/.exec(range)
   if (!match || (!match[1] && !match[2])) return null
-  const bytes = await response.arrayBuffer(), size = bytes.byteLength
+  const blob = await response.blob(), size = blob.size
   const suffix = !match[1]
   const start = suffix ? Math.max(0, size - Number(match[2])) : Number(match[1])
   const end = suffix || !match[2] ? size - 1 : Math.min(size - 1, Number(match[2]))
@@ -101,7 +130,7 @@ async function rangeResponse(response, range) {
   headers.set('Content-Range', `bytes ${start}-${end}/${size}`)
   headers.set('Content-Length', String(end - start + 1))
   headers.set('Accept-Ranges', 'bytes')
-  return new Response(bytes.slice(start, end + 1), { status: 206, headers })
+  return new Response(blob.slice(start, end + 1), { status: 206, headers })
 }
 
 self.addEventListener('fetch', event => {
@@ -111,19 +140,36 @@ self.addEventListener('fetch', event => {
   url.search = ''; url.hash = ''
   if (url.href === scope.href) url.pathname += 'index.html'
   const entry = entries.get(url.href)
-  if (!entry) return
-  const range = event.request.headers.get('Range')
-  if (range) {
-    event.waitUntil(ensureResource(entry).then(() => {}, error => { console.warn('[资源缓存] 媒体后台缓存暂未完成。', error) }))
+  if (!entry) {
+    // 更新时旧页面可能仍请求旧哈希模块，只回退这类不可变代码，不回退已变更的普通图片。
+    if (!/\/assets\/[^/]+-[\w-]+\.(?:js|css)$/.test(url.pathname)) return
     event.respondWith((async () => {
-      const cached = await (await caches.open(cacheName)).match(resourceURL(entry))
-      if (cached) {
-        const partial = await rangeResponse(cached, range)
-        if (partial) return partial
-      }
+      try {
+        const shared = await (await caches.open(assetCacheName)).match(url.href, { ignoreSearch: true })
+        if (shared) return shared
+        for (const name of (await caches.keys()).filter(name => name.startsWith(prefix) && name !== assetCacheName)) {
+          const previous = await (await caches.open(name)).match(url.href)
+          if (previous) return previous
+        }
+      } catch { /* 缓存不可用时由正常网络请求继续处理。 */ }
       return fetch(event.request)
     })())
     return
   }
-  event.respondWith(ensureResource(entry).catch(() => fetch(event.request)))
+  const range = event.request.headers.get('Range')
+  if (range) {
+    event.respondWith((async () => {
+      const cached = await cachedResource(entry)
+      if (cached) {
+        const partial = await rangeResponse(cached, range)
+        if (partial) return partial
+      }
+      // 未命中只交给浏览器原生分段请求，不另起完整音视频下载。
+      return fetch(event.request)
+    })().catch(() => fetch(event.request)))
+    return
+  }
+  const task = loadResource(entry, event.request)
+  event.respondWith(task.then(result => result.response.clone()).catch(() => fetch(event.request)))
+  event.waitUntil(task.then(result => result.stored).catch(error => { console.warn(`[资源缓存] 暂未保存 ${entry.path}，后续访问会重试。`, error) }))
 })

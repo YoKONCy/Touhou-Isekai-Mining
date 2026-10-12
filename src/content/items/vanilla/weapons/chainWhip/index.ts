@@ -10,7 +10,7 @@ const chainWhip: ItemDef = {
   id: CHAIN_WHIP_ID,
   grade: 1,
   combat: { ...whip.combat, penetration: 2, critChance: .04 },
-  melee: { ...whip.melee!, damage: 21, windup: .15, active: .26, recover: .36 },
+  melee: { ...whip.melee!, damage: 22, windup: .15, active: .26, recover: .36 },
   weapon: { ...whip.weapon, drawHeld: drawChainGrip, drawCurve: drawChainWhip, idleAim: chainIdleAim, supportGrip: chainIdleGrip },
   color: '#7f8d9e', hi: '#dae0dc', text: '#d4d9df',
   tags: [...(whip.tags ?? []), 'chain'],

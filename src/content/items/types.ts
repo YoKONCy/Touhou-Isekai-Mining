@@ -8,6 +8,7 @@
  * pack 清单登记，引擎文件零改动。
  */
 import type { ContentId } from '../core/ids'
+import type { PlayerVisualCostume } from '../../shared/playerAppearance'
 
 /** 物品 id：命名空间字符串（MOD 内容 TS 无法穷举，联合类型时代结束） */
 export type ItemId = ContentId
@@ -15,7 +16,7 @@ export type ItemId = ContentId
 /** 物品大类（决定背包行为/图标/可装备槽） */
 export type ItemKind = 'material' | 'misc' | 'collectible' | 'ammunition' | 'pick' | 'weapon' | 'armor' | 'consumable' | 'spellcard'
 
-/** 装备槽位（纸娃娃）：装束槽为头/身/腿合并后的全身槽；饰品 4 槽同型 */
+/** 装备槽位（纸娃娃）：装束槽为头/身/腿合并后的全身槽；饰品 6 槽同型 */
 export type EquipSlot =
   | 'pick'
   | 'weaponA'
@@ -23,15 +24,18 @@ export type EquipSlot =
   | 'spellA'
   | 'spellB'
   | 'outfit'
+  | 'vanityOutfit'
   | 'trinketA'
   | 'trinketB'
   | 'trinketC'
   | 'trinketD'
+  | 'trinketE'
+  | 'trinketF'
 
 /**
  * 物品定义可声明的归槽类型：
  * 比 {@link EquipSlot} 多一个虚拟值 `'trinket'`——表示"饰品类"物品，
- * 可被 trinketA~D 任一实槽接受（具体门控见 equipment.slotAccepts）。
+ * 可被 trinketA~F 任一实槽接受（具体门控见 equipment.slotAccepts）。
  */
 export type ItemEquipSlot = EquipSlot | 'trinket'
 
@@ -474,6 +478,8 @@ export interface ItemDef {
   icon: ItemIcon
   /** 可装备到哪个槽（pick/weapon/spellcard/outfit/trinket 类携带；'trinket'=饰品类通配） */
   equipSlot?: ItemEquipSlot
+  /** 穿戴图集标识；实际装备与时装槽共用外观，时装不提供战斗属性。 */
+  wearableAppearance?: PlayerVisualCostume
   /** 装备战斗属性；暴击率为0~1，穿透为抗性数值。 */
   combat?: { critChance?: number; meleeCritChance?:number; meleeWeaponDamageBonus?:number; penetration?: number; magicPenetration?:number; physicalResist?: number; magicResist?: number; projectileReduction?: number;projectileReductionRange?:readonly [number,number];spellCooldownReduction?:number;dodgeCooldownReduction?:number;dodgeDistanceBonus?:number;moveSpeedMultiplier?:number;dodgeCooldownMultiplier?:number;lightRadiusMultiplier?:number }
   /** 每趟下矿只抽一次的装备祝福，换房与换装不重抽。 */

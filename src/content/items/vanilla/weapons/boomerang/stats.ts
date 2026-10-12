@@ -11,7 +11,7 @@ export const stats = {
   },
   ranged: {
     type: 'boomerang',
-    damage: 17,
+    damage: 21,
     speed: 360,
     accuracyPenalty: 5,
     attackInterval: .3,

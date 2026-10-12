@@ -38,7 +38,7 @@ function run(which:'move'|'transfer'|'drop'|'action'):void {
     </template>
     <span v-else class="touch-item-hint">{{ t('ui.mobile.item_hint') }}</span>
     <small v-if="message" role="status">{{ message }}</small>
-    <Teleport to="body"><div v-if="details&&def&&stack" class="touch-detail-mask" data-inventory-action="touch" @pointerdown.stop @click.self="details=false"><article class="touch-item-detail hud-panel"><header><ItemIcon :id="stack.id" :size="36"/><strong :style="{color:itemQualityColor(def,'ui')}">{{ itemName(stack.id) }}<small>{{ quality }}</small></strong><button @click="details=false">×</button></header><p>{{ itemDesc(stack.id) }}</p><ItemStatSheet :def="def" expanded :ranged-crit="combat.rangedCritChance" :shooting-deviation="combat.shootingDeviation" :durability="stack.durability"/></article></div></Teleport>
+    <Teleport to="body"><div v-if="details&&def&&stack" class="touch-detail-mask" data-inventory-action="touch" @pointerdown.stop @click.self="details=false"><article class="touch-item-detail hud-panel"><header><ItemIcon :id="stack.id" :size="36"/><strong :style="{color:itemQualityColor(def,'ui')}">{{ itemName(stack.id) }}<small>{{ quality }}</small></strong><button @click="details=false">×</button></header><p v-if="selected === 'eq:vanityOutfit'">{{ t('ui.vanity.cosmetic_only') }}</p><p>{{ itemDesc(stack.id) }}</p><ItemStatSheet :def="def" expanded :ranged-crit="combat.rangedCritChance" :shooting-deviation="combat.shootingDeviation" :durability="stack.durability"/></article></div></Teleport>
   </div>
 </template>
 <style scoped>

@@ -40,7 +40,7 @@ body .title-hud-mask .title-hud-panel h2 {
   text-shadow: 0 0 22px #b59de333;
 }
 body .title-hud-mask .title-hud-panel :is(header small, .confirm-caption),
-body .title-hud-mask .settings-panel > small { color: #c3b8db; font-size: 12px; letter-spacing: 3px; }
+body .title-hud-mask .title-settings-head small { color: #c3b8db; font-size: 12px; letter-spacing: 3px; }
 body .title-hud-mask .title-hud-action {
   position: relative;
   display: inline-block;
@@ -161,11 +161,15 @@ body .title-hud-mask .title-audio-settings input::-webkit-slider-thumb { width: 
 body .title-hud-mask .title-audio-settings input::-moz-range-track { height: 3px; background: linear-gradient(90deg, #b0a0cf, #66547f); }
 body .title-hud-mask .title-audio-settings input::-moz-range-thumb { width: 15px; height: 15px; border: 0; border-radius: 0; background: linear-gradient(135deg, #fff1ff, #bba2e9); clip-path: polygon(50% 0,100% 50%,50% 100%,0 50%); transform: none; box-shadow: none; }
 body .title-hud-mask .title-audio-settings input:focus-visible { outline: 1px solid #9c87c3; outline-offset: 7px; }
-body .title-hud-mask .settings-panel > button { margin-top: 12px; }
+body .title-hud-mask .title-settings-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+body .title-hud-mask .title-settings-close { display: grid; place-items: center; flex: none; width: 44px; height: 44px; padding: 0; border: 1px solid #b8a8e133; border-radius: 0; background: #10162a80; color: #dbceef; font: 26px var(--font-body); cursor: pointer; }
+body .title-hud-mask .title-settings-close:focus-visible { outline: 1px solid #d7c5ff; outline-offset: 2px; }
+body .title-hud-mask .title-settings-foot { display: flex; justify-content: center; padding-top: 12px; }
 
-#app .title-hud-mask *::-webkit-scrollbar-track { background: #101427; border: 0; box-shadow: none; }
-#app .title-hud-mask *::-webkit-scrollbar-thumb { border: 2px solid #101427; background: #6e6088; }
-#app .title-hud-mask *::-webkit-scrollbar-thumb:hover { background: #a091be; }
+body .title-hud-mask * { scrollbar-color: #6e6088 #101427; }
+body .title-hud-mask *::-webkit-scrollbar-track { background: #101427; border: 0; box-shadow: none; }
+body .title-hud-mask *::-webkit-scrollbar-thumb { border: 2px solid #101427; background: #6e6088; }
+body .title-hud-mask *::-webkit-scrollbar-thumb:hover { background: #a091be; }
 @media (max-width: 560px) {
   body .title-hud-mask:is(.settings-mask,.records-mask,.confirm-mask) { padding: 16px; }
   body .title-hud-mask .title-hud-panel { padding: 23px 20px; }

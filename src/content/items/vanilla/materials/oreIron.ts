@@ -19,7 +19,7 @@ const ICON = svgIcon(`<svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg
 const def: ItemDef = {
   id: ORE_IRON_ID,
   kind: 'material',
-  rarity:2,
+  rarity:1,
   searchFootprint:[1,2],
   color: '#8993a2',
   hi: '#c2cbd8',

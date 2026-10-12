@@ -63,6 +63,7 @@ export interface SaveProfile {
     costume?: 'default' | 'old_miner'
     equipment: ReturnType<Equipment['toJSON']>
     equipmentDurability?:ReturnType<Equipment['durabilityJSON']>
+    equipmentHidden?: ReturnType<Equipment['visibilityJSON']>
     inventory: ReturnType<Inventory['toJSON']>
     inventoryCapacity?: number
     inventoryStackLimit?: number
@@ -177,6 +178,7 @@ export class CharacterProfile {
         costume: this.costume,
         equipment: this.equipment.toJSON(),
         equipmentDurability:this.equipment.durabilityJSON(),
+        equipmentHidden: this.equipment.visibilityJSON(),
         inventory: this.inventory.toJSON(),
         inventoryCapacity: this.inventory.size,
         inventoryStackLimit: 20,
@@ -225,6 +227,7 @@ export class CharacterProfile {
     for(const id of data.pendingSearchUnlocks??[])if(typeof id==='string')this.pendingSearchUnlocks.add(id)
     if (ch?.equipment) this.equipment.fromJSON(ch.equipment)
     this.equipment.restoreDurability(ch?.equipmentDurability)
+    this.equipment.restoreVisibility(ch?.equipmentHidden)
     if (Array.isArray(data.storage)) this.storage.fromJSON(data.storage)
     if (ch?.inventory) {
       // 囊袋升级只扩格子；旧档的堆叠加成取消，超限物品由下方迁移到仓库保留。

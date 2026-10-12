@@ -21,7 +21,7 @@ const ICON = svgIcon(`<svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg
 const def: ItemDef = {
   id: ORE_GOLD_ID,
   kind: 'material',
-  rarity:4,
+  rarity:2,
   searchFootprint:[2,2],
   color: '#d9aa3c',
   hi: '#ffe98f',

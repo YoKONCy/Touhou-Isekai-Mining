@@ -2,10 +2,11 @@ import { readonly, shallowRef } from 'vue'
 
 export type PlayerAppearance = 'brother' | 'sister'
 export type PlayerCostume = 'default' | 'old_miner'
-let activeCostume:PlayerCostume='default'
-export const simulationCostume=():PlayerCostume=>activeCostume
+export type PlayerVisualCostume = PlayerCostume | 'knight_plate'
+let activeCostume:PlayerVisualCostume='default'
+export const simulationCostume=():PlayerVisualCostume=>activeCostume
 /** 换装只影响当前绘制者，不能把其他本地玩家的衣服一起切换。 */
-export function withPlayerCostume<T>(costume:PlayerCostume,work:()=>T):T {
+export function withPlayerCostume<T>(costume:PlayerVisualCostume,work:()=>T):T {
   const previous=activeCostume;activeCostume=costume
   try{return work()}finally{activeCostume=previous}
 }

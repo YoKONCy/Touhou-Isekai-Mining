@@ -11,6 +11,7 @@ import LoopingTitleVideo from './LoopingTitleVideo.vue'
 import DisplaySettings from './DisplaySettings.vue'
 import { touchControls, compactLayout, displaySettings } from '../browser/display'
 import { t } from '../i18n'
+import { prepareGameContent } from '../content/prepare'
 
 const props = withDefaults(defineProps<{ initialScreen?: 'menu' | 'new' }>(), { initialScreen: 'menu' })
 const emit = defineEmits<{ start: [profile: CharacterProfile] }>()
@@ -29,8 +30,8 @@ async function openMenu(index: number): Promise<void> {
   if (index === 0) screen.value = 'new'
   else modal.value = index === 1 ? 'load' : 'settings'
   await nextTick()
-  if (index === 0) root.value?.querySelector<HTMLButtonElement>('.hero-choice.selected')?.focus()
-  if (index === 2) root.value?.querySelector<HTMLInputElement>('.settings-panel input')?.focus()
+  if (!touchControls.value && index === 0) root.value?.querySelector<HTMLButtonElement>('.hero-choice.selected')?.focus({ preventScroll: true })
+  if (!touchControls.value && index === 2) root.value?.querySelector<HTMLInputElement>('.settings-panel input')?.focus({ preventScroll: true })
 }
 function choose(value: PlayerAppearance): void { appearance.value = value; tap() }
 async function requestNew(): Promise<void> {
@@ -45,6 +46,7 @@ async function requestNew(): Promise<void> {
 async function createNew(): Promise<void> {
   busy.value = true; message.value = ''
   try {
+    await prepareGameContent()
     const profile = await saveService.newGame(appearance.value, name.value)
     confirmNew.value = false
     tap(); emit('start', profile)
@@ -57,7 +59,7 @@ async function back(): Promise<void> {
   else screen.value = 'menu'
   message.value = ''; tap()
   await nextTick()
-  root.value?.querySelector<HTMLButtonElement>('.title-option.active')?.focus()
+  if (!touchControls.value) root.value?.querySelector<HTMLButtonElement>('.title-option.active')?.focus({ preventScroll: true })
 }
 function onKey(event: KeyboardEvent): void {
   if (busy.value || confirmNew.value || modal.value === 'load' || event.isComposing) return
@@ -123,7 +125,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
     <SaveSlotsDialog v-if="modal === 'load'" mode="load" theme="title" @close="back" @loaded="emit('start', $event)"/>
     <div v-if="modal === 'settings'" class="settings-mask title-hud-mask" @click.self="back">
       <section class="settings-panel title-hud-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title">
-        <small>{{ t('ui.title.settings_caption') }}</small><h2 id="settings-title">{{ t('ui.title.settings') }}</h2><AudioSettings theme="title"/><DisplaySettings theme="title"/><button class="title-hud-action" @click="back">{{ t('ui.common.back') }}</button>
+        <header class="title-settings-head"><div><small>{{ t('ui.title.settings_caption') }}</small><h2 id="settings-title">{{ t('ui.title.settings') }}</h2></div><button class="title-settings-close" :aria-label="t('ui.common.close')" @click="back">×</button></header>
+        <div class="title-settings-content"><AudioSettings theme="title"/><DisplaySettings theme="title"/></div>
+        <footer class="title-settings-foot"><button class="title-hud-action" @click="back">{{ t('ui.common.back') }}</button></footer>
       </section>
     </div>
     <HudConfirm v-if="confirmNew" theme="title" :title="t('ui.title.confirm_new.title')" :message="t('ui.title.confirm_new.message')" :confirm-label="t('ui.title.begin')" :busy="busy" @cancel="!busy && (confirmNew = false)" @confirm="createNew"/>

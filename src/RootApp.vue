@@ -1,18 +1,16 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, shallowRef, ref, watch } from 'vue'
-import App from './App.vue'
+import { markRaw, nextTick, onBeforeUnmount, onMounted, shallowRef, ref, watch, type Component } from 'vue'
 import TitleScreen from './ui/TitleScreen.vue'
 import { landscapeRequired } from './browser/display'
 import type { CharacterProfile } from './shared/profile'
 import { setPlayerAppearance } from './shared/playerAppearance'
 import { dialogue } from './game/dialogue/dialogueService'
-import { loadMineAssets } from './game/art/mineAssets'
-import { loadCampArtwork } from './game/art/campArtwork'
-import { loadPlayerRigAssets } from './game/art/rig/playerRig'
+import { prepareGameContent } from './content/prepare'
 import { sfx, type AudioSettings as AudioSettingsValues } from './game/audio/Sfx'
 import { t } from './i18n'
 
 const profile = shallowRef<CharacterProfile | null>(null)
+const gameComponent = shallowRef<Component | null>(null)
 const entering = ref(false), error = ref(''), initialScreen = ref<'menu' | 'new'>('menu'), titleKey = ref(0)
 const phase = ref<'idle' | 'fadeOut' | 'black' | 'fadeIn'>('idle')
 const transitionTimers = new Map<number, () => void>()
@@ -66,11 +64,18 @@ async function start(next: CharacterProfile): Promise<void> {
     phase.value = 'black'
     profile.value = null
     await nextTick()
-    const [mapReady, rigReady, campReady] = await Promise.all([loadMineAssets(), loadPlayerRigAssets(next.playerAppearance), loadCampArtwork(), transitionDelay(220)])
+    const [game, mapReady, rigReady, campReady] = await Promise.all([
+      import('./App.vue'),
+      import('./game/art/mineAssets').then(module => module.loadMineAssets()),
+      import('./game/art/rig/playerRig').then(module => module.loadPlayerRigAssets(next.playerAppearance)),
+      import('./game/art/campArtwork').then(module => module.loadCampArtwork()),
+      prepareGameContent(), transitionDelay(220)
+    ])
     if (disposed) return
     if (!mapReady || !rigReady || !campReady) throw new Error('矿洞、基地或角色资源未加载完成')
     setPlayerAppearance(next.playerAppearance)
     dialogue.setProfile(next)
+    gameComponent.value = markRaw(game.default)
     profile.value = next
     await nextTick()
     phase.value = 'fadeIn'
@@ -94,7 +99,7 @@ onBeforeUnmount(() => {
 })
 </script>
 <template>
-  <App v-if="profile" :profile="profile" @loaded="start" @new-game="showTitle('new')" @title="showTitle()"/>
+  <component :is="gameComponent" v-if="profile && gameComponent" :profile="profile" @loaded="start" @new-game="showTitle('new')" @title="showTitle()"/>
   <TitleScreen v-else-if="phase !== 'black'" :key="titleKey" :initial-screen="initialScreen" @start="start"/>
   <div v-if="profile&&landscapeRequired" class="orientation-notice" role="status"><span aria-hidden="true">↻</span><strong>{{ t('ui.mobile.rotate') }}</strong><small>{{ t('ui.mobile.rotate_hint') }}</small></div>
   <div v-if="entering" class="journey-transition" :class="phase" role="status" :aria-label="t('ui.title.loading')"></div>

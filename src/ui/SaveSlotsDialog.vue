@@ -5,6 +5,8 @@ import type { CharacterProfile, SaveProfile } from '../shared/profile'
 import HudConfirm from './HudConfirm.vue'
 import SaveRenameDialog from './SaveRenameDialog.vue'
 import { currentLang, t } from '../i18n'
+import { touchControls } from '../browser/display'
+import { prepareGameContent } from '../content/prepare'
 
 const props = withDefaults(defineProps<{ mode: 'save' | 'load'; theme?: 'game' | 'title' }>(), { theme: 'game' })
 const emit = defineEmits<{ close: []; loaded: [profile: CharacterProfile] }>()
@@ -65,6 +67,7 @@ async function execute(id: number): Promise<void> {
       pending.value = null
       message.value = 'ui.records.saved'
     } else {
+      await prepareGameContent()
       const profile = id === 0 ? await saveService.resumeAutosave() : await saveService.activateSlot(id)
       pending.value = null
       emit('loaded', profile)
@@ -88,11 +91,11 @@ function onKey(event: KeyboardEvent): void {
 onMounted(async () => {
   window.addEventListener('keydown', onKey, true)
   await refresh(); await nextTick()
-  panel.value?.querySelector<HTMLButtonElement>('button')?.focus()
+  if (!touchControls.value) panel.value?.querySelector<HTMLButtonElement>('button')?.focus({ preventScroll: true })
 })
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKey, true)
-  if (previousFocus?.isConnected) previousFocus.focus()
+  if (!touchControls.value && previousFocus?.isConnected) previousFocus.focus({ preventScroll: true })
 })
 </script>
 

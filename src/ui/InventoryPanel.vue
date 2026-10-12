@@ -143,6 +143,8 @@ function showEmptyTip(e: MouseEvent, text: string): void { if (!mouse.holding())
 function organizeBag(): void { mouse.cancel(); props.cave.inventory.organize(); hover.hide(); refresh() }
 function destroyTrash(): void { if (mouse.destroy('trash:0')) hover.hide() }
 function changeCostume(costume:'default'|'old_miner'):void { if(props.cave.selectCostume(costume)){refresh();hover.hide()} }
+const outfitVisible = computed(() => { void props.tick; void bump.value; return props.cave.equipment.visualVisible('outfit') })
+function toggleOutfit(): void { if (props.cave.setEquipmentVisible('outfit', !outfitVisible.value)) refresh() }
 const carriedUnlocks=computed(()=>{void props.tick;void bump.value;return [...props.profile.pendingSearchUnlocks]})
 function organizeKey(e: KeyboardEvent): void {
   if (e.code !== 'KeyR' || e.repeat || e.ctrlKey || e.altKey || e.metaKey || abilityOpen.value) return
@@ -325,6 +327,20 @@ onBeforeUnmount(() => {
                 </div>
               </template>
             </div>
+          </div>
+
+          <div class="section-tag vanity-heading">
+            <span>{{ t('ui.vanity.title') }}</span>
+            <button class="outfit-visibility" data-inventory-action="visibility" :class="{ hidden: !outfitVisible }" :aria-pressed="outfitVisible" :aria-label="t(outfitVisible ? 'ui.vanity.hide' : 'ui.vanity.show')" :title="t(outfitVisible ? 'ui.vanity.hide' : 'ui.vanity.show')" @pointerdown.stop @click.stop="toggleOutfit">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12Q12 1 22 12Q12 23 2 12Z"/><circle cx="12" cy="12" r="3"/><path v-if="!outfitVisible" d="M3 3L21 21"/></svg>
+            </button>
+          </div>
+          <div class="vanity-row">
+            <div class="gequip eqcell vanity-slot enabled" data-drop="eq:vanityOutfit" @mouseenter="e => cave.equipment.get('vanityOutfit') ? showTip(e, cave.equipment.get('vanityOutfit')) : showEmptyTip(e, t('ui.vanity.hint'))" @mouseleave="hover.leave">
+              <ItemIcon v-if="cave.equipment.get('vanityOutfit')" :id="cave.equipment.get('vanityOutfit')" :size="32" :durability="cave.equipment.getStack('vanityOutfit')?.durability" show-durability/>
+              <span v-else class="eqlabel">{{ t('ui.slot.vanityOutfit') }}</span>
+            </div>
+            <p>{{ t(outfitVisible ? 'ui.vanity.hint' : 'ui.vanity.hidden') }}</p>
           </div>
 
           <div class="section-tag spell">{{ t('ui.inv.spellcase') }}</div>
@@ -744,7 +760,7 @@ onBeforeUnmount(() => {
     inset 0 2px 5px rgba(0, 0, 0, 0.45);
 }
 
-/* —— 紫绒饰匣（饰品 A~D 四槽，配色区别于朱漆符匣） —— */
+/* —— 紫绒饰匣（饰品 A~F 六槽，配色区别于朱漆符匣） —— */
 .section-tag.trinket {
   color: #b79cf0;
   margin-top: 12px;
@@ -757,7 +773,8 @@ onBeforeUnmount(() => {
   background: linear-gradient(90deg, rgba(160, 120, 230, 0.05), rgba(160, 120, 230, 0.45));
 }
 .trinket-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(3, 46px);
   gap: 6px;
   justify-content: center;
 }
@@ -1269,5 +1286,14 @@ onBeforeUnmount(() => {
 </style>
 
 <style scoped>
+.vanity-heading { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; }
+.vanity-heading::before, .vanity-heading::after { display: none; }
+.outfit-visibility { display: grid; place-items: center; width: 40px; min-height: 32px; padding: 5px; border: 1px solid #b59a6a55; background: #271d1688; color: #e1c895; cursor: pointer; }
+.outfit-visibility svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.6; }
+.outfit-visibility.hidden { color: #a89b86; background: #19151b; }
+.outfit-visibility:hover, .outfit-visibility:focus-visible { border-color: #e1c895; outline: 1px solid #d9ba7e88; outline-offset: 2px; }
+.vanity-row { display: flex; align-items: center; gap: 10px; flex: none; }
+.eqcell.vanity-slot { flex: none; width: 52px; height: 46px; border: 1px solid #b49e7755; border-top-color: #dac49b99; background: linear-gradient(150deg, #69544055, #211a24); box-shadow: inset 0 0 0 2px #17101844; }
+.vanity-row p { color: #c4b59b; font-size: 11px; line-height: 1.65; margin: 0; }
 .costume-options,.pending-collectibles{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:8px 18px;border-bottom:1px solid #b5985d44;color:#e2d2ad;font-size:13px}.costume-options .gbtn{padding:5px 12px;font-size:13px}.carried-unlock{display:inline-flex;align-items:center;gap:4px;background:#16121a55;padding:3px 7px;border:1px solid #ab8c5544}
 </style>

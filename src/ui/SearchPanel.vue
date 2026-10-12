@@ -6,6 +6,7 @@ import { itemQualityColor,gradeNameKey } from '../shared/itemQuality'
 import { t,itemName } from '../i18n'
 import ItemIcon from './ItemIcon.vue'
 import KeyCap from './KeyCap.vue'
+import TouchGlyph from './TouchGlyph.vue'
 import { touchControls } from '../browser/display'
 
 const props=defineProps<{view:SearchView}>()
@@ -37,7 +38,7 @@ const qualityLabel=(id:string)=>{const def=getItemDef(id);return def.grade?t(gra
       <button class="search-close" :aria-label="t('ui.search.close')" @click="emit('close')">×</button>
     </header>
 
-    <div class="search-grid" role="group" :aria-label="t('ui.search.contents')">
+    <div class="search-grid-viewport"><div class="search-grid" role="group" :aria-label="t('ui.search.contents')">
       <div v-for="n in view.cols*view.rows" :key="'cell:'+n" class="grid-cell"
         :style="{gridColumn:(n-1)%view.cols+1,gridRow:Math.floor((n-1)/view.cols)+1}" aria-hidden="true"></div>
       <button v-for="{slot,index} in visibleItems" :key="view.id+':'+index" class="search-item"
@@ -58,8 +59,9 @@ const qualityLabel=(id:string)=>{const def=getItemDef(id);return def.grade?t(gra
           <svg class="lens-glass" viewBox="0 0 40 40"><path d="M25 26L35 36" stroke="#261c20" stroke-width="7" stroke-linecap="round"/><path d="M25 26L35 36" stroke="#c1a06c" stroke-width="4" stroke-linecap="round"/><circle cx="17" cy="18" r="12" fill="#241c2780" stroke="#35282a" stroke-width="4"/><circle cx="17" cy="18" r="12" fill="none" stroke="#e7ca91" stroke-width="1.8"/><path d="M10 16Q11 10 18 10" fill="none" stroke="#fff0d0" stroke-width="1.5" stroke-linecap="round"/></svg>
         </span>
       </button>
-    </div>
+    </div></div>
 
+    <div class="search-summary">
     <div class="search-legend" aria-hidden="true"><span><i class="unknown-key"></i>{{t('ui.search.covered')}}</span><span><i class="revealed-key"></i>{{t('ui.search.revealed')}}</span></div>
     <div class="search-status" role="status" aria-live="polite"><span class="status-dot" :class="{working:view.searching&&!view.blocked,done:view.complete}"></span><span>{{state}}</span><small>{{t('ui.search.found',{n:found})}}</small></div>
     <div class="search-inspect">
@@ -67,14 +69,17 @@ const qualityLabel=(id:string)=>{const def=getItemDef(id);return def.grade?t(gra
       <span v-else class="inspect-hint">{{t('ui.search.inspect_hint')}}</span>
     </div>
     <footer>
-      <button class="search-take gbtn primary" :disabled="view.blocked||!available" @click="emit('take',-1)"><KeyCap action="interact"/><span>{{t('ui.search.take_all')}}</span><small v-if="available">{{available}}</small></button>
+      <button class="search-take gbtn primary" :disabled="view.blocked||!available" @click="emit('take',-1)"><TouchGlyph v-if="touchControls" kind="interact"/><KeyCap v-else action="interact"/><span>{{t('ui.search.take_all')}}</span><small v-if="available">{{available}}</small></button>
       <button v-if="!view.complete&&!view.searching" class="search-resume gbtn" :disabled="view.blocked" @click="emit('take',-3)">{{t('ui.search.resume')}}</button>
     </footer>
     <p class="search-help"><template v-if="touchControls">{{t('ui.mobile.search_hint')}}</template><template v-else>{{t('ui.search.action_hint')}}<span>{{t('ui.search.escape_hint')}}</span></template></p>
+    </div>
   </aside>
 </template>
 
 <style scoped>
+.search-summary{display:contents}
+.search-grid-viewport{min-width:0;min-height:0}
 /* 沿用背包的皮革、绒布和黄铜；格子共用托盘边界，物品跨格时遮住内部格线。 */
 .search-panel {
   --cell: clamp(58px, 9vh, 84px);

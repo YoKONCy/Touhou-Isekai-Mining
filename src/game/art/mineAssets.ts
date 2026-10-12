@@ -12,7 +12,7 @@ export function loadMineAssets(): Promise<boolean> {
   if (loading) return loading
   if (typeof Image === 'undefined') return Promise.resolve(false)
   const load = (name: string): Promise<HTMLImageElement> => new Promise((resolve, reject) => {
-    const image = new Image(); image.onload = () => image.naturalWidth ? resolve(image) : reject(new Error('矿洞素材为空。'))
+    const image = new Image(); image.decoding = 'async'; image.onload = () => image.naturalWidth ? resolve(image) : reject(new Error('矿洞素材为空。'))
     image.onerror = () => reject(new Error(`矿洞素材加载失败：${name}`))
     image.src = `${import.meta.env.BASE_URL}scenes/mine/${name}.png`
     if (image.complete && image.naturalWidth) resolve(image)

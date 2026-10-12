@@ -39,6 +39,7 @@ export function rollEnemyCount(
   if (room.kind === 'start') return rollRange(b.start)
   if (room.kind === 'reward') return rollRange(b.reward)
   if (room.kind === 'exit') return rollRange(biome.floorExitBudgets?.[room.floor ?? 1] ?? b.exit)
+  if (room.encounter === 'survival' && biome.survivalEncounter) return rollRange(biome.survivalEncounter.initialCount)
 
   const average=biome.floorEnemyAverages?.[room.floor??1]??b.normalAverage
   const depth=Math.max(1,Math.floor(room.depth??1))

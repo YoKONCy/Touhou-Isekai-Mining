@@ -3,6 +3,7 @@ import { onBeforeUnmount, ref, watch } from 'vue'
 import type { InputManager } from '../core/InputManager'
 import { t } from '../i18n'
 import { touchControls } from '../browser/display'
+import TouchGlyph from './TouchGlyph.vue'
 
 const props = defineProps<{ input: InputManager | null; blocked: boolean; panel: string | null; base: boolean; searching: boolean; dodgeCd: number; skillCd: number; skillAvailable: boolean; facing: number }>()
 const emit = defineEmits<{ panel: [kind: 'inventory' | 'map' | 'pause' | 'quests' | null] }>()
@@ -75,24 +76,44 @@ onBeforeUnmount(() => { clear(touchControls.value); window.removeEventListener('
 </script>
 <template>
   <div class="touch-controls" :class="{ 'touch-blocked': blocked }" @pointerdown.stop @click.stop @contextmenu.prevent>
-    <nav v-if="!blocked" class="touch-menu">
-      <button @click="open('inventory')">{{ t(panel === 'inventory' ? 'ui.mobile.close_bag' : 'ui.mobile.bag') }}</button>
-      <button v-if="!base" @click="open('map')">{{ t('ui.mobile.map') }}</button>
-      <button @click="open('quests')">{{ t('ui.mobile.quests') }}</button>
-      <button @click="open('pause')">Ⅱ</button>
+    <nav v-if="!blocked && !searching" class="touch-menu">
+      <button :aria-label="t(panel === 'inventory' ? 'ui.mobile.close_bag' : 'ui.mobile.bag')" :aria-pressed="panel === 'inventory'" @click="open('inventory')"><TouchGlyph kind="bag"/></button>
+      <button v-if="!base" :aria-label="t('ui.mobile.map')" :aria-pressed="panel === 'map'" @click="open('map')"><TouchGlyph kind="map"/></button>
+      <button :aria-label="t('ui.mobile.quests')" :aria-pressed="panel === 'quests'" @click="open('quests')"><TouchGlyph kind="journal"/></button>
+      <button :aria-label="t('ui.pause.title')" :aria-pressed="panel === 'pause'" @click="open('pause')"><TouchGlyph kind="pause"/></button>
     </nav>
     <template v-if="!blocked && !panel">
-      <div class="touch-pad touch-move" role="group" :aria-label="t('ui.mobile.move')" @pointerdown="start('move',$event)" @pointermove="move" @pointerup="end" @pointercancel="reset" @lostpointercapture="lost"><span class="touch-knob">✥</span></div>
-      <button class="touch-button touch-interact" @pointerdown="start('interact',$event)" @pointerup="end" @pointercancel="reset" @lostpointercapture="lost">{{ t('ui.mobile.interact') }}</button>
+      <div class="touch-pad touch-move" role="group" :aria-label="t('ui.mobile.move')" @pointerdown="start('move',$event)" @pointermove="move" @pointerup="end" @pointercancel="reset" @lostpointercapture="lost"><span class="touch-knob"><TouchGlyph kind="move"/></span></div>
+      <button class="touch-button touch-interact" :aria-label="t('ui.mobile.interact')" @pointerdown="start('interact',$event)" @pointerup="end" @pointercancel="reset" @lostpointercapture="lost"><TouchGlyph kind="interact"/></button>
       <template v-if="!base && !searching">
-        <div class="touch-pad touch-attack" role="group" :aria-label="t('ui.mobile.attack')" @pointerdown="start('attack',$event)" @pointermove="move" @pointerup="end" @pointercancel="reset" @lostpointercapture="lost"><span class="touch-knob">{{ t('ui.mobile.attack') }}</span></div>
-        <div v-if="skillAvailable" class="touch-pad touch-special" role="group" :aria-label="t('ui.mobile.skill')" @pointerdown="start('special',$event)" @pointermove="move" @pointerup="end" @pointercancel="reset" @lostpointercapture="lost"><span class="touch-knob">{{ t('ui.mobile.skill') }}</span><small v-if="skillCd>.05">{{ skillCd.toFixed(1) }}</small></div>
-        <button ref="dodgeButton" class="touch-button touch-dodge" @pointerdown="start('dodge',$event)" @pointerup="end" @pointercancel="reset" @lostpointercapture="lost">{{ t('ui.mobile.dodge') }}<small v-if="dodgeCd>.05">{{ dodgeCd.toFixed(1) }}</small></button>
-        <div v-if="charging" ref="cancelZone" class="touch-cancel">{{ t('ui.mobile.cancel_skill') }}</div>
+        <div class="touch-pad touch-attack" role="group" :aria-label="t('ui.mobile.attack')" @pointerdown="start('attack',$event)" @pointermove="move" @pointerup="end" @pointercancel="reset" @lostpointercapture="lost"><span class="touch-knob"><TouchGlyph kind="attack"/></span></div>
+        <div v-if="skillAvailable" class="touch-pad touch-special" role="group" :aria-label="t('ui.mobile.skill')" @pointerdown="start('special',$event)" @pointermove="move" @pointerup="end" @pointercancel="reset" @lostpointercapture="lost"><span class="touch-knob"><TouchGlyph kind="skill"/></span><small v-if="skillCd>.05">{{ skillCd.toFixed(1) }}</small></div>
+        <button ref="dodgeButton" class="touch-button touch-dodge" :aria-label="t('ui.mobile.dodge')" @pointerdown="start('dodge',$event)" @pointerup="end" @pointercancel="reset" @lostpointercapture="lost"><TouchGlyph kind="dodge"/><small v-if="dodgeCd>.05">{{ dodgeCd.toFixed(1) }}</small></button>
+        <div v-if="charging" ref="cancelZone" class="touch-cancel" :aria-label="t('ui.mobile.cancel_skill')"><TouchGlyph kind="cancel"/></div>
       </template>
     </template>
   </div>
 </template>
 <style scoped>
-.touch-controls{position:absolute;inset:0;z-index:25;pointer-events:none;--pad:calc(clamp(96px,24vh,124px)*var(--touch-scale));--small:calc(52px*var(--touch-scale));opacity:var(--touch-opacity)}.touch-pad,.touch-button,.touch-menu button{pointer-events:auto;touch-action:none;-webkit-touch-callout:none;border:1px solid #c4a67477;color:#eddbba;background:radial-gradient(circle at 35% 22%,#6e59623d,#27212da6 75%);box-shadow:inset 0 0 0 3px #17121c55,0 2px 8px #0004;font:inherit}.touch-pad{position:absolute;display:grid;place-items:center;border-radius:50%;width:var(--pad);height:var(--pad)}.touch-knob{display:grid;place-items:center;border:1px solid #c4a67455;background:#3b303aaa;width:53%;height:53%;border-radius:50%;pointer-events:none;font-size:13px;will-change:transform}.touch-move{left:calc(var(--safe-left) + 22px);bottom:calc(var(--safe-bottom) + 22px)}.touch-move .touch-knob{font-size:30px}.touch-attack{right:calc(var(--safe-right) + 20px);bottom:calc(var(--safe-bottom) + 24px)}.touch-special{width:calc(var(--pad)*.65);height:calc(var(--pad)*.65);right:calc(var(--safe-right) + var(--pad) + 27px);bottom:calc(var(--safe-bottom) + 26px)}.touch-special .touch-knob{width:70%;height:70%;font-size:12px}.touch-button{position:absolute;display:grid;place-items:center;min-width:var(--small);height:var(--small);border-radius:50%;font-size:12px;padding:6px}.touch-dodge{right:calc(var(--safe-right) + 30px);bottom:calc(var(--safe-bottom) + var(--pad) + 36px)}.touch-interact{left:calc(var(--safe-left) + var(--pad) + 36px);bottom:calc(var(--safe-bottom) + 40px)}.touch-menu{position:absolute;right:calc(var(--safe-right) + 10px);top:calc(var(--safe-top) + 10px);display:flex;gap:5px}.touch-menu button{min-width:44px;min-height:40px;padding:6px 9px;border-radius:2px;font-size:12px}.touch-pad[data-pressed=true],.touch-button[data-pressed=true]{border-color:#ffe0a5;background-color:#a2814d55}.touch-pad[data-cancel=true]{border-color:#df786b;background:#7a353a99}.touch-pad small,.touch-button small{position:absolute;bottom:4px;font-size:10px;pointer-events:none}.touch-cancel{position:absolute;right:calc(var(--safe-right) + 145px);bottom:calc(var(--safe-bottom) + 150px);padding:16px 22px;border:1px dashed #d79689;color:#f4c0b5;background:#3d2029dd;font-size:12px}.touch-blocked{display:none}@media(max-height:380px){.touch-controls{--pad:calc(90px*var(--touch-scale));--small:calc(46px*var(--touch-scale))}.touch-move,.touch-attack{bottom:calc(var(--safe-bottom) + 12px)}}
+.touch-controls{position:absolute;inset:0;z-index:25;pointer-events:none;--pad:var(--touch-pad);--small:var(--touch-small);opacity:var(--touch-opacity)}
+.touch-pad,.touch-button,.touch-menu button{pointer-events:auto;touch-action:none;-webkit-touch-callout:none;border:1px solid #bda47766;color:#eddbba;background:radial-gradient(circle at 32% 18%,#7c69502b,transparent 68%),#24212b70;box-shadow:inset 0 1px #e2cfa122,inset 0 -2px #100d1855,0 2px 5px #0003;font:inherit}
+.touch-pad{position:absolute;display:grid;place-items:center;border-radius:50%;width:var(--pad);height:var(--pad)}
+.touch-knob{display:grid;place-items:center;border:1px solid #bda47744;background:#35303b55;width:53%;height:53%;border-radius:50%;pointer-events:none;will-change:transform}
+.touch-move{left:calc(var(--safe-left) + 18px);bottom:calc(var(--safe-bottom) + 18px)}
+.touch-attack{right:calc(var(--safe-right) + 18px);bottom:calc(var(--safe-bottom) + 18px)}
+.touch-attack .touch-knob{width:62%;height:62%}
+.touch-attack :deep(.touch-glyph){width:38px;height:38px}
+.touch-special{width:var(--small);height:var(--small);right:calc(var(--safe-right) + var(--pad) + 20px);bottom:calc(var(--safe-bottom) + var(--pad)*.65 + 22px)}
+.touch-special .touch-knob{width:100%;height:100%;border:0;background:none}
+.touch-button{position:absolute;display:grid;place-items:center;width:var(--small);height:var(--small);border-radius:50%;padding:6px}
+.touch-dodge{right:calc(var(--safe-right) + 20px);bottom:calc(var(--safe-bottom) + var(--pad) + 30px)}
+.touch-interact{left:calc(var(--safe-left) + var(--pad) + 20px);bottom:calc(var(--safe-bottom) + var(--pad)*.65 + 22px)}
+.touch-menu{position:absolute;right:calc(var(--safe-right) + 10px);top:calc(var(--safe-top) + 8px);display:flex;gap:6px}
+.touch-menu button{display:grid;place-items:center;width:44px;height:44px;padding:5px;border-radius:9px;min-width:44px;min-height:44px}
+.touch-menu button[aria-pressed=true],.touch-pad[data-pressed=true],.touch-button[data-pressed=true]{border-color:#e7c992;background-color:#9d805344;box-shadow:inset 0 0 0 1px #d1b47c44,0 1px 5px #0004}
+.touch-menu button:focus-visible{outline:2px solid #e7c992;outline-offset:2px}
+.touch-pad[data-cancel=true]{border-color:#df786b;background:#7a353a99}
+.touch-pad small,.touch-button small{position:absolute;bottom:0;left:50%;transform:translateX(-50%);padding:0 4px;background:#17131ddd;border-radius:3px;font-size:10px;line-height:14px;color:#ecd6ad;pointer-events:none}
+.touch-cancel{position:absolute;right:calc(var(--safe-right) + var(--pad) + var(--small) + 42px);bottom:calc(var(--safe-bottom) + var(--pad) + 34px);display:grid;place-items:center;width:56px;height:56px;border:1px dashed #d79689;border-radius:50%;background:#3d2029bb;pointer-events:none}
+.touch-blocked{display:none}
 </style>

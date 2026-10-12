@@ -216,9 +216,16 @@ function makeTerrain(room:RoomDef,seed:number):RoomTerrain {
 export function buildOldHellFloorPlan():FloorPlan {
   const reduction=1+Math.floor(randomGeneration()*2)
   const plan=generateFloorPlan({roomsMin:CONFIG.dungeon.roomsMin-reduction,roomsMax:CONFIG.dungeon.roomsMax-reduction,rewardRooms:false})
+  const survival = biomeOldHell.survivalEncounter, candidates = plan.rooms.filter(room => room.kind === 'normal')
+  if (survival && candidates.length && randomGeneration() < survival.roomChance) {
+    candidates[Math.floor(randomGeneration() * candidates.length)]!.encounter = 'survival'
+  }
   for(const room of plan.rooms){
     room.floor=5;room.biomeId=BIOME_OLD_HELL_ID;room.searchRegion='old_hell_ruins'
     room.terrain=makeTerrain(room,Math.floor(randomGeneration()*0xffffffff))
+    if (room.encounter === 'survival' && survival?.guaranteedContainer) {
+      ensureTrapContainer(room.terrain, survival.guaranteedContainer)
+    }
   }
   const elite=biomeOldHell.eliteEncounter
   if(elite){
@@ -230,4 +237,18 @@ export function buildOldHellFloorPlan():FloorPlan {
     for(const room of candidates)if(remaining>0&&randomGeneration()<elite.roomChance){room.extraEnemies=[elite.enemyId];remaining--}
   }
   return plan
+}
+
+/** 保底奖励在楼层生成时固定；优先替换屋内普通点，无建筑时落在受保护的中央净空。 */
+function ensureTrapContainer(terrain: RoomTerrain, id: string): void {
+  if (terrain.buildings.some(building => building.containers.some(box => box.id === id))) return
+  const building = terrain.buildings[0]
+  if (building) {
+    const existing = building.containers[0]
+    if (existing) { existing.id = id; existing.large = true }
+    else building.containers.push({ id, col: building.col + Math.floor(building.width / 2), row: building.row + 1, large: true })
+    return
+  }
+  // 中央七格净空在地形生成时已保留，岩柱、深坑与建筑均不会占用。
+  terrain.containers = [{ id, col: Math.floor(terrain.cols / 2) + 2, row: Math.floor(terrain.rows / 2) - 2, large: true }]
 }

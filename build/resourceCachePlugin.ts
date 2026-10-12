@@ -9,10 +9,25 @@ interface ResourceEntry { path: string; revision: string; size: number; essentia
 /** 从本次真实构建产物生成缓存清单，资源变化即换缓存版本，无需手改游戏版本号。 */
 export function resourceCachePlugin(): Plugin {
   let config: ResolvedConfig
+  const shellFiles = new Set<string>(['index.html'])
   return {
     name: 'touhou-static-resource-cache',
     apply: 'build',
     configResolved(resolved) { config = resolved },
+    generateBundle(_options, bundle) {
+      shellFiles.clear(); shellFiles.add('index.html')
+      // 只沿静态依赖收集首页外壳，动态玩法、MOD 与其样式等到真正进入时再加载。
+      function collectShell(file: string): void {
+        if (shellFiles.has(file)) return
+        shellFiles.add(file)
+        const chunk = bundle[file]
+        if (chunk?.type !== 'chunk') return
+        chunk.imports.forEach(collectShell)
+        const metadata = (chunk as typeof chunk & { viteMetadata?: { importedCss?: Set<string> } }).viteMetadata
+        metadata?.importedCss?.forEach(css => shellFiles.add(css))
+      }
+      for (const chunk of Object.values(bundle)) if (chunk.type === 'chunk' && chunk.isEntry) collectShell(chunk.fileName)
+    },
     closeBundle() {
       if (!config.build.write || config.build.ssr) return
       const output = resolve(config.root, config.build.outDir)
@@ -23,7 +38,7 @@ export function resourceCachePlugin(): Plugin {
           if (entry.isDirectory()) { collect(file, `${path}/`); continue }
           if (!entry.isFile() || path === 'service-worker.js' || !STATIC_EXTENSIONS.has(extname(path).toLowerCase())) continue
           const bytes = readFileSync(file)
-          manifest.push({ path, revision: createHash('sha256').update(bytes).digest('hex'), size: bytes.length, essential: /\.(?:html|js|css)$/.test(path) })
+          manifest.push({ path, revision: createHash('sha256').update(bytes).digest('hex'), size: bytes.length, essential: shellFiles.has(path) })
         }
       }
       collect(output)

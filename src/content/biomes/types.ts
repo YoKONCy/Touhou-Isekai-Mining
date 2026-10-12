@@ -71,6 +71,17 @@ export interface BiomeDef {
   enemyBudget: BiomeEnemyBudget
   /** 群系独立怪池，避免楼层门槛重叠时混入其他生态。 */
   enemyIds?: readonly ContentId[]
+  /** 限时陷阱房复用统一计时器；未配置的旧楼层保持原来的刷怪节奏。 */
+  survivalEncounter?: {
+    roomChance: number
+    duration: number
+    interval: number
+    initialCount: readonly [number, number]
+    reinforcementCount: readonly [number, number]
+    noResources?: boolean
+    guaranteedContainer?: ContentId
+    openMessageKey?: string
+  }
   /** 未清场、有岩浆的房间按模拟时间定时补充敌人。 */
   lavaEncounter?: { enemyId:ContentId; interval:readonly [number,number] }
   /** 整层规划额外精英，预留必出房间名额；重访与续战不重新摇号。 */
