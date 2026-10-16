@@ -1,7 +1,7 @@
 import { Registry } from '../core/Registry'
 import type { ItemDef } from '../items/types'
-import { itemQualityLevel } from '../../shared/itemQuality'
-import { SEARCH_BALANCE } from './balance'
+import { isEquipmentItem, itemQualityLevel } from '../../shared/itemQuality'
+import { SEARCH_BALANCE, SEARCH_UNLOCK_FLOORS } from './balance'
 import type { ResolvedSearchRules, SearchContainerKind, SearchEffectDefinition, SearchFields, SearchGenerationContext, SearchLootModifier, SearchProfile, SearchRoomContext } from './types'
 
 /** 内容包可注册幸运、节庆、诅咒等纯计算修正；行为不写入容器快照。 */
@@ -12,7 +12,7 @@ const probability = (value: number): number => Math.max(0, Math.min(1, finite(va
 
 /** 群系、楼层、房型、区域和具体容器共用同一套解析入口。 */
 export function resolveSearchRules(room: SearchRoomContext, kind: SearchContainerKind, sourceId = '', table = '', override?: SearchProfile): ResolvedSearchRules {
-  const rules: ResolvedSearchRules = { density: 1, abundance: 1, rarity: 1, table, counts: [], emptyChance: 0,
+  const rules: ResolvedSearchRules = { floor: Math.max(0, Math.floor(finite(room.floor, 1))), density: 1, abundance: 1, rarity: 1, table, counts: [], emptyChance: 0,
     extraRolls: 0, quantityMultiplier: 1, itemWeights: {}, tagWeights: {}, qualityWeights: {}, appliedEffects: [] }
   const layers = [SEARCH_BALANCE.defaults, SEARCH_BALANCE.kinds[kind], SEARCH_BALANCE.biomes[room.biomeId ?? ''],
     SEARCH_BALANCE.floors[room.floor], SEARCH_BALANCE.roomKinds[room.roomKind ?? ''], SEARCH_BALANCE.regions[room.regionId ?? ''],
@@ -40,6 +40,7 @@ function mergeWeights(target: Record<string, number>, values: Readonly<Record<st
 /** 特殊效果只修正本次规则副本，不更改共享掉落表；相同效果标识只应用一次。 */
 export function applySearchEffects(base: ResolvedSearchRules, context: SearchGenerationContext): ResolvedSearchRules {
   const rules = structuredClone(base)
+  rules.floor = Math.max(0, Math.floor(finite(context.room.floor, 1)))
   const modifiers: SearchLootModifier[] = [...(context.effects.modifiers ?? [])]
   for (const effect of [...searchEffects.all()].sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0))) {
     const result = effect.resolve(context)
@@ -63,6 +64,10 @@ export function applySearchEffects(base: ResolvedSearchRules, context: SearchGen
 
 /** 品阶与非装备稀有度各用自己的等级；不混入仅用于搜索时长的装备加一级规则。 */
 export function searchItemWeight(baseWeight: number, item: ItemDef, rules: ResolvedSearchRules): number {
+  const floor = rules.floor ?? 1
+  if ((item.consume || item.tags?.includes('food')) && floor < SEARCH_UNLOCK_FLOORS.food) return 0
+  const exempt = item.equipSlot?.startsWith('trinket') || item.kind === 'spellcard' || item.equipSlot?.startsWith('spell')
+  if (!exempt && isEquipmentItem(item) && floor < SEARCH_UNLOCK_FLOORS.equipment) return 0
   const quality = Math.max(1, Math.min(7, itemQualityLevel(item)))
   let weight = Math.max(0, finite(baseWeight, 0)) * rules.rarity ** (quality - 1)
     * (rules.itemWeights[item.id] ?? 1) * (rules.qualityWeights[quality] ?? 1)

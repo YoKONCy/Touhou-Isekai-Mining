@@ -828,6 +828,13 @@ export class AudioEngine {
     for(let i=0;i<6;i++)this.noise({dur:.025+i*.004,type:'bandpass',f0:420+i*270,q:1.8,vol:.09-i*.009,at:.035+i*.028,pan,rev:.2})
   }
 
+  /** 首次进入熔岩区：低沉翻涌与热风缓缓升起，给对白保留空间。 */
+  oldHellEntrance():void {
+    this.ensure()
+    this.noise({dur:7,type:'lowpass',curve:[85,140,240,170,90],q:.6,vol:.17,env:'swell',buf:this.brown??undefined,rev:.18})
+    this.noise({dur:5.5,type:'bandpass',curve:[280,420,650,380],q:.55,vol:.045,env:'swell',at:.4,rev:.12})
+  }
+
   /** 焰灵预警的升调火鸣，爆发的低冲击与岩浆黏地的短噗响。 */
   fireBurst(kind:'warning'|'burst'|'splat'|'shoot',pan=0):void {
     this.ensure()

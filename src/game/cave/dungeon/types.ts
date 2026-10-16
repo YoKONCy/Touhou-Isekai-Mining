@@ -37,6 +37,8 @@ export interface RoomTerrain {
   doors: Array<{doorId:number;col:number;row:number;arrivalCol:number;arrivalRow:number}>
   /** 门道与入口净空，装饰、建筑及后续资源生成均需避让。 */
   reserved: number[]
+  /** 首次章节入口的真实出生点与通道出口，不参与房间之间的门连接。 */
+  storyEntrance?: { spawnCol:number;spawnRow:number;exitCol:number;exitRow:number;viewCol:number;viewRow:number }
   /** 天然岩台、断柱与承重岩柱；占地与墙体碰撞一致，外观高度独立于网格尺寸。 */
   rockFormations?: Array<{kind:'terrace'|'broken'|'pillar';cells:number[];height:number;seed:number}>
   buildings: Array<{col:number;row:number;width:number;height:number;variant:0|1;seed:number;containers:Array<{col:number;row:number;large:boolean;id?:import('../../../content/props/types').PropId}>}>

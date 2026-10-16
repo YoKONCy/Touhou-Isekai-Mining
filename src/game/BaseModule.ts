@@ -44,6 +44,9 @@ import { drawFurnaceState, drawWorktableTools, drawCraftMarker } from './art/wor
 import { rememberGelReturn } from '../content/story/sidequests/crafting/tetanus'
 import {rememberIronWork} from '../content/story/sidequests/crafting/ironWork'
 import { FourthCampScene, RUMIA_CAMP } from './story/FourthCampScene'
+import { FifthCampScene } from './story/FifthCampScene'
+import { FIFTH_FLAGS } from '../content/story/mainline/fifth-entry/state'
+import { STRANGE_PORK_ID } from '../content/items/vanilla/ids'
 import { FOURTH_FLAGS } from '../content/story/mainline/fourth-rescue/state'
 import { discoverCarried } from '../shared/discovery'
 import { refreshCulinaryProgress } from '../content/story/sidequests/culinary/state'
@@ -140,7 +143,7 @@ export class BaseModule extends CharacterModuleActions implements IGameModule {
   get worldBlurPx():number{return this.arrivalTime<0?0:14*Math.pow(1-Math.min(1,this.arrivalTime/1.15),3)}
   constructor(character:CharacterProfile,readonly localPlayers=new LocalPlayers(character)){super(character)}
   getWeaponSkillCooldown(id:string):number {return this.player?.getWeaponSkillCooldown(id)??0}
-  get canAddLocalPlayer():boolean {return !!this.player&&this.arrivalTime<0&&this.deathStage==='none'&&!dialogue.isActive&&!this.fourth?.blocking}
+  get canAddLocalPlayer():boolean {return !!this.player&&this.arrivalTime<0&&this.deathStage==='none'&&!dialogue.isActive&&!this.fourth?.blocking&&!this.fifth?.blocking}
   debugAddLocalPlayer(appearance:PlayerAppearance):string {
     if(!this.canAddLocalPlayer)throw new Error(t('ui.local_players.not_ready'))
     const profile=new LocalProfile();profile.playerAppearance=appearance;profile.setFlag('prologue.done',true)
@@ -149,12 +152,13 @@ export class BaseModule extends CharacterModuleActions implements IGameModule {
   debugRemoveLocalPlayer(id:string):void {this.localPlayers.remove(id)}
   private storyContext!:StoryContext
   private fourth: FourthCampScene | null = null
+  private fifth: FifthCampScene | null = null
   captureInputState():unknown {
-    if(dialogue.isActive||this.arrivalTime>=0||this.deathStage!=='none'||this.fourth?.blocking||this.panel==='inventory')throw new Error(t('ui.simulation.not_ready'))
+    if(dialogue.isActive||this.arrivalTime>=0||this.deathStage!=='none'||this.fourth?.blocking||this.fifth?.blocking||this.panel==='inventory')throw new Error(t('ui.simulation.not_ready'))
     return {profile:this.character.captureSimulation(),party:this.localPlayers.extras.map(member=>[member.id,member.controller,member.profile.captureSimulation(),member.entity?.x,member.entity?.y,member.entity?.hp,member.entity?.alive]),player:[this.player.x,this.player.y,this.player.hp,this.player.mana,this.player.alive,this.player.debugGod,this.player.activeToolId],}
   }
   captureSimulation():unknown {
-    if(dialogue.isActive||this.arrivalTime>=0||this.deathStage!=='none'||this.fourth?.blocking||this.panel==='inventory')throw new Error(t('ui.simulation.not_ready'))
+    if(dialogue.isActive||this.arrivalTime>=0||this.deathStage!=='none'||this.fourth?.blocking||this.fifth?.blocking||this.panel==='inventory')throw new Error(t('ui.simulation.not_ready'))
     const codec=new SnapshotCodec([this.player])
     this.localPlayers.bindReferences(codec)
     return {version:1,profile:this.character.captureSimulation(codec),player:this.player.captureSimulation(codec),localPlayers:this.localPlayers.capture(codec),time:this.time}
@@ -173,6 +177,7 @@ export class BaseModule extends CharacterModuleActions implements IGameModule {
     this.player.restoreSimulation(state.player,codec,this.map)
     this.localPlayers.finishRestore(state.localPlayers,codec,this.map)
     this.time=state.time;this.panel=null;this.deathStage='none';this.arrivalTime=-1;this.arrivalTalk=false
+    this.fifth = new FifthCampScene(this.character, this.player, this.map, () => this.ctx.engine.input.reset())
     this.queueRecipeNotices()
     this.ctx.bus.emit('ui:panel',null)
   }
@@ -210,6 +215,14 @@ export class BaseModule extends CharacterModuleActions implements IGameModule {
     if(!hadCookingQuest&&this.character.flagBool('quest.reimu.cooking.accepted')){this.message=t('quest.reimu_cooking.accepted',{name:t('quest.reimu_cooking.name')});this.messageTime=10}
     this.storageFlights=[]
     const extracted=(payload as {arrival?:boolean;extracted?:boolean}|undefined)?.extracted===true&&this.arrivalTime<0
+    const returnInfo=payload as {arrival?:boolean;fromFloor?:number;trialReturn?:boolean}|undefined
+    if(returnInfo?.arrival&&returnInfo.fromFloor===5&&!returnInfo.trialReturn){
+      this.character.setFlag(FIFTH_FLAGS.returned,true)
+      void saveService.persistStoryFlag(FIFTH_FLAGS.returned)
+    }
+    if(extracted&&[this.character.inventory,this.character.quickSlots,this.character.trash].some(bag=>bag.count(STRANGE_PORK_ID)>0)){
+      this.character.setFlag(FIFTH_FLAGS.meatReturned,true)
+    }
     for(const member of this.localPlayers.all)settleSearchRewards(member.profile,(payload as {extracted?:boolean}|undefined)?.extracted===true)
     if(extracted){for(const member of this.localPlayers.all)discoverCarried(member.profile);this.depositMaterials(2300,95)}
     this.queueRecipeNotices()
@@ -220,6 +233,8 @@ export class BaseModule extends CharacterModuleActions implements IGameModule {
     refreshCulinaryProgress(this.character,extracted||entry?.explorationDeath===true)
     if(!wasMisoAvailable&&this.character.flagBool('quest.miso.available')&&!extracted)void saveService.persistStoryFlag('quest.miso.available')
     this.fourth = this.character.flagBool(FOURTH_FLAGS.rescued) ? new FourthCampScene(this.character, this.player, () => ctx.engine.input.reset()) : null
+    this.fifth = new FifthCampScene(this.character, this.player, this.map, () => ctx.engine.input.reset())
+    if(this.deathStage==='none'&&this.arrivalTime<0&&!this.fourth?.blocking)this.fifth.prepare()
     if(this.fourth?.blocking)tutorial.dismiss()
     // 旧档已带回岩盐时补接剧情，不要求重复跑完一次二层。
     if(this.character.deepestDepth>=2&&materialCount(this.character,ROCK_SALT_ID)>0)this.character.setFlag('story.secondFloor.returned',true)
@@ -254,7 +269,7 @@ export class BaseModule extends CharacterModuleActions implements IGameModule {
   }
   private updateRecipeNotice(dt:number):void {
     // 入场、对白和面板遮挡时保留通知，等玩家真正能看见再计时。
-    if(this.panel||dialogue.isActive||this.deathStage!=='none'||this.arrivalTime>=0||this.fourth?.blocking)return
+    if(this.panel||dialogue.isActive||this.deathStage!=='none'||this.arrivalTime>=0||this.fourth?.blocking||this.fifth?.blocking)return
     this.recipeNoticeTime=Math.max(0,this.recipeNoticeTime-dt)
     if(this.recipeNoticeTime>0)return
     const id=this.recipeNotices.shift()
@@ -297,7 +312,7 @@ export class BaseModule extends CharacterModuleActions implements IGameModule {
       }
     }
   }
-  private setPanel(kind:UIPanelKind|null):void{if(kind==='wardrobe'&&!this.character.flagBool(WARDROBE_BUILT))return;if(this.fourth?.blocking||kind==='floors'&&this.fourth?.blockDeparture())return;if(kind==='map'||this.deathStage!=='none'||this.arrivalTime>=0||dialogue.isActive||kind==='floors'&&!canEnterMineFloor(this.character,2)||kind==='crafting'&&!this.character.flagBool('base.crafting.unlocked')||kind==='furnace'&&!this.character.flagBool('base.furnace.inspected'))return;this.panel=kind;if(kind)this.messageTime=0;this.ctx.bus.emit('ui:panel',kind);this.save()}
+  private setPanel(kind:UIPanelKind|null):void{if(kind==='wardrobe'&&!this.character.flagBool(WARDROBE_BUILT))return;if(this.fourth?.blocking||this.fifth?.blocking||kind==='floors'&&this.fourth?.blockDeparture())return;if(kind==='map'||this.deathStage!=='none'||this.arrivalTime>=0||dialogue.isActive||kind==='floors'&&!canEnterMineFloor(this.character,2)||kind==='crafting'&&!this.character.flagBool('base.crafting.unlocked')||kind==='furnace'&&!this.character.flagBool('base.furnace.inspected'))return;this.panel=kind;if(kind)this.messageTime=0;this.ctx.bus.emit('ui:panel',kind);this.save()}
   private playProgressStory():boolean{
     if(this.ctx.manager.transitioning||this.panel||dialogue.isActive||this.arrivalTime>=0||!this.character.flagBool('quest.reimu.cooking.done'))return false
     const started=playNextStory('camp.idle',this.storyContext,{onEnd:scene=>{
@@ -354,7 +369,7 @@ export class BaseModule extends CharacterModuleActions implements IGameModule {
     this.player.costume=costume;return true
   }
   override get actionsLocked():boolean{return this.player?.isChanneling??false}
-  override get inputBlocked():boolean{return this.arrivalTime>=0||this.deathStage!=='none'||!!this.fourth?.blocking||dialogue.isActive||tutorial.isModal}
+  override get inputBlocked():boolean{return this.arrivalTime>=0||this.deathStage!=='none'||!!this.fourth?.blocking||!!this.fifth?.blocking||dialogue.isActive||tutorial.isModal}
 
   // —— 开发调试控制台入口（DevConsole.vue 专用；发布时可整体摘除，不接触存档契约） ——
 
@@ -430,13 +445,13 @@ export class BaseModule extends CharacterModuleActions implements IGameModule {
   }
   handleUIInput(engine:EngineContext):void {
     const input=engine.input
-    if(input.suppressed||dialogue.isActive||this.fourth?.blocking||this.deathStage!=='none'||this.arrivalTime>=0||!campArtworkReady())return
+    if(input.suppressed||dialogue.isActive||this.fourth?.blocking||this.fifth?.blocking||this.deathStage!=='none'||this.arrivalTime>=0||!campArtworkReady())return
     if(input.actionPressed('panel'))this.setPanel(this.panel==='inventory'?null:'inventory')
     if(input.actionPressed('pause'))this.setPanel(this.panel?null:'pause')
     if(this.panel!=='pause')for(let i=0;i<3;i++)if(input.actionPressed((['hand1','hand2','hand3'] as const)[i]))this.selectHand(i)
   }
   update(dt:number,engine:EngineContext):void {
-    this.player.scp127.observe(dt,this.player,dialogue.isActive||this.panel!==null&&this.panel!=='inventory'||engine.input.suppressed||this.deathStage!=='none'||this.arrivalTime>=0)
+    this.player.scp127.observe(dt,this.player,dialogue.isActive||this.panel!==null&&this.panel!=='inventory'||engine.input.suppressed||this.deathStage!=='none'||this.arrivalTime>=0||!!this.fifth?.blocking)
     // 新基地尚未就绪时不开始入场对白与走位，也不把旧画面烘焙进缓存。
     if(!campArtworkReady())return
     this.updateRecipeNotice(dt)
@@ -467,6 +482,14 @@ export class BaseModule extends CharacterModuleActions implements IGameModule {
         })
       }
       return
+    }
+    if(this.fifth?.blocking){
+      this.fifth.update(dt)
+      this.animator.update(dt,{speed:0,moveAngle:Math.PI/2,aim:this.fifth.reimuAim,armed:false})
+      this.time+=dt;return
+    }
+    if(!this.ctx.manager.transitioning&&!this.panel&&!dialogue.isActive&&this.arrivalTime<0&&this.fifth?.tryStart()){
+      tutorial.dismiss();this.fifth.update(0);return
     }
     if(!this.panel&&this.playWardrobeStory())return
     if(!this.panel&&this.playProgressStory())return
@@ -547,12 +570,12 @@ export class BaseModule extends CharacterModuleActions implements IGameModule {
     }}))
     const rk=this.arrivalTime<0?1:Math.min(1,this.arrivalTime/3),rx=REIMU.x+505*(1-rk),ry=REIMU.y+90*(1-rk)
     const reimuX=this.deathStage==='none'?rx:CAMP_BED.x-70,reimuY=this.deathStage==='none'?ry:CAMP_BED.y+40
-    draws.push({y:reimuY,draw:()=>drawReimuRig(g,reimuX,reimuY,this.animator.build(Math.PI/2))})
-    if(this.deathStage==='none')draws.push({y:this.player.y,draw:()=>this.player.render(g)})
+    draws.push({y:reimuY,draw:()=>drawReimuRig(g,reimuX,reimuY,this.animator.build(this.fifth?.blocking?this.fifth.reimuAim:Math.PI/2))})
+    if(this.deathStage==='none')draws.push({y:this.player.y,draw:()=>this.fifth?.blocking?this.fifth.renderPlayer(g):this.player.render(g)})
     for(const member of this.localPlayers.extras)if(member.entity){const player=member.entity;draws.push({y:player.y,draw:()=>player.render(g)})}
     if(this.fourth){
       const fourth=this.fourth
-      draws.push({y:fourth.rumiaPosition.y,draw:()=>fourth.renderRumia(g)})
+      draws.push({y:this.fifth?.blocking?this.fifth.rumiaPosition.y:fourth.rumiaPosition.y,draw:()=>this.fifth?.blocking?this.fifth.renderRumia(g):fourth.renderRumia(g)})
       draws.push({y:fourth.kedamaSortY,draw:()=>fourth.renderKedama(g)})
     }
     if(this.character.flagBool('unlock.decoration.shrub'))draws.push({y:SHRUB_SPOT.y,draw:()=>drawShrubPot(g)})

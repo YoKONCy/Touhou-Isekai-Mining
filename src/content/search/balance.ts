@@ -1,5 +1,8 @@
 import type { SearchContainerKind, SearchProfile } from './types'
 
+/** 只限制搜索产出，采集、战斗掉落、制作和任务奖励不受影响。 */
+export const SEARCH_UNLOCK_FLOORS = { food: 3, equipment: 2 } as const
+
 /**
  * 搜索经济统一配置：density 管搜索点密度，abundance 管箱内堆数，rarity 管稀有倾向。
  * 三项倍率逐层相乘，数量分布与专属池由更具体的配置覆盖。

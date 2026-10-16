@@ -776,10 +776,22 @@ export class Player {
     ctx.fill()
   }
 
-  /**
-   * 每帧逻辑
-   * @param pointerX 指针世界坐标
-   */
+  /** 剧情走位只推进位置和骨骼，不推进战斗、状态、进食与武器计时。 */
+  updateStoryMotion(dt:number,map:TileMap,targetX:number,targetY:number,speed=140):boolean {
+    this.motionHistory.capture(this.x,this.y)
+    const dx=targetX-this.x,dy=targetY-this.y,distance=Math.hypot(dx,dy)
+    const travel=Math.min(distance,Math.max(0,dt)*speed),angle=distance>1?Math.atan2(dy,dx):this.facing
+    const body:Collider={x:this.x,y:this.y,vx:dt>0&&distance>1?dx/distance*travel/dt:0,
+      vy:dt>0&&distance>1?dy/distance*travel/dt:0,r:this.collisionR}
+    map.moveEntity(body,dt)
+    this.x=body.x;this.y=body.y;this.vx=body.vx;this.vy=body.vy;this.facing=angle
+    this.renderPoseCache=null
+    this.animator.update(dt,{speed:Math.hypot(this.vx,this.vy),moveAngle:angle,aim:angle,
+      armed:this.activeToolId!==null&&!getItemDef(this.activeToolId).weapon?.hiddenHeld})
+    return Math.hypot(targetX-this.x,targetY-this.y)<=3
+  }
+
+  /** 每帧逻辑；瞄准点由输入提供世界坐标。 */
   update(dt:number,input:PlayerInput,map:TileMap,props:readonly Prop[]=[]):void {
     withSimulationAppearance(this.appearance ?? simulationAppearance(),()=>this.updateCurrent(dt,input,map,props))
   }

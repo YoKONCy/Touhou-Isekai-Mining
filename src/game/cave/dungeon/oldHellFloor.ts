@@ -8,9 +8,10 @@ import { TILE_FLOOR,TILE_WALL,TILE_LAVA,TILE_PIT,TILE_DOOR_CLOSED } from '../../
 import { hash2 } from '../../art/artPalette'
 import { generateFloorPlan } from './bsp'
 import type { RoomDef,RoomTerrain,FloorPlan } from './types'
+import { FIFTH_ENTRANCE } from '../../../content/story/mainline/fifth-entry/state'
 
 /** 大尺度轮廓先成形，再附着门口；通路与装饰选址均复用这份地形。 */
-function makeTerrain(room:RoomDef,seed:number):RoomTerrain {
+function makeTerrain(room:RoomDef,seed:number,introEntrance=false):RoomTerrain {
   const cols=90,rows=36,tiles:number[]=Array(cols*rows).fill(TILE_WALL),reserved=new Set<number>()
   let counter=0
   const rand=()=>hash2(seed,++counter),integer=(lo:number,hi:number)=>lo+Math.floor(rand()*(hi-lo+1))
@@ -38,6 +39,13 @@ function makeTerrain(room:RoomDef,seed:number):RoomTerrain {
     }
   }
   const centerC=Math.floor(cols/2),centerR=Math.floor(rows/2)
+  if(introEntrance){
+    // 首次展开的画面确实包含熔岩与废墟，不能让入口对白依赖随机湖泊是否生成。
+    for(let r=4;r<=13;r++)for(let c=16;c<=34;c++){
+      if(((c-25)/9)**2+((r-8)/4.5)**2<.9+hash2(seed+c,r)*.15)set(c,r,TILE_LAVA)
+    }
+    for(let r=22;r<=30;r++)for(let c=25;c<=37;c++)set(c,r,TILE_FLOOR)
+  }
   const clear=(c:number,r:number,radius=1)=>{
     for(let dy=-radius;dy<=radius;dy++)for(let dx=-radius;dx<=radius;dx++){
       if(inside(c+dx,r+dy)){set(c+dx,r+dy,TILE_FLOOR);reserved.add(key(c+dx,r+dy))}
@@ -58,6 +66,7 @@ function makeTerrain(room:RoomDef,seed:number):RoomTerrain {
       let col=vertical?target:dir==='W'?2:cols-3,row=vertical?(dir==='N'?2:rows-3):target,best=Infinity
       // 在预期方位附近评估多个真实岸段，同墙门保持距离，避开尖角和深湖。
       for(let axis=low;axis<=high;axis++){
+        if(introEntrance&&dir==='W'&&axis>=13&&axis<=23)continue
         if(doors.some(d=>room.doors.find(ref=>ref.doorId===d.doorId)?.dir===dir&&Math.abs((vertical?d.col:d.row)-axis)<spacing))continue
         const startC=vertical?axis:dir==='W'?2:cols-3,startR=vertical?(dir==='N'?2:rows-3):axis
         for(let step=1;step<length;step++){
@@ -144,13 +153,23 @@ function makeTerrain(room:RoomDef,seed:number):RoomTerrain {
     }
     reached=connected()
   }
+  if(introEntrance){
+    // 西侧岩缝先窄后宽；全段净空被保留，资源、岩柱和建筑不能堵住剧情走位。
+    for(let r=14;r<=22;r++)for(let c=2;c<=22;c++)reserved.add(key(c,r))
+    for(let r=15;r<=21;r++)for(let c=2;c<=14;c++)set(c,r,TILE_WALL)
+    for(let c=4;c<=22;c++){
+      const radius=c<15?0:c<18?1:2
+      for(let dy=-radius;dy<=radius;dy++)set(c,FIFTH_ENTRANCE.spawnRow+dy,TILE_FLOOR)
+    }
+    reached=connected()
+  }
   for(let k=0;k<tiles.length;k++)if(tiles[k]===TILE_FLOOR&&!reached.has(k))tiles[k]=TILE_WALL
   const buildings:RoomTerrain['buildings']=[]
   const desired=integer(2,4)
   for(let i=0;i<desired;i++){
     const variant=(i%2) as 0|1,width=variant?10:6,height=variant?6:4
     for(let attempt=0;attempt<220;attempt++){
-      const col=integer(10,cols-width-10),row=integer(7,rows-height-6)
+      const col=introEntrance&&i===0&&attempt===0?27:integer(10,cols-width-10),row=introEntrance&&i===0&&attempt===0?23:integer(7,rows-height-6)
       let free=true
       for(let r=row-1;r<=row+height;r++)for(let c=col-1;c<=col+width;c++){
         if(tiles[key(c,r)]!==TILE_FLOOR||reserved.has(key(c,r)))free=false
@@ -210,10 +229,10 @@ function makeTerrain(room:RoomDef,seed:number):RoomTerrain {
     for(let dy=-2;dy<=2;dy++)for(let dx=-2;dx<=2;dx++)if(tiles[key(c+dx,r+dy)]!==TILE_FLOOR||reserved.has(key(c+dx,r+dy)))free=false
     if(free){set(c,r,TILE_PIT);if(rand()<.5)set(c+1,r,TILE_PIT)}
   }
-  return {cols,rows,seed,tiles,doors,reserved:[...reserved],buildings,rockFormations}
+  return {cols,rows,seed,tiles,doors,reserved:[...reserved],buildings,rockFormations,...(introEntrance?{storyEntrance:{...FIFTH_ENTRANCE}}:{})}
 }
 
-export function buildOldHellFloorPlan():FloorPlan {
+export function buildOldHellFloorPlan(introEntrance=false):FloorPlan {
   const reduction=1+Math.floor(randomGeneration()*2)
   const plan=generateFloorPlan({roomsMin:CONFIG.dungeon.roomsMin-reduction,roomsMax:CONFIG.dungeon.roomsMax-reduction,rewardRooms:false})
   const survival = biomeOldHell.survivalEncounter, candidates = plan.rooms.filter(room => room.kind === 'normal')
@@ -222,7 +241,7 @@ export function buildOldHellFloorPlan():FloorPlan {
   }
   for(const room of plan.rooms){
     room.floor=5;room.biomeId=BIOME_OLD_HELL_ID;room.searchRegion='old_hell_ruins'
-    room.terrain=makeTerrain(room,Math.floor(randomGeneration()*0xffffffff))
+    room.terrain=makeTerrain(room,Math.floor(randomGeneration()*0xffffffff),introEntrance&&room.id===plan.startId)
     if (room.encounter === 'survival' && survival?.guaranteedContainer) {
       ensureTrapContainer(room.terrain, survival.guaranteedContainer)
     }

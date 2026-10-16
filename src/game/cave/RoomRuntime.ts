@@ -421,6 +421,8 @@ export class RoomRuntime {
     this.knownPlayers=Array.from(players)
   }
   private time = 0
+  /** 演出期间只让熔岩、热汽、雾气保持流动，不推进敌人、伤害和刷怪。 */
+  advanceStoryScenery(dt:number):void { this.time += dt }
 
   // —— B2：地面交互物（站立物 + F；与磁吸 Drop 区分） ——
   private interactables: Interactable[] = []
@@ -1550,6 +1552,8 @@ export class RoomRuntime {
     if(this.oldHell)this.navigation.configure(this.map,this.collisionProps)
     const fixed=this.script?[]:[...(this.def.extraEnemies??[]),...fixedEnemyIds(this.def.kind,this.def.floor??1,allowed)]
     const valid=(x:number,y:number,radius:number):boolean=>{
+      const entrance=this.def.terrain?.storyEntrance
+      if(entrance&&x<=(entrance.exitCol+4)*tile&&Math.abs(y-(entrance.spawnRow+.5)*tile)<4*tile)return false
       const clearance=Math.max(24,radius)
       if(Math.hypot(x-spawnX,y-spawnY)<180||this.collisionProps.some(p=>circleHitsProp(x,y,clearance,p)))return false
       if(this.enemies.some(e=>Math.hypot(e.x-x,e.y-y)<Math.max(50,e.r+clearance+4)))return false

@@ -1,4 +1,6 @@
 import { setPlayerAppearance } from '../../shared/playerAppearance'
+import { FifthFloorDirector } from './FifthFloorDirector'
+import { FIFTH_FLAGS } from '../../content/story/mainline/fifth-entry/state'
 import { canvasViewport } from '../../core/rendering/Viewport'
 import { searchRewardEffects,collectSearchReward,settleSearchRewards } from '../../shared/searchRewards'
 import { LocalPlayers, type LocalPlayer, type LocalPlayersSnapshot } from '../simulation/LocalPlayers'
@@ -201,7 +203,7 @@ export class CaveModule implements IGameModule, PrologueHost {
   private light!: CaveLight
   getSearchView(): SearchView | null { return this.current?.searchView(this.player) ?? null }
   get actionsLocked():boolean{return this.player?.isChanneling??false}
-  override get inputBlocked():boolean{return this.locked||this.storyLock||this.fade!=='none'||this.entryReveal>=0||!!this.relay?.blocksInput||!!this.fourth?.blocksInput||dialogue.isActive||tutorial.isModal}
+  override get inputBlocked():boolean{return this.locked||this.storyLock||this.fade!=='none'||this.entryReveal>=0||!!this.relay?.blocksInput||!!this.fourth?.blocksInput||!!this.fifth?.blocksInput||dialogue.isActive||tutorial.isModal}
   takeSearchSlot(slot: number): void {
     const view = this.getSearchView()
     if (view) this.mctx.engine.input.queueSearch({ playerId: this.localPlayers.primaryId, containerId: view.id, slot })
@@ -231,6 +233,7 @@ export class CaveModule implements IGameModule, PrologueHost {
   private director: PrologueDirector | null = null
   private relay: MineRelayDirector | null = null
   private fourth: FourthFloorDirector | null = null
+  private fifth: FifthFloorDirector | null = null
   /** 剧情黑场当前不透明度（向 director.black 目标指数渐变；S0 醒来/营地用） */
   private blackAlpha = 0
   private entryReveal = -1
@@ -262,7 +265,7 @@ export class CaveModule implements IGameModule, PrologueHost {
   private readonly participantHosts = new Map<string, RoomHost>()
   private activeParticipants:RoomParticipant[]=[]
   private participantEntries=new WeakMap<Player,RoomParticipant>()
-  get canAddLocalPlayer():boolean { return !!this.current && !this.director && !this.locked && !dialogue.isActive && !this.fourth?.blocksInput && !this.relay?.blocksInput }
+  get canAddLocalPlayer():boolean { return !!this.current && !this.director && !this.locked && !dialogue.isActive && !this.fourth?.blocksInput && !this.fifth?.blocksInput && !this.relay?.blocksInput }
   debugAddLocalPlayer(appearance:PlayerAppearance):string {
     if(!this.canAddLocalPlayer)throw new Error(t('ui.local_players.not_ready'))
     const profile=new CharacterProfile();profile.playerAppearance=appearance;profile.setFlag('prologue.done',true)
@@ -454,11 +457,11 @@ export class CaveModule implements IGameModule, PrologueHost {
 
   /** 演出中的回调不是战斗数据；只在可操作边界建立恢复点。 */
   captureInputState():unknown {
-    if(this.director||this.relay||dialogue.isActive||this.fourth?.blocksInput||this.storyLock||this.locked||this.panel==='inventory')throw new Error(t('ui.simulation.not_ready'))
+    if(this.director||this.relay||dialogue.isActive||this.fourth?.blocksInput||this.fifth?.blocksInput||this.storyLock||this.locked||this.panel==='inventory')throw new Error(t('ui.simulation.not_ready'))
     return {profile:this.character.captureSimulation(),party:this.localPlayers.extras.map(member=>[member.id,member.controller,member.profile.captureSimulation(),member.entity?.x,member.entity?.y,member.entity?.hp,member.entity?.alive]),player:[this.player.x,this.player.y,this.player.hp,this.player.mana,this.player.alive,this.player.debugGod,this.player.activeToolId],room:this.currentId,kills:this.kills,cast:this.spellARequested,castB:this.spellBRequested,phase:this.fourth?.phase,enemies:this.current.snapshotEnemies.map(enemy=>[enemy.entityId,enemy.x,enemy.y,enemy.hp,enemy.alive]),ore:this.current.oreLeft,cleared:this.current.isCleared}
   }
   captureSimulation():unknown {
-    if(this.director||this.relay||dialogue.isActive||this.fourth?.blocksInput||this.storyLock||this.locked||this.panel==='inventory')throw new Error(t('ui.simulation.not_ready'))
+    if(this.director||this.relay||dialogue.isActive||this.fourth?.blocksInput||this.fifth?.blocksInput||this.storyLock||this.locked||this.panel==='inventory')throw new Error(t('ui.simulation.not_ready'))
     const codec=new SnapshotCodec([this.player])
     this.localPlayers.bindReferences(codec)
     for(const room of this.roomCache.values()){codec.add(room);room.bindSnapshotReferences(codec)}
@@ -477,7 +480,7 @@ export class CaveModule implements IGameModule, PrologueHost {
     if(!this.player)this.player=new Player(0,0)
     ;(this.player as {entityId:string}).entityId=String(state.player.entityId);codec.add(this.player)
     this.localPlayers.bindPrimary(this.player);this.localPlayers.prepareRestore(state.localPlayers,codec);this.participantHosts.clear()
-    this.director=null;this.relay=null;this.storyLock=false;this.locked=false;this.panel=null
+    this.director=null;this.relay=null;this.fifth=null;this.storyLock=false;this.locked=false;this.panel=null
     this.plan={...structuredClone(state.plan),slots:Int16Array.from(state.plan.slots)}
     for(const room of this.roomCache.values())room.releaseRenderResources()
     this.roomCache.clear()
@@ -519,6 +522,7 @@ export class CaveModule implements IGameModule, PrologueHost {
     floorTitle.dismiss()
     this.roomSeed = Math.floor(randomGeneration()*4294967296)
     this.director = null
+    this.fifth = mode === 'normal' && this.depth === 5 && !this.character.flagBool(FIFTH_FLAGS.introSeen) ? new FifthFloorDirector(this.character) : null
     this.relay = mode==='normal'&&shouldStartMineRelay(this.character,this.depth)
       ? new MineRelayDirector(this.character,()=>this.finishRun('cave:extract')) : null
     this.fourth = mode === 'normal' && this.depth === 4 && !this.character.flagBool(FOURTH_FLAGS.rescued) ? new FourthFloorDirector(this.character, () => {
@@ -537,7 +541,7 @@ export class CaveModule implements IGameModule, PrologueHost {
     } else if(this.depth===4){
       this.plan=buildFourthFloorPlan()
     } else if(this.depth===5){
-      this.plan=buildOldHellFloorPlan()
+      this.plan=buildOldHellFloorPlan(!!this.fifth)
     } else {
       this.plan = generateFloorPlan()
       for (const room of this.plan.rooms) room.floor = this.depth
@@ -593,6 +597,12 @@ export class CaveModule implements IGameModule, PrologueHost {
       const size=roomDimensions(def)
       let sx = (size.cols * CONFIG.tile) / 2
       let sy = (size.rows * CONFIG.tile) / 2
+      const entrance = def.terrain?.storyEntrance
+      if (fromDoorId < 0 && entrance) {
+        // 刷怪出生保护围绕通道出口，避免演出结束立即贴脸接敌。
+        sx = (entrance.exitCol + .5) * CONFIG.tile
+        sy = (entrance.exitRow + .5) * CONFIG.tile
+      }
       if (fromDoorId >= 0) {
         // 落点本身就是合法地面，同时用作刷怪/矿脉的出生留空中心
         const p = this.previewArrive(def, fromDoorId)
@@ -622,9 +632,9 @@ export class CaveModule implements IGameModule, PrologueHost {
       this.player.y = p.y
       this.player.facing = p.facing
     } else {
-      // 入口房：房间中央
-      this.player.x = (room.map.cols * room.map.tile) / 2
-      this.player.y = (room.map.rows * room.map.tile) / 2
+      const entrance = def.terrain?.storyEntrance
+      this.player.x = entrance ? (entrance.spawnCol + .5) * room.map.tile : (room.map.cols * room.map.tile) / 2
+      this.player.y = entrance ? (entrance.spawnRow + .5) * room.map.tile : (room.map.rows * room.map.tile) / 2
     }
     this.player.vx = 0
     this.player.vy = 0
@@ -673,7 +683,7 @@ export class CaveModule implements IGameModule, PrologueHost {
 
   /** 撤离/死亡 → 冻结并通知 UI；死亡损失随实际扣除一起记录。 */
   private finishRun(kind: 'cave:extract' | 'cave:died'): void {
-    if (this.locked) return
+    if (this.locked || this.fifth?.blocksInput) return
     this.mctx.bus.emit('ui:inventoryReturn', undefined)
     this.locked = true
     this.extracted = kind === 'cave:extract'
@@ -749,7 +759,7 @@ export class CaveModule implements IGameModule, PrologueHost {
 
   private setPanel(kind: UIPanelKind | null): void {
     if (this.locked) return
-    if (kind && this.fourth?.blocksInput) return
+    if (kind && (this.fourth?.blocksInput || this.fifth?.blocksInput)) return
     if (kind) this.current.cancelSearch(this.player)
     if (kind) for(const player of this.localPlayers.entities)player.cancelCharge()
     this.panel = kind
@@ -965,7 +975,7 @@ export class CaveModule implements IGameModule, PrologueHost {
 
   /** 当前是否允许调试撤离（结算未锁、非序章流程） */
   get debugCanExtract(): boolean {
-    return !this.locked && this.director === null && !this.fourth?.active
+    return !this.locked && this.director === null && !this.fourth?.active && !this.fifth?.blocksInput
   }
 
   /** 立即按正常撤离结算本局（弹撤离面板，矿石与成长全部保留） */
@@ -1171,7 +1181,7 @@ export class CaveModule implements IGameModule, PrologueHost {
 
   handleUIInput(engine: EngineContext): void {
     const { input } = engine
-    if (input.suppressed || this.locked || this.relay?.blocksInput || this.fourth?.blocksInput || dialogue.isActive) return
+    if (input.suppressed || this.locked || this.relay?.blocksInput || this.fourth?.blocksInput || this.fifth?.blocksInput || dialogue.isActive) return
     if (input.actionPressed('panel')) this.setPanel(this.panel === 'inventory' ? null : 'inventory')
     if (input.actionPressed('map')) this.setPanel(this.panel === 'map' ? null : 'map')
     if (input.actionPressed('pause')) {
@@ -1188,7 +1198,7 @@ export class CaveModule implements IGameModule, PrologueHost {
     this.light.resize(engine.viewW, engine.viewH)
   }
   update(dt: number, engine: EngineContext): void {
-    this.player.scp127.observe(dt, this.player, dialogue.isActive || this.storyLock || this.panel !== null && this.panel !== 'inventory' || engine.input.suppressed || !!this.fourth?.blocksInput || !!this.relay?.blocksInput || this.entryReveal >= 0)
+    this.player.scp127.observe(dt, this.player, dialogue.isActive || this.storyLock || this.panel !== null && this.panel !== 'inventory' || engine.input.suppressed || !!this.fourth?.blocksInput || !!this.fifth?.blocksInput || !!this.relay?.blocksInput || this.entryReveal >= 0)
     this.player.scp127.noteArena(this.current.def.id, this.current.isCleared)
     if (dialogue.isActive || this.storyLock || engine.input.suppressed) this.player.cancelCharge()
     sfx.setCaveAmbient(true)
@@ -1213,9 +1223,9 @@ export class CaveModule implements IGameModule, PrologueHost {
       // 普通入矿从首次可操作更新开始显影，祈祷卡停留期间不提前消耗标题。
       if (this.entryTitlePending) {
         this.entryTitlePending = false
-        if(!this.fourth?.active)sfx.setCaveMusic(true,this.depth===5?'old_hell':'cave')
-        floorTitle.show(this.relay?'story.mineRelay.route_title':this.depth===5?'floor.title.cave_fifth':this.depth===4?'floor.title.cave_fourth':this.depth===3?'floor.title.cave_third':this.depth===2?'floor.title.cave_second':'floor.title.cave_first', undefined, { holdMs: 850 })
-        if (!this.character.flagBool('tutorial.map.seen')) {
+        if(!this.fourth?.active&&!this.fifth?.blocksInput)sfx.setCaveMusic(true,this.depth===5?'old_hell':'cave')
+        if(!this.fifth?.blocksInput)floorTitle.show(this.relay?'story.mineRelay.route_title':this.depth===5?'floor.title.cave_fifth':this.depth===4?'floor.title.cave_fourth':this.depth===3?'floor.title.cave_third':this.depth===2?'floor.title.cave_second':'floor.title.cave_first', undefined, { holdMs: 850 })
+        if (!this.fifth?.blocksInput && !this.character.flagBool('tutorial.map.seen')) {
           tutorial.show('story.tut.map', { durationMs: 99999999 })
           this.markMapTutorialSeen()
         }
@@ -1260,6 +1270,13 @@ export class CaveModule implements IGameModule, PrologueHost {
 
     // 背包只占界面输入，世界与角色计时继续；其他模态面板仍暂停。
     if (this.panel !== null && this.panel !== 'inventory') {
+      return
+    }
+
+    if (this.fifth?.blocksInput) {
+      this.current.cancelSearches()
+      if (this.entryReveal < 0) this.fifth.update(dt, engine, this.current, this.localPlayers.entities, this.camera)
+      else this.camera.update(dt)
       return
     }
 
@@ -1421,6 +1438,7 @@ export class CaveModule implements IGameModule, PrologueHost {
       this.director?.renderSearchGuide(ctx, this.camera, engine.viewW, engine.viewH)
     }
     this.fourth?.renderScreen(ctx,engine.viewW,engine.viewH)
+    this.fifth?.renderScreen(ctx,engine.viewW,engine.viewH,this.player,this.camera)
     const rawHint = this.current.hintFor(this.player)
     const hint = rawHint ? formatKeyBindings(rawHint) : null
     if (hint && this.panel === null && !dialogue.isActive && !this.locked && !this.director?.black) {

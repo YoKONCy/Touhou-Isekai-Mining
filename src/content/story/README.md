@@ -14,6 +14,7 @@
 | 第一次死亡回营 | `events/first-death/` | `events/first-death/lang/zh_cn.json` |
 | 找到收音机 | `events/radio/` | `events/radio/lang/zh_cn.json` |
 | 初遇怪物房 | `events/monster-room/` | `events/monster-room/lang/zh_cn.json` |
+| 第五层岩缝入口、回营报告与带回猪肉 | `mainline/fifth-entry/` | `mainline/fifth-entry/lang/zh_cn.json` |
 | 说话人、通用教学与剧情提示 | 当前目录 | `lang/zh_cn.json` |
 
 界面按钮、交互操作和布局提示在 `src/ui/lang/`：
@@ -106,4 +107,12 @@ NPC 的话题池、阶段判断、已聊记忆和台词放在该 NPC 自己的�
 
 进度 `story.fourth.won/rescued/rumiaKnown/arrived/campDone/asked` 分别记录胜利、解救、姓名揭示、回营首段、讨肉过场与完整询问；胜利后重进只补救援。所有下矿入口在解救后、询问前拦截，询问取消不解锁。完整结束后开放第五层并显示主线“亮亮的那条路”。
 
-离线验收为 `node art-studies/fourth-floor/verify.cjs`，覆盖正式矿洞/基地模块和存档门控。TODO：第五层独有群系、怪物和肉类素材另行设计；当前复用深窟底板与四层怪池。
+第四层已有离线验收入口 `node art-studies/fourth-floor/verify.cjs`，覆盖正式矿洞/基地模块和存档门控。
+
+## 第五层入口与回营
+
+`mainline/fifth-entry/` 保存定稿对白、表情、分支和持久标记。`FifthFloorDirector` 在首访时接管岩缝走位、远景展开、旧地狱音乐与统一楼层标题；真实入口地形只作用于这次首房，敌人、资源和大型装饰避让通道。剧情期间熔岩、雾气与热汽继续流动，敌人、伤害和刷怪计时冻结。
+
+首次从第五层成功撤离或失败回营后，通过独立的 `camp.fifth` 事件报告见闻，不依赖料理任务。`FifthCampScene` 负责营火旁站位、露米娅凑近和主角拿肉的表现。已带出的猪肉即使归仓也能触发；未带回则先播短分支，以后第一次实际带回再补验肉。验肉对白不扣除素材。
+
+`story.fifth.introSeen/returned/reported/emptySeen/meatReturned/meatSeen` 分开记录入口、回营与猪肉进度；自然结束才写入已看状态，取消后可补播。剧情标记单独保存，不覆盖死亡前检查点。旧档下一次进入第五层可观看入口，下一次从第五层回营可接报告。

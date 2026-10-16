@@ -60,6 +60,8 @@ export interface SearchEffectDefinition {
   resolve: (context: SearchGenerationContext) => SearchLootModifier | undefined
 }
 export interface ResolvedSearchRules {
+  /** 实际房间楼层；旧快照未记录时由生成上下文补齐。 */
+  floor?: number
   density: number
   abundance: number
   rarity: number
