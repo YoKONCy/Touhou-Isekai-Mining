@@ -252,6 +252,13 @@ this.off?.();this.off=null;this.boss.attacks.clear();this.room.clearDoomsday(thi
     }
     return false
   }
+  /** 首领界面独立于场景画布，CSS 动画不参与战斗时钟与快照。 */
+  getBossHudState():import('../shared/bossHud').BossHudState|null {
+    if(!this.boss||this.phase==='intro'||this.phase==='defeatFade')return null
+    return {id:'grimm',nameKey:'trial.grimm.name',hp:this.boss.hp,maxHp:this.boss.maxHp,stage:this.boss.stage,
+      threshold:.55,defeated:!this.boss.alive,invulnerable:this.boss.state==='break'||this.boss.stage===2,
+      guardian:false,...(this.boss.isTimeSpell?{spell:{nameKey:'trial.time_spell_name',remaining:this.boss.spellRemaining}}:{})}
+  }
   render(g:CanvasRenderingContext2D,e:EngineContext):void {
     const w=CONFIG.roomCols*CONFIG.tile,h=CONFIG.roomRows*CONFIG.tile
     // 全屋可见，顶部预警和出生点不因相机裁剪消失。
@@ -259,33 +266,15 @@ this.off?.();this.off=null;this.boss.attacks.clear();this.room.clearDoomsday(thi
     g.fillStyle='#0a0408';g.fillRect(0,0,e.viewW,e.viewH);g.save();g.translate(this.ox+Math.sin(this.clock*83)*this.shake*5,this.oy+Math.cos(this.clock*71)*this.shake*4);g.scale(this.scale,this.scale)
     this.room.renderPlayers(g,this.localPlayers.entities,this.player)
     this.renderWorldAtmosphere(g,e)
-    this.boss.attacks.render(g,this.room.map)
     for(const player of this.localPlayers.entities){this.room.renderDoomsday(g,player);player.renderDoomCrescents(g,'all');player.scp127.renderOverlay(g,player)}
     this.localPlayers.renderLabels(g);g.restore()
     this.renderScreenAtmosphere(g,e)
+    // 危险弹幕在场景压色之后绘制，亮边不能被红黑暗角再次染暗。
+    g.save();g.translate(this.ox+Math.sin(this.clock*83)*this.shake*5,this.oy+Math.cos(this.clock*71)*this.shake*4);g.scale(this.scale,this.scale)
+    this.boss.attacks.render(g,this.room.map);g.restore()
     renderNausea(g,e.viewW,e.viewH,this.player)
     renderHurtScreen(g,e.viewW,e.viewH,this.player)
-    const width=Math.min(560,e.viewW*.55),left=(e.viewW-width)/2,ratio=this.boss.hp/this.boss.maxHp
-    g.save();g.textAlign='center';g.font='16px zpix, sans-serif';g.fillStyle='#e5d6bc';g.fillText(t('trial.grimm.name')+' · '+t('trial.stage',{n:this.boss.stage}),e.viewW/2,22)
-    g.fillStyle='#18121f';g.fillRect(left,32,width,13);const grad=g.createLinearGradient(left,0,left+width,0);grad.addColorStop(0,'#523d66');grad.addColorStop(.65,'#96709e');grad.addColorStop(1,'#d3afbd');g.fillStyle=grad;g.fillRect(left,32,width*ratio,13);g.strokeStyle='#baa085';g.lineWidth=1;g.strokeRect(left,32,width,13)
-    for(const k of [.55]){g.fillStyle='#0e0b17';g.fillRect(left+width*k-1,32,2,13)}
-    g.font='10px zpix, sans-serif';g.fillStyle='#e5d6bc';g.fillText(Math.ceil(this.boss.hp)+' / '+this.boss.maxHp,e.viewW/2,43)
-    if(this.boss.isTimeSpell){
-      const title=t('trial.time_spell_name'),cx=e.viewW/2
-      const size=Math.max(18,Math.min(30,e.viewW/22))
-      g.font=`bold ${size}px zpix, serif`;g.lineJoin='round'
-      const tw=g.measureText(title).width
-      const shade=g.createLinearGradient(0,48,0,105)
-      shade.addColorStop(0,'rgba(9,1,7,.9)');shade.addColorStop(1,'rgba(30,3,12,0)')
-      g.fillStyle=shade;g.fillRect(cx-tw/2-28,48,tw+56,58)
-      g.strokeStyle='#16030b';g.lineWidth=5;g.strokeText(title,cx,78)
-      const ink=g.createLinearGradient(0,54,0,80)
-      ink.addColorStop(0,'#fff0d6');ink.addColorStop(.5,'#ffb8ab');ink.addColorStop(1,'#b94b65')
-      g.fillStyle=ink;g.fillText(title,cx,78)
-      g.strokeStyle='#a34b56';g.lineWidth=1;g.beginPath();g.moveTo(cx-tw/2,85);g.lineTo(cx+tw/2,85);g.stroke()
-      g.font='12px zpix, sans-serif';g.fillStyle='#e6a994'
-      g.fillText(t('trial.time_spell_timer',{seconds:this.boss.spellRemaining.toFixed(1)}),cx,101)
-    }
+    g.save()
     if(this.phase==='defeatFade'){
       const k=Math.min(1,this.finished/1.8)
       g.fillStyle=`rgba(0,0,0,${k*k*(3-2*k)})`;g.fillRect(0,0,e.viewW,e.viewH)

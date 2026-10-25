@@ -233,6 +233,7 @@ export class CaveModule implements IGameModule, PrologueHost {
   private director: PrologueDirector | null = null
   private relay: MineRelayDirector | null = null
   private fourth: FourthFloorDirector | null = null
+  getBossHudState():import('../../shared/bossHud').BossHudState|null {return this.fourth?.getBossHudState()??null}
   private fifth: FifthFloorDirector | null = null
   /** 剧情黑场当前不透明度（向 director.black 目标指数渐变；S0 醒来/营地用） */
   private blackAlpha = 0

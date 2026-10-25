@@ -1,4 +1,4 @@
-import baseArtworkLayout from '../../../public/scenes/base/layout.json'
+import baseArtworkLayout from './data/base-layout.json'
 import { drawCampArtworkGround, drawCampArtworkEntity, drawCampArtworkShadow, drawCampArtworkAtmosphere } from './campArtwork'
 
 /** 营地场景：占地、交互与绘制共用校准后的接地点，高度不参与地面碰撞。 */

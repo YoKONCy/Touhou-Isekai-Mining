@@ -1,4 +1,4 @@
-import atlasLayout from '../../../public/scenes/mine/atlas.json'
+import atlasLayout from './data/mine-atlas.json'
 
 export type MineSprite = keyof typeof atlasLayout.parts
 let atlas: HTMLImageElement | undefined

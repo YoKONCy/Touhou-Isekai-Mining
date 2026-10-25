@@ -1,4 +1,5 @@
 import { CONFIG } from '../../config'
+import { drawGrimmMiasma } from './grimmMiasma'
 
 // 固定甲片路径只解析一次；动作由局部骨架变换驱动。
 const paths = new Map<string, Path2D>()
@@ -53,20 +54,23 @@ export function drawGrimm(ctx: CanvasRenderingContext2D, x: number, y: number, c
     const steel=gradient(-38,-145,40,-45,[[0,'#848b89'],[.18,'#424b50'],[.44,'#171d25'],[.68,'#39424a'],[1,'#0d1119']])
     const darkSteel=gradient(-22,-85,28,0,[[0,'#535b5e'],[.36,'#252c35'],[.7,'#131923'],[1,'#353a42']])
     const gold=gradient(-24,-130,30,-50,[[0,'#b39a63'],[.28,'#75603b'],[.62,'#33271c'],[1,'#95805a']])
-    const shape=(data:string,fill:string|CanvasGradient=steel,edge=true):void=>{
+    const shape=(data:string,fill:string|CanvasGradient=steel,edge=true,rule:CanvasFillRule='nonzero'):void=>{
       const p=path(data)
-      ctx.fillStyle=fill;ctx.fill(p)
+      ctx.fillStyle=fill;ctx.fill(p,rule)
       if(edge){ctx.strokeStyle='#070910';ctx.lineWidth=1.5;ctx.lineJoin='round';ctx.stroke(p)}
       // 受击亮色叠加保留甲片明暗，而非整块替换为白色。
-      if(flash>0){ctx.save();ctx.globalAlpha*=Math.min(.7,flash);ctx.fillStyle='#ffe6d4';ctx.fill(p);ctx.restore()}
+      if(flash>0){ctx.save();ctx.globalAlpha*=Math.min(.7,flash);ctx.fillStyle='#ffe6d4';ctx.fill(p,rule);ctx.restore()}
     }
     const line=(data:string,col:string,width=1):void=>{
       ctx.strokeStyle=col;ctx.lineWidth=width;ctx.lineCap='round';ctx.stroke(path(data));ctx.lineCap='butt'
     }
-    // 黑红厚布与血红翻折：不等长撕裂布瓣、缺口及细长残条，不做整齐锯齿。
+    drawGrimmMiasma(ctx,clock,damageStage,'body')
+    // 不等长的断布和贯穿破洞共用轮廓，破洞透出后景，不用黑色补丁冒充缺口。
     ctx.save();ctx.translate(sway*.8,-112);ctx.rotate(m.cloth);ctx.translate(0,112)
     const cloth=gradient(-58,-122,55,4,[[0,'#29060d'],[.35,'#140307'],[.75,'#0b0205'],[1,'#050103']])
-    shape('M-35-122 Q-57-104-59-67 L-64-4-51-16-49 5-41-2-38-25-34-16-32 8-22-3-19-24-10-9 2-19 12-3 20-12 23-27 29-10 35 4 39-15 46-8 48-29 56-11 61-3 Q57-73 48-98 L34-124Z',cloth)
+    const cloak='M-35-122 Q-57-104-59-67 L-63-46-57-50-64-17-69 5-60-3-55-20-51-16-49 5-43 1-40-19-36-35-37-12-32 8-25 1-24-13-19-31-16-14-9-23-4-42 2-19 8-12 10-32 16-48 13-19 20-12 25-30 29-10 35 4 39-15 46-8 48-29 53-16 51-44 59-17 66-2 61-33 Q57-73 48-98 L34-124Z M-46-82 L-39-88-41-69-47-57-44-72Z M35-81 L42-73 45-52 39-57 40-68Z M-25-48 L-21-58-21-43-29-29Z'
+    shape(cloak,cloth,true,'evenodd')
+    ctx.save();ctx.clip(path(cloak),'evenodd')
     shape('M-34-116 Q-53-63-51-16 L-49 5-41-2-38-25 Q-36-70-23-108Z','#410914',false)
     shape('M30-116 Q48-62 56-11 L48-29 46-8 39-15 Q30-64 22-108Z','#2b050d',false)
     shape('M-60-36 L-67 9-63 5-55-31Z','#30050e',false)
@@ -75,25 +79,33 @@ export function drawGrimm(ctx: CanvasRenderingContext2D, x: number, y: number, c
     shape('M11-115 Q9-49 17-2 L24-7 Q16-55 21-106Z','#0c050b',false)
     line('M-28-102 Q-37-57-39-17 M26-101 Q35-63 39-21','#79403355',.8)
     ctx.restore()
+    ctx.restore()
     // 腿甲分为大腿、膝盖、胫甲与靴面，增加纵向比例而非缩放整个素材。
     for(const side of[-1,1]){
       ctx.save();ctx.translate(side*16,moving?side*gait*(pose==='run'?5:1.4):0);ctx.scale(1.18,.88);ctx.rotate(moving?side*gait*.045:0)
       shape('M-9-66 L9-66 8-40 0-34-9-40Z',darkSteel)
       shape('M-10-43 L0-49 11-43 9-32 0-27-10-33Z',steel)
-      shape('M-8-30 L8-30 7-9 11-2-9-2-9-12Z',darkSteel)
+      shape(side<0?'M-8-30 L8-30 7-17 3-15 7-11 7-9 11-2-9-2-9-12Z':'M-8-30 L8-30 7-9 11-2-9-2-9-12-5-16-9-20Z',darkSteel)
       shape('M-9-7 L7-7 14 1 Q3 6-12 2Z','#242c35')
       shape('M-1-29 L2-29 2-9-1-5Z','#677071',false)
       line('M-8-42 L0-46 8-42 M-8-1 L7-1','#a0a49a66',.8)
       line('M-5-22 L-5-11','#060a11',1.5)
+      shape(side<0?'M-7-39 L-1-42 3-37-2-34Z':'M3-26 L7-23 4-13 1-17Z','#15151d',false)
+      line(side<0?'M-7-40 L-2-42':'M4-25 L6-23','#a2977c77',.7)
       ctx.restore()
     }
     // 肩胸恢复宽厚体量，缩短纵向比例；躯干从腰部倾转，脚底不跟着漂移。
     ctx.save();ctx.translate(0,-61+breath);ctx.rotate(m.lean);ctx.translate(0,61);ctx.scale(1.22,.92)
-    shape('M-24-117 L0-123 24-117 23-91 16-77 0-71-17-78-25-94Z',steel)
+    shape('M-24-117 L0-123 24-117 23-103 19-100 23-96 21-87 16-77 0-71-17-78-25-94-21-99-25-103Z',steel)
     shape('M-20-112 L-3-117-2-83-15-80-20-93Z','#414a50',false)
     shape('M3-117 L20-111 19-93 13-81 2-83Z','#151b24',false)
     shape('M-2-119 L2-119 4-91 0-80-4-91Z','#7a817b',false)
     line('M-20-110 L-6-114 M-18-91 L-9-84 M5-114 L18-110','#b4b7a36b',.8)
+    // 大块崩落露出深色内衬，旧漆、氧化和亮刃磨痕按甲面分区。
+    shape('M-20-105 L-15-108-10-103-13-98-10-95-18-91-21-96Z','#10121a',false)
+    shape('M9-113 L17-110 15-105 10-107 6-103 4-107Z','#463b35',false)
+    shape('M10-92 L17-96 18-88 13-83 8-84Z','#1b1920',false)
+    line('M-20-105 L-16-107-12-103 M10-93 L16-95','#a49e866f',.85)
     // 胸徽小而集中：旧金包住一枚猩红嵌石，避免全身铺金。
     shape('M0-109 L6-103 0-96-6-103Z',gold)
     shape('M0-106 L3-103 0-99-3-103Z','#821b25',false)
@@ -122,12 +134,15 @@ export function drawGrimm(ctx: CanvasRenderingContext2D, x: number, y: number, c
     }
     ctx.restore();ctx.restore()
     // 原设左肩宽厚叠甲：大甲面层层压住，不能缩成独立的小圆盖。
-    shape('M-21-119 Q-37-145-49-135 L-62-108-59-85-43-83-28-98Z',steel)
+    shape('M-21-119 Q-37-145-49-135 L-55-124-51-119-57-120-62-108-59-99-54-97-59-92-59-85-49-84-47-89-43-83-28-98Z',steel)
     shape('M-28-122 Q-40-136-48-126 L-57-108-42-99-28-108Z','#505960')
     shape('M-30-109 Q-44-113-56-117 L-62-104 Q-51-94-39-94 L-28-102Z','#39434c')
     if(damageStage<2)shape('M-34-98 L-59-104-61-92 Q-48-81-35-88 L-28-94Z','#29343e')
     else shape('M-34-98 L-49-102-43-96-48-90-36-91-28-94Z','#161b23')
     line('M-29-123 Q-41-139-49-129 M-57-111 Q-46-101-35-102 M-59-98 Q-47-89-36-91','#b2b5a483',1)
+    shape('M-48-128 L-41-124-43-118-36-113-44-110-51-115-54-120Z','#171b23',false)
+    shape('M-57-107 L-49-104-51-100-57-102Z','#635443',false)
+    line('M-49-128 L-42-125 M-45-112 L-40-114','#a89c7b80',.8)
     shape(damageStage<3?'M22-120 L32-141 40-130 47-119 44-103 30-101 23-110Z':'M22-120 L30-128 32-121 37-126 47-119 44-103 30-101 23-110Z',darkSteel)
     if(damageStage<3){
       shape('M29-121 L33-135 39-125 42-114 32-110Z','#596268')
@@ -146,16 +161,17 @@ export function drawGrimm(ctx: CanvasRenderingContext2D, x: number, y: number, c
     line('M-6 21 L5 21 M-5 27 L6 27','#a7ad9c66',.8)
     // 勇剑沃柏尔：黑钢直身接宽月牙回刃，保留原握点与纵向长度。
     ctx.save();ctx.translate(0,33);ctx.rotate(m.wrist)
+    drawGrimmMiasma(ctx,clock,damageStage,'blade',false,pose==='slash'?1.35:1)
     const blade=gradient(-11,20,12,25,[[0,'#17191b'],[.18,'#494740'],[.42,'#9b9581'],[.49,'#d2c6a5'],[.55,'#4c4940'],[.82,'#252626'],[1,'#827760']])
-    shape('M-9 15 L9 15 10 84 14 96 8 111-10 114-10 96-14 92-10 88-14 84-10 80Z',blade)
+    shape('M-9 15 L9 15 9 36 5 40 10 43 10 63 6 67 10 70 10 84 14 96 8 111-10 114-10 96-14 92-10 88-14 84-10 80-10 56-6 53-10 49Z',blade)
     shape('M-9 17 L-6 20-6 78-10 83-7 88-8 97-7 110-10 114-10 96-14 92-10 88-14 84-10 80Z','#282a28',false)
-    line('M2 20 L3 83 8 100','#d8cdb2',1.1)
+    line('M2 20 L2 34 M3 44 L3 61 M3 71 L3 83 8 100','#c3b79b',1)
     line('M-1 25 L0 80','#171a1a',1.5)
     // 月牙的内弧向握柄回卷；外刃宽实填，不能画成细钩或普通尖剑。
     const crescent=gradient(-48,104,15,138,[[0,'#363834'],[.3,'#9e9a89'],[.57,'#d1c9b2'],[.7,'#827e70'],[1,'#242724']])
-    shape('M8 95 Q17 93 20 105 L18 119 Q4 141-21 141 Q-44 137-59 96 Q-38 124-12 117 Q2 112 8 95Z',crescent)
-    shape('M-59 96 Q-44 137-21 141 Q4 141 18 119 L12 121 Q-6 137-23 133 Q-43 124-59 96Z','#3a3c36',false)
-    line('M-55 101 Q-39 133-20 137 Q3 138 16 120','#d9ceb0',1)
+    shape('M8 95 Q17 93 20 105 L18 119 Q9 132-5 138 L-10 132-13 140-21 141 Q-32 139-41 127 L-39 120-46 122 Q-53 113-59 96 Q-44 115-30 117 L-26 112-23 118 Q-4 120 8 95Z',crescent)
+    shape('M-59 96 Q-53 113-46 122 L-39 120-41 127 Q-32 139-21 141 L-13 140-10 132-5 138 Q9 132 18 119 L12 121 Q-6 137-23 133 Q-43 124-59 96Z','#3a3c36',false)
+    line('M-55 101 Q-48 118-43 123 M-37 130 Q-28 137-20 137 L-15 137 M-4 134 Q8 132 16 120','#c9bc9d',1)
     line('M-51 104 Q-30 125-11 120 Q1 115 8 100','#a49778',.9)
     // 剑尖接合处的黑钢包片与旧金环钉。
     shape('M6 94 Q16 92 20 105 L18 119 11 124 Q10 108 1 106Z','#242724')
@@ -165,6 +181,9 @@ export function drawGrimm(ctx: CanvasRenderingContext2D, x: number, y: number, c
     // 固定划痕与磨损，不逐帧随机生成，避免金属表面闪烁。
     line('M-5 32 L-2 29 M5 46 L8 42 M-5 61 L-2 57 M4 73 L7 70 M-32 124 L-28 119 M-21 132 L-17 126 M-7 128 L-3 121','#e0d4b14d',.65)
     line('M-7 23 L-7 35 M7 54 L7 64 M-40 117 L-34 125 M-12 133 L-8 130','#9d794969',.8)
+    shape('M-4 40 L3 44 1 50 5 55 0 61-4 58-1 51-5 48Z','#19121e',false)
+    shape('M-23 120 L-13 123-16 129-22 127-28 130-31 125Z','#31212b',false)
+    line('M-3 42 L0 48-2 53 1 57 M-23 122 L-17 124-20 127','#7a3049',.9)
     // 向剑身弯曲的双钩护手与中央椭圆座。
     shape('M-7 11 Q-16 3-25 7 L-28 13 Q-20 9-17 20 L-11 17 0 19 11 17 Q17 6 25 13 L23 6 Q15 1 7 11Z','#34332a')
     shape('M-11 11 Q0 5 11 11 L10 17 Q0 21-10 17Z',gold)
@@ -181,6 +200,7 @@ export function drawGrimm(ctx: CanvasRenderingContext2D, x: number, y: number, c
       line('M3 25 L4 83 M-55 101 Q-39 133-20 137 Q3 138 16 120','#ff874b',1.6)
       ctx.restore()
     }
+    drawGrimmMiasma(ctx,clock,damageStage,'blade',true,pose==='slash'?1.35:1)
     ctx.restore();ctx.restore();ctx.restore()
     // 原设厚围领环抱下颌，宽褶面与胸甲遮压，头部嵌入甲胄而非细颈悬空。
     shape('M-25-132 Q0-120 26-133 L32-114 Q21-95 0-98 Q-21-97-32-116Z','#15161d')
@@ -189,13 +209,13 @@ export function drawGrimm(ctx: CanvasRenderingContext2D, x: number, y: number, c
     line('M-23-126 Q-5-114 21-123 M-25-117 Q-9-105 14-112 M-16-107 Q0-101 15-109','#85847b70',1.2)
     // 墨绿盔缨与头壳分开：向上延伸的窄缨形成高耸轮廓。
     ctx.save();ctx.translate(sway*.55,breath*.3)
-    shape('M-6-151 Q-14-174-3-189 Q8-196 13-182 Q21-166 10-145Z','#172c26')
+    shape('M-6-151 Q-14-174-3-189 L0-182 4-193 8-185 12-188 13-182 Q21-166 10-145 L6-154 3-146Z','#172c26')
     shape('M-2-185 Q5-184 8-171 L6-153 1-151Z','#3e5440',false)
     line('M-3-183 Q4-175 3-156 M5-188 Q13-171 8-157','#70806291',.9)
     line('M-6-179 Q-8-169-3-158','#0b1917',1.4)
     ctx.restore()
     // 更小且更长的封闭头盔：眉脊/颊片/鼻梁/下颌明确分面。
-    shape('M-17-150 Q-15-165 0-168 Q15-165 17-150 L16-135 9-122 0-116-9-122-17-136Z',steel)
+    shape('M-17-150 Q-15-165 0-168 L5-164 8-166 Q15-162 17-150 L16-139 12-136 15-132 9-122 0-116-9-122-17-136Z',steel)
     shape('M-15-151 L-2-157-3-139-12-132Z','#555f63',false)
     shape('M3-157 L15-151 12-133 4-139Z','#111923',false)
     shape('M-17-146 L0-153 17-146 13-140 0-144-13-140Z','#777f78')
@@ -205,6 +225,8 @@ export function drawGrimm(ctx: CanvasRenderingContext2D, x: number, y: number, c
     shape('M-13-133 L-5-129-5-122-10-127Z','#323b43',false)
     shape('M5-129 L13-133 10-127 5-122Z','#161d28',false)
     line('M0-164 L0-156 M-14-147 L-3-151 M-11-132 L-7-130','#d1d0aa8a',.8)
+    shape('M5-160 L10-157 8-152 11-149 7-144 3-147 6-153Z','#11101a',false)
+    line('M6-159 L9-157 M9-148 L7-145','#9c8c7c77',.7)
     // 稳定划痕落在具体甲面上，不在空气中随机撒点。
     line('M-16-106 L-13-108 M-14-88 L-11-90 M-42-117 L-40-119 M35-126 L37-123 M9-95 L12-98','#bec0a646',.65)
     if(damageStage>=2){
@@ -216,6 +238,7 @@ export function drawGrimm(ctx: CanvasRenderingContext2D, x: number, y: number, c
       shape('M4-112 L18-108 12-99 18-91 9-79 2-86 5-96Z','#08020a',false)
       line('M5-110 L10-100 7-92 12-84','#b62a47',1.2)
     }
+    drawGrimmMiasma(ctx,clock,damageStage,'body',true)
     ctx.restore()
   } finally {
     ctx.restore()

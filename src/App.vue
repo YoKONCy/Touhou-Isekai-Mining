@@ -15,6 +15,7 @@ import { PROFILE_KEY } from './core/save/saveService'
 import { setDialogueHooks } from './game/dialogue/effects'
 import Hotbar from './ui/Hotbar.vue'
 import StatusEffectsHud from './ui/StatusEffectsHud.vue'
+import BossHealthHud from './ui/BossHealthHud.vue'
 import type { StatusSnapshot } from './shared/statusEffects'
 import InventoryPanel from './ui/InventoryPanel.vue'
 import WardrobePanel from './ui/WardrobePanel.vue'
@@ -70,6 +71,10 @@ const searchView = computed(() => { void hudTick.value; return currentActions.va
 // HUD 数据（节流刷新，避免 Vue 每帧重渲染）
 const stats = reactive({ fps: 0, tps: 0 })
 const hudTick = ref(0)
+const bossHud = computed(() => {
+  void hudTick.value
+  return scene.value === 'trial' ? trial.getBossHudState() : scene.value === 'cave' ? cave.getBossHudState() : null
+})
 const audioMuted = ref(sfx.muted)
 const statusEffects = ref<StatusSnapshot[]>([])
 const debug = reactive({
@@ -406,6 +411,9 @@ onBeforeUnmount(() => {
 <template>
   <div class="game-root" :class="{ 'ui-pointer': panel !== null || result !== null || consoleOpen, 'base-art': scene === 'base' }">
     <canvas ref="canvasRef" class="game-canvas"></canvas>
+    <Transition name="boss-hud">
+      <BossHealthHud v-if="bossHud && !passage && !result && !consoleOpen" :key="bossHud.id" :boss="bossHud" :paused="panel !== null && panel !== 'inventory'"/>
+    </Transition>
     <TouchControls v-if="touchControls" :input="touchInput" :blocked="touchBlocked" :panel="panel" :base="scene==='base'" :searching="!!searchView" :dodge-cd="debug.dodgeCd" :skill-cd="touchSkillCd" :skill-available="touchSkillAvailable" :facing="touchPlayer?.facing??Math.PI/2" @panel="requestPanel"/>
     <PrayerTransition v-if="passage" :destination="passage.destination" :failed="passage.failed" />
 

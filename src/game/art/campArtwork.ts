@@ -1,4 +1,4 @@
-import layout from '../../../public/scenes/base/layout.json'
+import layout from './data/base-layout.json'
 import type { CampEntity } from './campScene'
 
 /** 已确认的手绘赛璐璐基地：背景与设施拆层，接地点继续服从原场景定义。 */

@@ -8,6 +8,7 @@ import { bladeErasesProjectile } from './weaponProjectileSweep'
 import { damageLabel } from '../shared/combat'
 import { sweepProjectileObstacles, type BulletBlocker } from './projectileObstacles'
 import { segmentCircleEntry } from './CombatSpatial'
+import { GRIMM_BALANCE } from '../content/enemies/vanilla/grimmBalance'
 
 export type BossHazard = {
   kind: 'mist'|'bolt'|'seal'|'laser'|'slash'|'smoke'|'oath'|'rift'|'shardSeed'
@@ -15,7 +16,10 @@ export type BossHazard = {
   rx:number; ry:number; angle:number; speed:number; hit:boolean; fired:boolean
   ox:number; oy:number; phase:number
   returning?:boolean; bend?:number; dark?:boolean; fixed?:boolean
+  appearance?:'petal'|'needle'|'cinder'|'crystal'
   reach?:number; activeDuration?:number
+  /** 每束只显示开火前这段预警，避免整组远期线条同时遮挡场地。 */
+  warningDuration?:number
   split?:boolean; targetX?:number; targetY?:number
   targetId?:string
   removed?:boolean
@@ -23,7 +27,7 @@ export type BossHazard = {
   flightAge?:number
 }
 const flyingHazard = (h: BossHazard) => h.kind === 'mist' || h.kind === 'bolt' || h.kind === 'oath' || h.kind === 'shardSeed'
-/** 飞行弹以碰撞结束生命周期，返流 duration 只控制轨迹周期；定时法阵、激光仍按时结束。 */
+/** 飞行弹在碰撞时回收；螺旋雾弹与时符弹另有寿命上限，回卷只往返一次。 */
 export class BossAttacks {
   hazards: BossHazard[]=[]
   private slowRemaining=0
@@ -64,6 +68,7 @@ export class BossAttacks {
       const movementDt=Math.max(0,h.age-h.delay-Math.max(0,before-h.delay))*speedMultiplier
       if(flyingHazard(h))h.flightAge=(h.flightAge??Math.max(0,before-h.delay))+movementDt
       const t=flyingHazard(h)?h.flightAge!:h.age-h.delay
+      if((h.kind==='mist'||h.kind==='oath')&&t>=h.duration){h.removed=true;continue}
       // 跨过激活时刻也结算一次，避免低帧率漏掉短激光。
       if(h.removed||!flyingHazard(h)&&before>h.delay+h.duration)continue
       const px=h.x,py=h.y
@@ -74,11 +79,11 @@ export class BossAttacks {
       }
       if(h.kind==='mist'){
         // 黄金比例旋臂：环整体外扩并旋转 1.618 圈，每发弹绕自身行进中心先外扩后回卷。
-        const life=h.returning?t%h.duration:Math.max(0,t)
+        const life=Math.max(0,t)
         const c=Math.cos(h.angle),s=Math.sin(h.angle),b=map.bounds
         const wallX=Math.abs(c)<1e-6?Infinity:(c>0?b.right-h.ox:h.ox-b.left)/Math.abs(c)
         const wallY=Math.abs(s)<1e-6?Infinity:(s>0?b.bottom-h.oy:h.oy-b.top)/Math.abs(s)
-        // duration 是返流周期，不是飞行寿命；所有飞行弹都由实际障碍碰撞回收。
+        // duration 同时限定飞行寿命；返流只完成一次外扩与回卷，不重新起算。
         const outward=Math.max(24,h.reach??Math.min(wallX-110,wallY-110))/(h.speed*.6)
         const travel=h.returning?outward*Math.sin(Math.PI*life/h.duration):life
         const span=h.returning?outward:h.duration
@@ -92,7 +97,7 @@ export class BossAttacks {
         const u=Math.min(1,t/.75),distance=(h.reach??260)*(1-Math.pow(1-u,3))
         h.x=h.ox+Math.cos(h.angle)*distance;h.y=h.oy+Math.sin(h.angle)*distance
       }else if(h.kind==='oath'){
-        const u=h.returning?(t%h.duration)/h.duration:Math.min(1,t/h.duration)
+        const u=Math.min(1,t/h.duration)
         // 返流弹在中点自然减速，先停再回；原点锁定，不追踪角色。
         const distance=h.returning?(h.reach??h.speed*h.duration/Math.PI)*Math.sin(Math.PI*u):h.speed*t
         const a=h.angle+(h.bend??0)*Math.sin(Math.PI*u)
@@ -146,11 +151,11 @@ export class BossAttacks {
       if(hit)this.hitPlayer(h,p,engine,fx)
       }
       // 分裂放在撞墙、消弹和玩家命中之后，已被消灭的种子不能再生成弹幕。
-      if(h.kind==='shardSeed'&&!h.removed&&t>=1.2&&!h.split){
+      if(h.kind==='shardSeed'&&!h.removed&&t>=GRIMM_BALANCE.survival.seedSplitAt&&!h.split){
         h.split=true
         grimmSpellSplit(sfx, Math.max(-.65,Math.min(.65,(h.x-anchor.x)/400)))
         const aim=Math.atan2((h.targetY??anchor.y)-h.y,(h.targetX??anchor.x)-h.x)
-        for(let i=-2;i<=2;i++)this.add('oath',h.x,h.y,{angle:aim+i*.19,speed:235,rx:5.5,duration:7,phase:i,dark:i%2===0,bend:i*.035})
+        for(let i=-2;i<=2;i++)this.add('oath',h.x,h.y,{angle:aim+i*.2,speed:GRIMM_BALANCE.survival.seedShotSpeed,rx:5.5,duration:5,phase:h.phase+i,dark:i%2===0,bend:i*.025,appearance:i%2===0?'needle':'petal'})
         h.removed=true
       }
     }
@@ -167,10 +172,10 @@ export class BossAttacks {
     try{
       for(const h of this.hazards){
         const t=flyingHazard(h)?h.flightAge??h.age-h.delay:h.age-h.delay
-        // 只有激光把提示线压缩到预警最初 0.1 秒；法阵等其他攻击的预警仍覆盖整个 delay。
-        const hint=h.kind==='laser'?.1:Infinity,warnEnd=Math.min(h.delay,hint)
-        const warning=t<0&&h.age<warnEnd
-        const k=warning?Math.max(0,h.age/Math.max(.01,warnEnd)):Math.min(1,Math.max(0,t)/h.duration)
+        const warnStart=h.kind==='laser'?Math.max(0,h.delay-(h.warningDuration??GRIMM_BALANCE.laser.warning)):0
+        if(h.kind==='laser'&&h.age<warnStart)continue
+        const warning=t<0
+        const k=warning?Math.max(0,(h.age-warnStart)/Math.max(.01,h.delay-warnStart)):Math.min(1,Math.max(0,t)/h.duration)
         g.save()
         // 单个特效绘制即便抛错也必须恢复状态，防止 lighter 泄漏污染整帧导致白屏。
         try{
@@ -205,7 +210,7 @@ export class BossAttacks {
       g.restore();g.globalAlpha=1;g.globalCompositeOperation='source-over';g.shadowBlur=0;g.setLineDash([])
     }
   }
-  /** 高能激光：提示线只在预警最初一瞬；激活后为猩红黑束、柔和外晕与连续白炽核心，整体裁剪在墙内。 */
+  /** 高能激光：只在临近击发时显露一根短暂连续红线，不叠边界、虚线或箭纹。 */
   private renderLaser(g:CanvasRenderingContext2D,h:BossHazard,map:TileMap,t:number,warning:boolean,k:number):void {
     const left=-h.rx,right=h.rx,w=h.rx*2
     // 先在世界空间裁剪，再旋转束坐标，斜向激光也不泄漏到墙外。
@@ -213,16 +218,9 @@ export class BossAttacks {
     g.beginPath();g.rect(left,-h.ry*4,w,h.ry*8);g.clip()
     g.setLineDash([])
     if(warning){
-      const a=.3+.6*k
-      const band=g.createLinearGradient(0,-h.ry,0,h.ry)
-      band.addColorStop(0,'rgba(255,70,60,0)');band.addColorStop(.5,`rgba(255,70,60,${.05*a})`);band.addColorStop(1,'rgba(255,70,60,0)')
-      g.fillStyle=band;g.fillRect(left,-h.ry,w,h.ry*2)
-      g.globalCompositeOperation='lighter'
-      g.strokeStyle=`rgba(255,170,150,${.75*a})`;g.lineWidth=1
+      const a=.48+.4*k
+      g.strokeStyle=`rgba(228,112,113,${a})`;g.lineWidth=1.3
       g.beginPath();g.moveTo(left,0);g.lineTo(right,0);g.stroke()
-      g.strokeStyle=`rgba(255,110,90,${.5*a})`
-      for(const cx of [left,right]){g.beginPath();g.moveTo(cx,-6);g.lineTo(cx,6);g.stroke()}
-      g.globalCompositeOperation='source-over'
       g.restore()
       return
     }
@@ -496,35 +494,78 @@ export class BossAttacks {
     }
     g.globalCompositeOperation='source-over'
   }
-  /** 生存时符弹体：实色危险核与亮边，回卷前显露一圈收缩提示。 */
-  private oathSprites:HTMLCanvasElement[]=[]
+  /** 黑焰、棱刺、余烬和黑晶分别烘焙；只让局部刃缘发亮，保留暗核与不同轮廓。 */
+  private oathSprites=new Map<string,HTMLCanvasElement>()
   private renderOath(g:CanvasRenderingContext2D,h:BossHazard,t:number):void {
-    const index=h.dark?1:0
-    if(!this.oathSprites[index]){
-      // 暗核、血色渐变刃面与羽化光晕一次烘焙；高弹量不逐粒开阴影或建立渐变。
+    const appearance=h.appearance??(h.kind==='shardSeed'?'crystal':h.dark?'needle':'petal')
+    const variant=((h.phase%3)+3)%3,key=`${appearance}:${variant}`
+    let sprite=this.oathSprites.get(key)
+    if(!sprite){
       const cv=document.createElement('canvas');cv.width=cv.height=64
       const c=cv.getContext('2d')!;c.translate(32,32)
-      const halo=c.createRadialGradient(0,0,2,0,0,29)
-      halo.addColorStop(0,h.dark?'rgba(210,30,85,.38)':'rgba(255,75,60,.5)');halo.addColorStop(.45,'rgba(180,12,46,.16)');halo.addColorStop(1,'rgba(80,0,20,0)')
+      const cold=appearance==='needle'||appearance==='crystal'
+      const halo=c.createRadialGradient(0,0,5,0,0,28)
+      halo.addColorStop(0,cold?'rgba(148,83,172,.28)':'rgba(185,36,77,.32)')
+      halo.addColorStop(.6,cold?'rgba(74,30,103,.12)':'rgba(110,12,40,.14)');halo.addColorStop(1,'rgba(30,0,20,0)')
       c.fillStyle=halo;c.fillRect(-32,-32,64,64)
-      c.beginPath();c.moveTo(15,0);c.bezierCurveTo(2,-10,-9,-8,-14,0);c.bezierCurveTo(-7,9,4,8,15,0);c.closePath()
-      const body=c.createLinearGradient(0,-9,0,9)
-      body.addColorStop(0,h.dark?'#913044':'#ffd4b0');body.addColorStop(.28,h.dark?'#370917':'#cf3345');body.addColorStop(.65,'#12030b');body.addColorStop(1,'#78152b')
-      c.fillStyle=body;c.fill();c.strokeStyle='#060108';c.lineWidth=1.5;c.stroke()
-      c.globalCompositeOperation='lighter';c.strokeStyle=h.dark?'#e65c87':'#ffb199';c.lineWidth=1.3
-      c.beginPath();c.moveTo(-11,0);c.quadraticCurveTo(1,-7,13,0);c.stroke()
-      c.fillStyle='#fff0dd';c.beginPath();c.ellipse(5,-1,3,1.1,0,0,Math.PI*2);c.fill()
-      this.oathSprites[index]=cv
+      const body=new Path2D()
+      if(appearance==='petal'){
+        body.moveTo(18+variant,0);body.bezierCurveTo(10,-13-variant,0,-15,-10,-8)
+        body.bezierCurveTo(-15,-5,-15,1,-23,4);body.bezierCurveTo(-12,3,-10,13,1,12)
+        body.bezierCurveTo(12,12,15,5,18+variant,0)
+      }else if(appearance==='needle'){
+        body.moveTo(23,0);body.lineTo(7,-12);body.lineTo(-7,-11-variant)
+        body.lineTo(-21,-4);body.lineTo(-13,0);body.lineTo(-20,5+variant)
+        body.lineTo(-6,12);body.lineTo(8,10)
+      }else if(appearance==='crystal'){
+        body.moveTo(1,-19);body.lineTo(12,-9);body.lineTo(15,3+variant);body.lineTo(4,18)
+        body.lineTo(-9,13);body.lineTo(-15,-1);body.lineTo(-8,-14)
+      }else{
+        for(let i=0;i<13;i++){
+          const angle=i*Math.PI*2/13,radius=14+Math.sin(i*2.7+variant)*2
+          const x=Math.cos(angle)*radius,y=Math.sin(angle)*radius
+          i?body.lineTo(x,y):body.moveTo(x,y)
+        }
+      }
+      body.closePath()
+      const shade=c.createLinearGradient(-4,-14,5,15)
+      shade.addColorStop(0,cold?'#69416f':'#903149');shade.addColorStop(.26,cold?'#29172f':'#35101f')
+      shade.addColorStop(.65,'#100b16');shade.addColorStop(1,cold?'#3f274b':'#511a2c')
+      c.strokeStyle='#100a17';c.lineWidth=4;c.stroke(body);c.fillStyle=shade;c.fill(body)
+      c.strokeStyle=cold?'#9e78af':'#be6c7d';c.lineWidth=1.4;c.stroke(body)
+      c.save();c.clip(body)
+      if(appearance==='petal'){
+        c.fillStyle='#bb3359';c.beginPath();c.moveTo(-18,3);c.bezierCurveTo(-5,-10,5,-8,17,0);c.bezierCurveTo(2,-4,-2,4,-18,3);c.fill()
+        c.strokeStyle='#e29b9b';c.lineWidth=1.3;c.beginPath();c.moveTo(-7,-9);c.quadraticCurveTo(4,-11,15,-1);c.stroke()
+      }else if(appearance==='needle'){
+        c.fillStyle='#684674';c.beginPath();c.moveTo(-15,-7);c.lineTo(7,-11);c.lineTo(20,0);c.lineTo(1,-3);c.closePath();c.fill()
+        c.strokeStyle='#c7abc9';c.lineWidth=1.2;c.beginPath();c.moveTo(-3,-9);c.lineTo(20,0);c.lineTo(7,2);c.stroke()
+        c.strokeStyle='#934b82';c.beginPath();c.moveTo(-13,7);c.lineTo(5,4);c.stroke()
+      }else if(appearance==='crystal'){
+        c.fillStyle='#694377';c.beginPath();c.moveTo(1,-19);c.lineTo(3,-2);c.lineTo(-9,13);c.lineTo(-15,-1);c.closePath();c.fill()
+        c.fillStyle='#2b193a';c.beginPath();c.moveTo(3,-2);c.lineTo(15,3);c.lineTo(4,18);c.closePath();c.fill()
+        c.strokeStyle='#c095b9';c.lineWidth=1.4;c.beginPath();c.moveTo(1,-15);c.lineTo(3,-2);c.lineTo(-6,10);c.stroke()
+        c.strokeStyle='#a94987';c.beginPath();c.moveTo(3,-2);c.lineTo(11,3);c.stroke()
+      }else{
+        c.strokeStyle='#b94b63';c.lineWidth=2.4;c.beginPath();c.moveTo(-12,-6);c.lineTo(-2,-3);c.lineTo(2,4);c.lineTo(11,7);c.moveTo(-2,-3);c.lineTo(4,-11);c.moveTo(2,4);c.lineTo(-6,12);c.stroke()
+        c.strokeStyle='#db938e';c.lineWidth=.9;c.beginPath();c.moveTo(-10,-5);c.lineTo(-2,-2);c.lineTo(1,4);c.stroke()
+      }
+      c.restore()
+      sprite=cv;this.oathSprites.set(key,cv)
     }
-    g.save();g.rotate(h.angle+(h.bend??0)*Math.sin(Math.PI*Math.min(1,t/h.duration)))
+    const turn=h.returning?Math.max(0,Math.min(1,(t/h.duration-.46)/.08))*Math.PI:0
+    g.save();g.rotate(h.angle+(h.bend??0)*Math.sin(Math.PI*Math.min(1,t/h.duration))+turn)
     const r=h.rx,size=r*5
-    g.drawImage(this.oathSprites[index],-size/2,-size/2,size,size)
+    if(appearance==='needle'||appearance==='petal'){
+      g.globalAlpha=.18;g.drawImage(sprite,-size/2-r*1.15,-size/2,size,size);g.globalAlpha=1
+    }
+    g.drawImage(sprite,-size/2,-size/2,size,size)
     g.globalCompositeOperation='lighter'
     if(h.kind==='shardSeed'){
-      const gather=Math.min(1,t/1.2)
-      g.rotate(t*3);g.strokeStyle='#f38ca5';g.lineWidth=1.2
+      const gather=Math.min(1,t/GRIMM_BALANCE.survival.seedSplitAt)
+      g.rotate(t*2.2);g.strokeStyle='#ad608d';g.lineWidth=1.1
       g.beginPath();g.moveTo(0,-r*1.8);g.lineTo(r*1.3,0);g.lineTo(0,r*1.8);g.lineTo(-r*1.3,0);g.closePath();g.stroke()
-      g.strokeStyle=`rgba(255,140,160,${.3+.5*gather})`;g.beginPath();g.arc(0,0,r*(2.5-gather),0,Math.PI*1.6);g.stroke()
+      g.strokeStyle=`rgba(211,125,167,${.25+.45*gather})`;g.beginPath();g.arc(0,0,r*(2.5-gather),0,Math.PI*1.6);g.stroke()
     }
     if(h.returning&&t/h.duration>.34&&t/h.duration<.55){
       g.strokeStyle='rgba(255,130,145,.8)';g.lineWidth=1

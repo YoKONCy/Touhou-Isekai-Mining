@@ -29,10 +29,12 @@ export class DoomsdayRoom {
     if (player.isDoomsday || player.activeToolId === DOOMSDAY_ID) player.cancelDoomsdayAction()
   }
 
-  private doomDamage(e: Enemy, base: number, p: Player, host: RoomHost, area = false): void {
+  private doomDamage(e: Enemy, p: Player, host: RoomHost, area = false): void {
     if (!e.canBeHit) return
-    const equipment = getItemDef(DOOMSDAY_ID).combat
-    const result = e.resolveDamage({ base, attackPower: p.attackPower, coefficient: 0.5,damageBonus:p.physicalOutgoingDamageBonus,
+    const weapon = getItemDef(DOOMSDAY_ID), equipment = weapon.combat, normal = weapon.melee
+    if (!normal) return
+    // 光束与每枚印记均使用常规挥砍参数，不能借用杀戮模式的强化伤害。
+    const result = e.resolveDamage({ base:normal.damage, attackPower: p.attackPower, coefficient:normal.powerCoefficient??normal.windup+normal.active+normal.recover,damageBonus:p.physicalOutgoingDamageBonus,
       penetration: (equipment?.penetration ?? 0) + p.equipmentCombat.penetration,
       critChance: (equipment?.critChance ?? 0) + p.equipmentCombat.critChance+(p.equipmentCombat.meleeCritChance??0),
       area, aoeReduction: e.def.combat.aoeReduction,falloff:(e.def.combat.meleeDamageTakenMultiplier??1)*(1+(p.equipmentCombat.meleeWeaponDamageBonus??0)) },'physical')
@@ -61,10 +63,11 @@ export class DoomsdayRoom {
       if (total > 0) {
         // 先快照，再结算；宿主死亡不影响奖励与其范围冲击。
         for (const h of hosts) {
-          for (let i = 0; i < h.count && h.e.alive; i++) this.doomDamage(h.e, 666, p, host)
+          for (let i = 0; i < h.count && h.e.canBeHit; i++) this.doomDamage(h.e, p, host)
           for (const e of this.room.enemies()) {
             if (e !== h.e && e.alive && e.containsHit(h.x,h.y,110))
-              this.doomDamage(e, 333 * h.count, p, host, true)
+              // 逐枚结算，让强度、暴击与抗性都和单枚命中一致。
+              for (let i = 0; i < h.count && e.canBeHit; i++) this.doomDamage(e, p, host, true)
           }
           this.doomBursts.push({ x: h.x, y: h.y, life: 0.45 })
         }
@@ -89,7 +92,7 @@ export class DoomsdayRoom {
       }
       if (first) {
         doomsdayBeamHit(sfx)
-        this.doomDamage(first, 333, p, host)
+        this.doomDamage(first, p, host)
         if (first.canBeHit) {
           const marks = this.doomsdayMarks.get(first) ?? []
           if (marks.length < 6) {

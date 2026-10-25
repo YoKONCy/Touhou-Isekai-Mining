@@ -152,19 +152,17 @@ export class FourthFloorDirector {
       this.phase = 'leaving'; this.leavingTime = 0; this.biting = false
     } })
   }
+  getBossHudState():import('../../shared/bossHud').BossHudState|null {
+    if(!this.activeRoom||!this.boss||!['battle','phaseBreak','half','knockdown'].includes(this.phase))return null
+    return {id:'kedama',nameKey:'story.fourth.boss',hp:this.boss.hp,maxHp:this.boss.maxHp,stage:this.boss.stage,
+      threshold:.5,defeated:!this.boss.alive,invulnerable:this.phase==='phaseBreak'||this.phase==='half',guardian:!!this.guardian?.alive}
+  }
   renderScreen(g: CanvasRenderingContext2D, width: number, height: number): void {
     if (!this.activeRoom || !this.boss) return
     if (this.biting) {
       if (resolveDialogueCG(dialogue.state.value?.node)) this.biteHasCG = true
       // 完整 CG 退场后不再补播程序小插图，避免窜入设计范围以外的台词。
       if (!this.biteHasCG) withPlayerCostume(this.profile.equipment.visibleCostume(this.profile.costume), () => drawRumiaBiteCutin(g, width, height, this.clock,this.biteCutinAge))
-    }
-    if (this.boss.alive && this.phase !== 'waiting' && this.phase !== 'intro') {
-      const w = Math.min(460, width * .45), x = (width - w) / 2
-      g.save(); g.fillStyle = '#292330ee'; g.strokeStyle = '#b29873'; g.lineWidth = 1; g.fillRect(x - 12, 12, w + 24, 52); g.strokeRect(x - 12, 12, w + 24, 52)
-      g.font = '14px zpix'; g.textAlign = 'center'; g.fillStyle = '#e4d5bc'; g.fillText(t('story.fourth.boss'), width / 2, 31)
-      g.fillStyle = '#16131d'; g.fillRect(x, 40, w, 8); g.fillStyle = '#bb91c6'; g.fillRect(x, 40, w * this.boss.hp / this.boss.maxHp, 8)
-      g.font = '10px zpix'; g.fillStyle = '#dacbb7'; g.fillText(`${Math.ceil(this.boss.hp)} / ${this.boss.maxHp}`, width / 2, 60); g.restore()
     }
     if (this.black > 0) { g.save(); g.fillStyle = `rgba(8,6,13,${this.black})`; g.fillRect(0, 0, width, height); g.restore() }
   }

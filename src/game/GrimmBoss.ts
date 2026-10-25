@@ -8,6 +8,7 @@ import { drawGrimm, createGrimmRigMotion } from './art/rig/grimmRig'
 import { sfx } from './audio/Sfx'
 import { grimmSound, grimmSpellVolley } from '../content/enemies/vanilla/grimmAudio'
 import { drawBossCastHalo } from './art/rig/bossCastHalo'
+import { GRIMM_BALANCE } from '../content/enemies/vanilla/grimmBalance'
 
 type State='retreat'|'run'|'roll'|'hidden'|'slash'|'chain'|'cast'|'second'|'thirdVolley'|'recovery'|'break'|'timeSpell'
 /** 格林专用编排，共用 Enemy 的生命和所有正式武器结算。 */
@@ -115,66 +116,86 @@ export class GrimmBoss extends Enemy {
   }
   private lasers(map:TileMap):void {
     const b=map.bounds
+    const timing=GRIMM_BALANCE.laser
     {
-      // 一阶段四个正交方向；最终阶段开放斜向和双组，始终共享十四束预算。
+      // 单组快速扫过，双组只错开起拍，保留交叉压迫；不锁住首领的后续招式。
       const index=this.battleStage===3?Math.floor(randomCombat()*8):Math.floor(randomCombat()*4)*2
       const dual=this.battleStage===3&&randomCombat()<.5
+      const warning=dual?timing.dualWarning:timing.warning,step=dual?timing.dualStep:timing.step
       for(let group=0;group<(dual?2:1);group++){
         const direction=(index+(group?2:0))*Math.PI/4
         const normal=direction,angle=normal+Math.PI/2
         const extent=Math.abs(Math.cos(normal))*(b.right-b.left)/2+Math.abs(Math.sin(normal))*(b.bottom-b.top)/2
         const count=dual?7:14
+        const groupDelay=group*timing.groupOffset
         for(let i=0;i<count;i++){
           const off=-extent+(i+.5)*extent*2/count
-          this.attacks.add('laser',(b.left+b.right)/2+Math.cos(normal)*off,(b.top+b.bottom)/2+Math.sin(normal)*off,{angle,rx:Math.hypot(b.right-b.left,b.bottom-b.top),ry:extent*.6/count/(dual?2:1),delay:.15+i*.085+group*.045,duration:.085})
+          const delay=warning+i*step+groupDelay
+          this.attacks.add('laser',(b.left+b.right)/2+Math.cos(normal)*off,(b.top+b.bottom)/2+Math.sin(normal)*off,
+            {angle,rx:Math.hypot(b.right-b.left,b.bottom-b.top),ry:extent*.6/count/(dual?2:1),
+              delay,duration:timing.active,warningDuration:timing.hintDuration,phase:group})
         }
       }
     }
-    grimmSound(sfx, 'burst')
+    grimmSound(sfx, 'charge')
   }
-  private rifts(map:TileMap,p:PlayerLike):void {
+  private rifts(map:TileMap,p:PlayerLike,survival=false):void {
     const b=map.bounds,cx=(b.left+b.right)/2,cy=(b.top+b.bottom)/2
-    for(let i=0;i<5;i++){
-      // 两束压玩家附近，三束切周边空间；整组旋向随玩家方位变化，避免固定中央扇形。
+    for(let i=0;i<(survival?4:5);i++){
+      // 两束压玩家附近，其余切周边空间；预警落点锁定后不再追踪。
       const aim=Math.atan2(p.y-cy,p.x-cx)
       const angle=aim+i*Math.PI/5+(randomCombat()-.5)*.24
       const nx=-Math.sin(angle),ny=Math.cos(angle)
       const extent=Math.abs(nx)*(b.right-b.left)/2+Math.abs(ny)*(b.bottom-b.top)/2
       const playerOffset=(p.x-cx)*nx+(p.y-cy)*ny
-      let offset=i<2?playerOffset+(i===0?-1:1)*(48+randomCombat()*22):(randomCombat()-.5)*extent*1.6
+      const clearance=survival?68:52
+      let offset=i<2?playerOffset+(i===0?-1:1)*(clearance+randomCombat()*22):(randomCombat()-.5)*extent*1.6
       offset=Math.max(-extent+30,Math.min(extent-30,offset))
       // 保留可读反应间距，预警锁定后不再追踪，也不把线放到房间之外。
-      if(Math.abs(offset-playerOffset)<43){
-        const left=playerOffset-52,right=playerOffset+52
+      if(Math.abs(offset-playerOffset)<clearance-9){
+        const left=playerOffset-clearance,right=playerOffset+clearance
         offset=left>=-extent+30?left:Math.min(extent-30,right)
       }
-      this.attacks.add('rift',cx+nx*offset,cy+ny*offset,{angle,rx:Math.hypot(b.right-b.left,b.bottom-b.top),ry:22,delay:.6,duration:.65,activeDuration:.18,phase:i})
+      this.attacks.add('rift',cx+nx*offset,cy+ny*offset,{angle,rx:Math.hypot(b.right-b.left,b.bottom-b.top),
+        ry:survival?17:22,delay:survival?GRIMM_BALANCE.survival.riftWarning:.9,duration:.65,activeDuration:.18,phase:i})
     }
     grimmSound(sfx, 'charge')
   }
   private timePattern(beat:number,p:PlayerLike,map:TileMap):void {
-    const elapsed=24-this.timer,act=Math.min(2,Math.floor(elapsed/8))
-    if(elapsed>22||elapsed%8<.45)return
-    grimmSpellVolley(sfx, act,act>0&&beat%4===0,act===2&&beat%3===0)
-    const base=beat*.19*(act===1?-1:1)
+    const balance=GRIMM_BALANCE.survival,elapsed=balance.duration-this.timer,act=Math.min(2,Math.floor(elapsed/8))
+    // 换幕与裂束前后暂停补弹，避免读取预警时又被新一圈弹幕封住移动路线。
+    if(elapsed>22.6||elapsed%8<.5||balance.riftTimes.some(at=>elapsed>=at-balance.riftPauseBefore&&elapsed<=at+balance.riftPauseAfter))return
+    const seeds=act>0&&beat%5===0,petals=act===2&&beat%4===0
+    grimmSpellVolley(sfx, act,seeds,petals)
+    const base=beat*.12*(act===1?-1:1)
     const reach=Math.hypot(CONFIG.roomCols*CONFIG.tile,CONFIG.roomRows*CONFIG.tile)*.5+50
-    const count=act===0?12:act===1?14:16,speed=act===0?175:act===1?210:245
+    const count=balance.counts[act]!,speed=balance.speeds[act]!
+    const gap=base+Math.PI/3
     for(let side=0;side<2;side++){
       const orbit=base+side*Math.PI
       for(let i=0;i<count;i++){
-        this.attacks.add('oath',this.x+Math.cos(orbit)*42,this.y+Math.sin(orbit)*42,{angle:base+i*Math.PI*2/count+side*.11,speed,rx:6,duration:act>0&&side===1?6.5:reach/speed+1,reach,delay:side*.13,bend:(side?-.35:.35)*(act+1),dark:side===1,returning:act>0&&side===1,phase:beat})
+        const angle=base+i*Math.PI*2/count+side*Math.PI/count
+        // 两股弹交错并留出较窄缺口，旋向按节拍变化，不实时追踪玩家。
+        const gapDistance=Math.abs(Math.atan2(Math.sin(angle-gap),Math.cos(angle-gap)))
+        if(Math.min(gapDistance,Math.PI-gapDistance)<balance.gapHalfAngle+.1)continue
+        const returning=act>0&&side===1&&beat%(act===2?2:3)===0
+        this.attacks.add('oath',this.x+Math.cos(orbit)*42,this.y+Math.sin(orbit)*42,
+          {angle,speed,rx:6,duration:returning?4.8:reach/speed+1,reach,delay:side*.22,
+            bend:(side?-1:1)*(.15+act*.055),dark:side===1,returning,phase:beat+i,
+            appearance:side===0?'petal':'needle'})
       }
     }
-    // 第二幕起每四组散出三枚停驻晶种，锁定当时玩家位置，形成延迟扇射逼走位。
-    if(act>0&&beat%4===0)for(let i=0;i<3;i++){
+    // 黑晶停驻后扇射，瞄准落点保持锁定，不追着玩家转向。
+    if(seeds)for(let i=0;i<3;i++){
       const a=base+i*Math.PI*2/3,c=Math.cos(a),s=Math.sin(a),b=map.bounds
       const dx=Math.abs(c)<1e-6?Infinity:(c>0?b.right-this.x:this.x-b.left)/Math.abs(c)
       const dy=Math.abs(s)<1e-6?Infinity:(s>0?b.bottom-this.y:this.y-b.top)/Math.abs(s)
-      this.attacks.add('shardSeed',this.x,this.y,{angle:a,rx:8,duration:1.3,reach:Math.max(30,Math.min(270,dx-40,dy-40)),targetX:p.x,targetY:p.y,dark:true})
+      this.attacks.add('shardSeed',this.x,this.y,{angle:a,rx:8,duration:1.55,reach:Math.max(30,Math.min(270,dx-40,dy-40)),targetX:p.x,targetY:p.y,dark:true,appearance:'crystal',phase:beat+i})
     }
-    if(act===2&&beat%3===0)for(let i=0;i<18;i++){
-      if(i%6===beat%6||i%6===(beat+1)%6)continue
-      this.attacks.add('oath',this.x,this.y,{angle:i*Math.PI*2/18+beat*.08,speed:115,rx:7,duration:reach/115+1,bend:.12,dark:false})
+    if(petals)for(let i=0;i<12;i++){
+      const angle=base+i*Math.PI/6,gapDistance=Math.abs(Math.atan2(Math.sin(angle-gap),Math.cos(angle-gap)))
+      if(Math.min(gapDistance,Math.PI-gapDistance)<balance.gapHalfAngle+.1)continue
+      this.attacks.add('oath',this.x,this.y,{angle,speed:125,rx:7,duration:6,reach,bend:.16,dark:true,appearance:'cinder',phase:beat+i})
     }
   }
   override update(dt:number,map:TileMap,p:PlayerLike):void {
@@ -208,25 +229,24 @@ export class GrimmBoss extends Enemy {
       }
       if(this.timer<=0){
         this.battleStage=this.breakTarget;this.attacks.clear()
-        if(this.battleStage===2){this.spellBeat=0;this.spellRifts=0;this.enter('timeSpell',24)}else this.enter('retreat',.5)
+        if(this.battleStage===2){this.spellBeat=0;this.spellRifts=0;this.enter('timeSpell',GRIMM_BALANCE.survival.duration)}else this.enter('retreat',.5)
       }
       return
     }
     if(this.state==='timeSpell'){
       if(this.timer<=0){this.attacks.clear();this.breakTarget=3;this.enter('break',1);return}
       if(this.effects.skillsDisabled)return
-      const elapsed=24-this.timer
-      // 后16秒采用4/4/2/2/2/2秒节拍；最后一轮留出完整伤害窗口，避免归零清场吞掉击发。
-      const warningTimes=[11.2,15.2,17.2,19.2,21.2,23.2]
-      while(this.spellRifts<warningTimes.length&&elapsed>=warningTimes[this.spellRifts]){this.rifts(map,p);this.spellRifts++}
-      const beat=Math.floor(elapsed/.58)
+      const elapsed=GRIMM_BALANCE.survival.duration-this.timer
+      const warningTimes=GRIMM_BALANCE.survival.riftTimes
+      while(this.spellRifts<warningTimes.length&&elapsed>=warningTimes[this.spellRifts]){this.rifts(map,p,true);this.spellRifts++}
+      const beat=Math.floor(elapsed/GRIMM_BALANCE.survival.beat)
       while(this.spellBeat<=beat)this.timePattern(this.spellBeat++,p,map)
       return
     }
     if(this.state==='retreat'){
       this.move(map,Math.atan2(this.y-p.y,this.x-p.x),52,dt)
       if(this.timer<=0){const candidates=(this.battleStage===3?[1,2,3,4,5]:[1,2,3,4]).filter(s=>s!==this.lastSkill);this.skill=candidates[Math.floor(randomCombat()*candidates.length)];this.lastSkill=this.skill
-        if(this.skill===1){this.repeats=2+Math.floor(randomCombat()*3);this.enter('run',.5)}else{this.enter('cast',this.skill===5?.6:this.skill===2?.3:.5);if(this.skill===5)this.rifts(map,p);grimmSound(sfx, 'charge')}
+        if(this.skill===1){this.repeats=2+Math.floor(randomCombat()*3);this.enter('run',.5)}else{this.enter('cast',this.skill===5?1.05:this.skill===2?.3:.5);if(this.skill===5)this.rifts(map,p);grimmSound(sfx, 'charge')}
       }
     }else if(this.state==='run'){
       this.move(map,Math.atan2(p.y-this.y,p.x-this.x),320,dt)

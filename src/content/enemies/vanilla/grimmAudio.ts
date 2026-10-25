@@ -17,8 +17,8 @@ export function grimmSpellVolley(audio: AudioEngine, act: number, seed: boolean,
     const weight = 1 + Math.min(2, act) * .1
     audio.noise({dur:.42,buf:audio.brownNoise,type:'lowpass',curve:audio.sweepArch(85,260,65,.18),q:.5,vol:.14*weight,env:'whip',rev:.38})
     audio.noise({dur:.34,curve:audio.sweepArch(240,1050+act*130,180,.2),q:.55,vol:.11*weight,env:'whip',rev:.46,pan:-.22})
-    // 对侧弹幕晚出0.13秒：只补轻薄气流，不再叠一遍低频主体。
-    audio.noise({dur:.28,curve:audio.sweep(820,190),q:.5,vol:.075,at:.13,pan:.22,env:'whip',rev:.42})
+    // 对侧弹幕晚出0.22秒：只补轻薄气流，不再叠一遍低频主体。
+    audio.noise({dur:.28,curve:audio.sweep(820,190),q:.5,vol:.075,at:.22,pan:.22,env:'whip',rev:.42})
     if(seed)audio.noise({dur:.3,buf:audio.brownNoise,curve:audio.sweep(620,125),q:.65,vol:.09,env:'hit',rev:.5})
     if(petals)audio.noise({dur:.38,curve:audio.sweepArch(360,1400,240,.25),q:.5,vol:.065,env:'whip',rev:.48})
   }
