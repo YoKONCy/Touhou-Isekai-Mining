@@ -20,6 +20,9 @@ import {
 } from '../../shared/profile'
 import type { SaveStore } from './store'
 import { dexieSaveStore } from './dexieStore'
+import { decodeSaveFileDetails, encodeSaveFile, SAVE_FILE_VERSION, SaveTransferError, type SaveImportPreview, type SaveImportWarning } from './saveTransfer'
+import { findItemDef } from '../../shared/itemDefs'
+import { EQUIP_SLOT_META, slotAccepts } from '../../shared/equipment'
 
 /**
  * 【源码级调试开关】启动即清档（手动切换，非 UI 入口、与 dev/构建模式无关）：
@@ -117,6 +120,74 @@ export class SaveService {
     if (WIPE_SAVE_ON_BOOT) return null
     await this.pendingSave
     return this.store.loadProfile()
+  }
+
+  /** 导出已落盘的检查点，不把矿洞中的临时进度偷偷存入文件。 */
+  async exportSave(slot: number): Promise<string> {
+    if (![0, 1, 2, 3].includes(slot)) throw new Error('无效存档槽')
+    await this.pendingSave
+    const raw = slot === 0 ? await this.store.loadProfile() : await this.store.loadSlice(`manual:${slot}`)
+    if (!raw) throw new SaveTransferError('empty')
+    return encodeSaveFile(raw as SaveProfile)
+  }
+
+  /** 兼容差异集中呈现在确认框；预览构造可读取的副本，不修改原文件或真实槽位。 */
+  inspectImport(contents: string): SaveImportPreview {
+    const { data, fileVersion } = decodeSaveFileDetails(contents)
+    const warnings: SaveImportWarning[] = []
+    if (data.version !== SAVE_VERSION) warnings.push({ kind: 'save_version', found: data.version, current: SAVE_VERSION })
+    if (fileVersion !== undefined && fileVersion !== SAVE_FILE_VERSION)
+      warnings.push({ kind: 'file_version', found: fileVersion, current: SAVE_FILE_VERSION })
+    // 高版本也尝试读取现有字段；写成当前版本，后续正常读档不会再被版本门控拦住。
+    data.version = Math.min(data.version, SAVE_VERSION)
+    migrate(data)
+    data.version = SAVE_VERSION
+    let requiredSlots = 0
+    const missing = new Set<string>()
+    for (const bag of [data.character.inventory, data.character.quickSlots, data.character.trash ?? [], data.storage]) {
+      for (let i = 0; i < bag.length; i++) {
+        const stack = bag[i]
+        if (!stack) continue
+        const definition = findItemDef(stack.id)
+        if (!definition) { missing.add(stack.id); bag[i] = null; continue }
+        requiredSlots += Math.ceil(stack.qty / Math.max(1, definition.maxStack))
+      }
+    }
+    const supported = new Set<string>(EQUIP_SLOT_META.map(entry => entry.slot))
+    let relocated = 0
+    for (const [slot, id] of Object.entries(data.character.equipment)) if (id) {
+      const key = slot as keyof typeof data.character.equipment
+      if (!findItemDef(id)) { missing.add(id); data.character.equipment[key] = null }
+      else if (!supported.has(slot) || !slotAccepts(key, id)) {
+        data.storage.push({ id, qty: 1, ...(data.character.equipmentDurability?.[key] !== undefined
+          ? { durability: data.character.equipmentDurability[key] } : {}) })
+        delete data.character.equipmentDurability?.[key]
+        data.character.equipment[key] = null; relocated++; requiredSlots++
+      }
+      if (!supported.has(slot)) delete data.character.equipment[key]
+    }
+    if (data.smelting && !findItemDef(data.smelting.id)) { missing.add(data.smelting.id); data.smelting = null }
+    if (missing.size) warnings.push({ kind: 'missing_items', count: missing.size })
+    if (relocated) warnings.push({ kind: 'equipment', count: relocated })
+    // 旧背包溢出会迁入仓库，限制展开量，避免畸形大数量卡住恢复过程。
+    if (requiredSlots > 4096) throw new SaveTransferError('too_large')
+    try { new CharacterProfile().fromJSON(structuredClone(data)) }
+    catch { throw new SaveTransferError('invalid') }
+    return { data, warnings }
+  }
+
+  /** 单槽写入原子落盘；只存入目标槽，不替换当前角色，不改动其他槽。 */
+  async importSave(slot: number, contents: string): Promise<void> {
+    if (simulationReadOnly()) throw new Error('回放期间不能导入真实存档')
+    if (![0, 1, 2, 3].includes(slot)) throw new Error('无效存档槽')
+    const { data } = this.inspectImport(contents)
+    const task = this.pendingSave.then(async () => {
+      if (slot === 0) await this.store.saveProfile(data)
+      else await this.store.saveSlice(`manual:${slot}`, data)
+    })
+    // 导入写盘失败必须反馈，但不能让失败的任务阻塞后续正常保存。
+    this.pendingSave = task.catch(() => {})
+    await task
   }
 
   async resumeAutosave(): Promise<CharacterProfile> {

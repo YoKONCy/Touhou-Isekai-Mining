@@ -9,7 +9,7 @@ const directory = await mkdtemp(join(tmpdir(), 'mining-simulation-'))
 try {
   const output = join(directory, 'simulation.test.mjs')
   await build({
-    entryPoints: ['tests/simulation.test.ts'], outfile: output, bundle: true,
+    entryPoints: [process.argv[2] ?? 'tests/simulation.test.ts'], outfile: output, bundle: true,
     platform: 'node', format: 'esm', target: 'node22',
     define: { 'import.meta.env.BASE_URL': '"/"', 'import.meta.env.DEV': 'false' },
     logLevel: 'warning'

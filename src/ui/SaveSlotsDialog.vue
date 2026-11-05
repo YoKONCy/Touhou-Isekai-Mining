@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
 import { saveService } from '../core/save/saveService'
+import { MAX_SAVE_FILE_BYTES, SaveTransferError, type SaveImportPreview } from '../core/save/saveTransfer'
+import { downloadSaveFile, saveFileName } from '../browser/saveFiles'
 import type { CharacterProfile, SaveProfile } from '../shared/profile'
 import HudConfirm from './HudConfirm.vue'
 import SaveRenameDialog from './SaveRenameDialog.vue'
@@ -16,6 +18,10 @@ const autosave = ref<SaveProfile | null>(null)
 const loading = ref(true), busy = ref(false), message = ref('')
 const pending = ref<number | null>(null)
 const renaming = ref<{ id: number; name: string } | null>(null)
+const importInput = ref<HTMLInputElement | null>(null)
+const importTarget = ref<number | null>(null)
+const imported = shallowRef<SaveImportPreview & { id: number; contents: string } | null>(null)
+let disposed = false
 const previousFocus = document.activeElement as HTMLElement | null
 const entries = computed(() => [
   ...(props.mode === 'load' ? [{ id: 0, label: t('ui.records.autosave'), data: autosave.value }] : []),
@@ -76,9 +82,67 @@ async function execute(id: number): Promise<void> {
   finally { busy.value = false }
 }
 function confirmPending(): void { if (pending.value !== null) void execute(pending.value) }
-function close(): void { if (!busy.value && !renaming.value) emit('close') }
+function transferError(error: unknown, fallback: string): void {
+  message.value = error instanceof SaveTransferError ? error.messageKey : fallback
+  console.error('[存档] 文件操作失败', error)
+}
+async function exportRecord(id: number): Promise<void> {
+  if (busy.value || loading.value) return
+  busy.value = true; message.value = ''
+  try {
+    const contents = await saveService.exportSave(id)
+    if (disposed) return
+    const data = (JSON.parse(contents) as { profile: SaveProfile }).profile
+    downloadSaveFile(contents, saveFileName(data, id))
+    message.value = 'ui.records.exported'
+  } catch (error) { transferError(error, 'ui.records.error.export') }
+  finally { busy.value = false }
+}
+function chooseImport(id: number): void {
+  if (busy.value || loading.value) return
+  importTarget.value = id; message.value = ''
+  importInput.value?.click()
+}
+async function readImport(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement, file = input.files?.[0], id = importTarget.value
+  input.value = ''; importTarget.value = null
+  if (!file || id === null || busy.value) return
+  busy.value = true; message.value = ''
+  try {
+    if (file.size > MAX_SAVE_FILE_BYTES) throw new SaveTransferError('too_large')
+    const contents = await file.text()
+    await prepareGameContent()
+    if (disposed) return
+    imported.value = { id, contents, ...saveService.inspectImport(contents) }
+  } catch (error) { transferError(error, 'ui.records.error.import') }
+  finally { busy.value = false }
+}
+const importMessage = computed(() => {
+  if (!imported.value) return ''
+  const { id, data } = imported.value
+  const slot = entries.value.find(entry => entry.id === id)?.label ?? ''
+  const confirmation = t('ui.records.confirm_import.message', { slot, name: identity(data), level: data.combat.level })
+  if (!imported.value.warnings.length) return confirmation
+  const warnings = imported.value.warnings.map(warning => t(`ui.records.compatibility.${warning.kind}`,
+    { count: warning.count ?? 0, found: warning.found ?? 0, current: warning.current ?? 0 }))
+  return `${confirmation} ${t('ui.records.compatibility.notice')} ${warnings.join(' ')} ${t('ui.records.compatibility.backup')}`
+})
+async function confirmImport(): Promise<void> {
+  if (!imported.value || busy.value) return
+  busy.value = true; message.value = ''
+  try {
+    await saveService.importSave(imported.value.id, imported.value.contents)
+    imported.value = null
+    await refresh()
+    message.value = 'ui.records.imported'
+  } catch (error) {
+    imported.value = null
+    transferError(error, 'ui.records.error.import')
+  } finally { busy.value = false }
+}
+function close(): void { if (!busy.value && !renaming.value && !imported.value) emit('close') }
 function onKey(event: KeyboardEvent): void {
-  if (pending.value !== null || renaming.value) return
+  if (pending.value !== null || renaming.value || imported.value) return
   event.stopImmediatePropagation()
   if (event.code === 'Escape') { event.preventDefault(); close() }
   if (event.code !== 'Tab') return
@@ -94,6 +158,7 @@ onMounted(async () => {
   if (!touchControls.value) panel.value?.querySelector<HTMLButtonElement>('button')?.focus({ preventScroll: true })
 })
 onBeforeUnmount(() => {
+  disposed = true
   window.removeEventListener('keydown', onKey, true)
   if (!touchControls.value && previousFocus?.isConnected) previousFocus.focus({ preventScroll: true })
 })
@@ -103,6 +168,7 @@ onBeforeUnmount(() => {
   <div class="records-mask" :class="{ 'title-hud-mask': theme === 'title' }" @click.self="close">
     <section ref="panel" class="records-panel" :class="theme === 'title' ? 'title-hud-panel' : 'gpanel hud-panel'" role="dialog" aria-modal="true" aria-labelledby="records-title">
       <header><div><small>{{ t(theme === 'title' ? 'ui.title.records_caption' : 'ui.records.caption') }}</small><h2 id="records-title">{{ t(mode === 'save' ? 'ui.records.save_title' : 'ui.records.load_title') }}</h2></div><button class="records-close" :disabled="busy" :aria-label="t('ui.common.close')" @click="close">×</button></header>
+      <input ref="importInput" type="file" accept=".json,application/json" hidden @change="readImport" @cancel="importTarget = null"/>
       <div class="records-list">
         <div v-for="entry in entries" :key="entry.id" class="record-row">
         <button :class="[theme === 'title' ? 'title-record-sheet' : 'record-sheet', { empty: !entry.data }]" :disabled="loading || busy || (mode === 'load' && !entry.data)" @click="choose(entry.id, entry.data)">
@@ -110,17 +176,23 @@ onBeforeUnmount(() => {
           <template v-if="entry.data"><strong>{{ identity(entry.data) }}</strong><span>{{ t('ui.records.summary', { level: entry.data.combat.level, round: entry.data.round, depth: entry.data.deepestDepth }) }}</span><time>{{ savedTime(entry.data.meta.savedAt) }}</time><b class="record-stamp" :aria-hidden="theme === 'title'">{{ theme === 'title' ? '✦' : t('ui.records.stamp') }}</b></template>
           <template v-else><strong>{{ t(loading ? 'ui.records.loading' : 'ui.records.empty') }}</strong><span>{{ t(theme === 'title' ? 'ui.title.empty_record' : mode === 'save' ? 'ui.records.empty_save' : 'ui.records.empty_load') }}</span></template>
         </button>
-        <button v-if="entry.data" class="record-rename" :disabled="busy || loading" :aria-label="t('ui.records.rename_slot', { slot: recordLabel(entry.label, entry.data) })" @click="openRename(entry.id, entry.data)">{{ t('ui.records.rename') }}</button>
+        <div class="record-actions">
+          <button v-if="entry.id !== 0 || theme === 'title'" class="record-rename" :disabled="busy || loading" :aria-label="t('ui.records.import_slot', { slot: recordLabel(entry.label, entry.data) })" @click="chooseImport(entry.id)">{{ t('ui.records.import') }}</button>
+          <button v-if="entry.data" class="record-rename" :disabled="busy || loading" :aria-label="t('ui.records.export_slot', { slot: recordLabel(entry.label, entry.data) })" @click="exportRecord(entry.id)">{{ t('ui.records.export') }}</button>
+          <button v-if="entry.data" class="record-rename" :disabled="busy || loading" :aria-label="t('ui.records.rename_slot', { slot: recordLabel(entry.label, entry.data) })" @click="openRename(entry.id, entry.data)">{{ t('ui.records.rename') }}</button>
+        </div>
         </div>
       </div>
       <footer><p role="status">{{ t(message || (mode === 'save' ? 'ui.records.save_note' : 'ui.records.load_note')) }}</p><button :class="theme === 'title' ? 'title-hud-action' : 'gbtn'" :disabled="busy" @click="close">{{ t('ui.common.back') }}</button></footer>
     </section>
     <HudConfirm v-if="pending !== null" :theme="theme" :title="t(mode === 'save' ? 'ui.records.confirm_save.title' : 'ui.records.confirm_load.title')" :message="t(mode === 'save' ? 'ui.records.confirm_save.message' : 'ui.records.confirm_load.message')" :confirm-label="t(mode === 'save' ? 'ui.records.save_action' : 'ui.records.load_action')" :busy="busy" @cancel="!busy && (pending = null)" @confirm="confirmPending"/>
     <SaveRenameDialog v-if="renaming" :name="renaming.name" :theme="theme" :busy="busy" :error="message === 'ui.records.error.rename' ? t(message) : ''" @cancel="!busy && (renaming = null)" @save="rename"/>
+    <HudConfirm v-if="imported" :theme="theme" :title="t('ui.records.confirm_import.title')" :message="importMessage" :confirm-label="t('ui.records.import')" :busy="busy" @cancel="!busy && (imported = null)" @confirm="confirmImport"/>
   </div>
 </template>
 
 <style scoped>
+.record-actions{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:6px;padding:5px 4px 0}.record-actions .record-rename{position:static;min-height:32px;padding:5px 9px;color:#d0b992}.title-hud-mask .record-actions .record-rename{color:#c9b8e4}.record-actions .record-rename:hover:enabled{color:#f5e1bb}.title-hud-mask .record-actions .record-rename:hover:enabled{color:#f6eeff}.record-row .record-number{padding-right:0}
 .record-row{position:relative;min-width:0}.record-row .record-sheet{width:100%}.record-number{display:block;padding-right:80px;overflow-wrap:anywhere}.record-rename{position:absolute;top:12px;right:14px;padding:4px 7px;border:0;border-radius:0;background:none;color:#806442;font:inherit;font-size:11px;cursor:pointer;z-index:1}.record-rename:hover:enabled{color:#523919;text-decoration:underline;text-underline-offset:3px}.record-rename:disabled{opacity:.5;cursor:default}.record-rename:focus-visible{outline:1px solid #9a7850;outline-offset:2px}
 .records-mask{position:fixed;inset:0;z-index:1800;display:grid;place-items:center;padding:20px;background:#080a16bf;cursor:default}.records-panel{width:min(700px,100%);max-height:90dvh;display:flex;flex-direction:column;padding:24px;background:repeating-linear-gradient(2deg,transparent 0 24px,#d1b78505 25px,transparent 26px 50px),linear-gradient(135deg,#43353c,#282330);box-shadow:0 18px 60px #0008}
 header{display:flex;align-items:center;justify-content:space-between;gap:20px;padding-bottom:20px;border-bottom:1px solid #bba27644}header small{font-size:10px;letter-spacing:3px;color:#ad967d}h2{font-size:25px;font-weight:400;letter-spacing:5px;margin-top:10px;color:#ead8b8}.records-close{border:0;background:none;font:inherit;font-size:30px;color:#c5af8c;cursor:pointer}.records-list{overflow:auto;min-height:0;display:grid;gap:18px;padding:20px 7px 10px}

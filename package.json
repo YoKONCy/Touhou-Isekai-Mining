@@ -13,6 +13,7 @@
   "scripts": {
     "dev": "vite",
     "test": "node scripts/test-simulation.mjs",
+    "test:save": "node scripts/test-simulation.mjs tests/save-transfer.test.ts",
     "build": "vite build",
     "preview": "vite preview"
   },
