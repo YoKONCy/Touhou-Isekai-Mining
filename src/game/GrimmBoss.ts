@@ -10,7 +10,7 @@ import { grimmSound, grimmSpellVolley } from '../content/enemies/vanilla/grimmAu
 import { drawBossCastHalo } from './art/rig/bossCastHalo'
 import { GRIMM_BALANCE } from '../content/enemies/vanilla/grimmBalance'
 
-type State='retreat'|'run'|'roll'|'hidden'|'slash'|'chain'|'cast'|'second'|'thirdVolley'|'recovery'|'break'|'timeSpell'
+type State='retreat'|'run'|'roll'|'hidden'|'slash'|'followupSlash'|'chain'|'cast'|'second'|'thirdVolley'|'recovery'|'break'|'timeSpell'
 /** 格林专用编排，共用 Enemy 的生命和所有正式武器结算。 */
 export class GrimmBoss extends Enemy {
   /** 实体坐标为躯干中心，素材仍以脚底为锚；初始出生位置保持原脚底位置。 */
@@ -88,7 +88,10 @@ export class GrimmBoss extends Enemy {
     const x=Math.max(b.left+pad,Math.min(b.right-pad,p.x+Math.cos(a)*d)),y=Math.max(b.top+pad,Math.min(b.bottom-pad,p.y+Math.sin(a)*d))
     this.warning={x,y,targetX:p.x,targetY:p.y};this.enter('hidden',.3+randomCombat()*.3);grimmSound(sfx, 'vanish')
   }
-  private finish():void{this.enter('recovery',.35+randomCombat()*.3)}
+  private finish():void{
+    const timing=GRIMM_BALANCE.slash
+    this.enter('recovery',this.skill===1?timing.recoveryMin+randomCombat()*timing.recoverySpread:.35+randomCombat()*.3)
+  }
   private ring(p:PlayerLike,second:boolean):void {
     const n=second?24:16,base=second&&this.battleStage===3?this.volleyAngle:Math.atan2(p.y-this.y,p.x-this.x),speed=second?750:460
     if(!second)this.volleyAngle=base
@@ -255,12 +258,24 @@ export class GrimmBoss extends Enemy {
       this.move(map,Math.atan2(p.y-this.y,p.x-this.x),360,dt)
       if(this.timer<=0)this.hide(map,p)
     }else if(this.state==='hidden'){
-      if(this.timer<=0&&this.warning){const w=this.warning;this.x=w.x;this.y=w.y;this.angle=Math.atan2(w.targetY-w.y,w.targetX-w.x);this.warning=null;this.enter('slash',.26);this.slashIssued=false;this.attacks.add('smoke',this.x,this.y,{rx:65,duration:.4});grimmSound(sfx, 'slash')}
-    }else if(this.state==='slash'){
-      const steps=Math.max(1,Math.ceil(680*dt/10)),step=dt/steps
-      for(let i=0;i<steps;i++){const speed=680*this.effects.modify('moveSpeed',1);this.vx=Math.cos(this.angle)*speed;this.vy=Math.sin(this.angle)*speed;map.moveEntity(this,step)}
-      if(this.duration-this.timer>=.07&&!this.slashIssued){this.slashIssued=true;this.attacks.add('slash',this.x,this.y,{angle:this.angle,rx:120,duration:.2})}
-      if(this.timer<=0){this.repeats--;if(this.repeats>0)this.enter('chain',.12);else this.finish()}
+      if(this.timer<=0&&this.warning){const w=this.warning;this.x=w.x;this.y=w.y;this.angle=Math.atan2(w.targetY-w.y,w.targetX-w.x);this.warning=null;this.enter('slash',GRIMM_BALANCE.slash.duration);this.slashIssued=false;this.attacks.add('smoke',this.x,this.y,{rx:65,duration:.4});grimmSound(sfx, 'slash')}
+    }else if(this.state==='slash'||this.state==='followupSlash'){
+      const followup=this.state==='followupSlash',timing=GRIMM_BALANCE.slash
+      const speed=(followup?timing.followupSpeed:680)*this.effects.modify('moveSpeed',1)
+      const steps=Math.max(1,Math.ceil(speed*dt/10)),step=dt/steps
+      for(let i=0;i<steps;i++){this.vx=Math.cos(this.angle)*speed;this.vy=Math.sin(this.angle)*speed;map.moveEntity(this,step)}
+      if(this.duration-this.timer>=(followup?timing.followupWindup:timing.windup)&&!this.slashIssued){
+        this.slashIssued=true;this.attacks.add('slash',this.x,this.y,{angle:this.angle,rx:timing.radius,duration:.2,phase:followup?1:0})
+      }
+      if(this.timer<=0){
+        if(!followup&&this.battleStage===3){
+          // 第二刀原地附近紧接追斩，起手锁定方向；两刀之间不再翻滚或闪现。
+          this.angle=Math.atan2(p.y-this.y,p.x-this.x)
+          this.enter('followupSlash',timing.followupDuration);this.slashIssued=false;grimmSound(sfx,'slash')
+        }else{
+          this.repeats--;if(this.repeats>0)this.enter('chain',.12);else this.finish()
+        }
+      }
     }else if(this.state==='chain'){
       if(this.timer<=0)this.enter('roll',.16)
     }else if(this.state==='cast'&&this.timer<=0){
@@ -270,7 +285,11 @@ export class GrimmBoss extends Enemy {
       this.ring(p,true)
       if(this.battleStage===3){this.volleyAngle+=Math.PI/24;this.enter('thirdVolley',.22)}else this.finish()
     }else if(this.state==='thirdVolley'&&this.timer<=0){this.ring(p,true);this.finish()}
-    else if(this.state==='recovery'&&this.timer<=0)this.enter('retreat',(.35+randomCombat()*.5)/(1+(this.stage-1)*.15))
+    else if(this.state==='recovery'&&this.timer<=0){
+      // 连段收招后的退步也一起缩短，避免短后摇后又空等一轮。
+      const timing=GRIMM_BALANCE.slash
+      this.enter('retreat',this.skill===1?timing.retreatMin+randomCombat()*timing.retreatSpread:(.35+randomCombat()*.5)/(1+(this.stage-1)*.15))
+    }
   }
   override render(g:CanvasRenderingContext2D):void {
     const offset=this.motionHistory.offset(this.x,this.y)
@@ -329,7 +348,7 @@ export class GrimmBoss extends Enemy {
       return
     }
     if(this.haloAlpha>0)drawBossCastHalo(g,this.x,this.y+this.footOffset-82,this.clock,this.haloProgress,this.haloAlpha)
-    const pose=this.state==='run'?'run':this.state==='roll'?'roll':this.state==='slash'?'slash':this.state==='cast'||this.state==='second'||this.state==='thirdVolley'||this.state==='break'||this.state==='timeSpell'?'cast':'walk'
+    const pose=this.state==='run'?'run':this.state==='roll'?'roll':this.state==='slash'||this.state==='followupSlash'?'slash':this.state==='cast'||this.state==='second'||this.state==='thirdVolley'||this.state==='break'||this.state==='timeSpell'?'cast':'walk'
     drawGrimm(g,this.x,this.y+this.footOffset,this.clock,pose,1-Math.max(0,this.timer)/this.duration,this.hitFlash,this.alive?(this.state==='break'&&this.breakTarget===2?(this.teleported?Math.min(1,(.65-this.timer)/.25):Math.max(0,(this.timer-.65)/.35)):1):this.dying/1.2,this.rigMotion,this.state==='break'?this.breakTarget:this.battleStage)
     if(this.state==='cast'){g.save();g.strokeStyle='#e04a38';g.lineWidth=2;g.globalAlpha=.8;g.beginPath();g.ellipse(this.x,this.y+this.footOffset,56+Math.sin(this.clock*25)*3,22,0,0,Math.PI*2);g.stroke();g.restore()}
   }

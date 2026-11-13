@@ -1,5 +1,17 @@
 /** 格林试炼节奏集中配置；弹幕、预警与实际击发共用时间参数。 */
 export const GRIMM_BALANCE = {
+  slash: {
+    radius: 168,
+    duration: .26,
+    windup: .07,
+    followupDuration: .22,
+    followupWindup: .045,
+    followupSpeed: 220,
+    recoveryMin: .06,
+    recoverySpread: .04,
+    retreatMin: .08,
+    retreatSpread: .06
+  },
   survival: {
     duration: 24,
     beat: .64,

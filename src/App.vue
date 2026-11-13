@@ -117,6 +117,7 @@ const debug = reactive({
   round: 1
 })
 const displayedHp = computed(() => Number.isFinite(debug.hp) ? Math.max(0, Math.floor(debug.hp)) : 0)
+const displayedMana = computed(() => Number.isFinite(debug.mana) ? Math.max(0, Math.floor(debug.mana)) : 0)
 
 /** 结算面板 */
 type ResultKind = 'extract' | 'died' | null
@@ -454,9 +455,9 @@ onBeforeUnmount(() => {
             :class="{ low: debug.mana < spellCost }"
             :style="{ width: `${debug.manaRatio * 100}%` }"
           ></div>
-          <span class="mp-num">{{ debug.mana }}</span>
+          <span class="mp-num">{{ displayedMana }}</span>
         </div>
-        <span v-if="scene === 'base'" class="base-stat-num">{{ debug.mana }}</span>
+        <span v-if="scene === 'base'" class="base-stat-num">{{ displayedMana }}</span>
       </div>
 
       <!-- 等级与本级经验：灵力条下的细金线，无独立面板框 -->
